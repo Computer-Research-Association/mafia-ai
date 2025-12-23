@@ -5,9 +5,9 @@ from core.game import MafiaGame
 import config
 
 class MafiaEnv(gym.Env):
-    def __init__(self):
+    def __init__(self, log_file=None):
         super(MafiaEnv, self).__init__()
-        self.game = MafiaGame()
+        self.game = MafiaGame(log_file=log_file)
         
         # Action Space: 0~7번 플레이어 지목
         self.action_space = spaces.Discrete(config.PLAYER_COUNT)
