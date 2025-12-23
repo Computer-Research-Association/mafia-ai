@@ -1,17 +1,41 @@
 import argparse
 from core.env import MafiaEnv
 from ai.ppo import PPO # (나중에 구현 예정)
+from ai.reinforce import REINFORCEAgent
 
 def main(args):
     # 1. 환경 생성
     env = MafiaEnv()
-    print(f"Environment Initialized. Action Space: {env.action_space}")
+    # PPO 대신 REINFORCE 에이전트 생성
+    agent = REINFORCEAgent(state_dim=env.observation_space.shape[0], 
+                           action_dim=env.action_space.n)
 
-    # 2. 모드에 따른 실행
     if args.mode == 'train':
-        print("Training Mode Started...")
-        # TODO: 학습 루프 구현
-        pass
+        print("Sanity Check Training Started (REINFORCE)...")
+        
+        for episode in range(1000): # 1000판만 돌려보자
+            obs, _ = env.reset()
+            done = False
+            total_reward = 0
+            
+            while not done:
+                # 1. 행동 선택
+                action = agent.select_action(obs)
+                
+                # 2. 환경 진행
+                next_obs, reward, done, truncated, _ = env.step(action)
+                
+                # 3. ★중요★ 보상을 에이전트에게 알려줌 (REINFORCE는 이게 필요)
+                agent.rewards.append(reward)
+                
+                obs = next_obs
+                total_reward += reward
+            
+            # 4. 한 게임 끝나면 바로 학습 (Update)
+            agent.update()
+            
+            if episode % 100 == 0:
+                print(f"Episode {episode}, Total Reward: {total_reward}")
         
     elif args.mode == 'test':
         print("Test Mode Started...")
