@@ -1,0 +1,31 @@
+# Byte-compiled / Optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual Environments
+venv/
+env/
+.env
+.venv/
+
+# IDE Settings (VS Code, PyCharm)
+.vscode/
+.idea/
+*.swp
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Project Specific (Logs, Models, Data)
+*.log
+logs/
+checkpoints/
+models/
+data/
+*.pt
+*.pth
+
+# Jupyter Notebook
+.ipynb_checkpoints
