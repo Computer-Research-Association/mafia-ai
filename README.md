@@ -1,1 +1,1 @@
-"# mafia-ai" 
+# mafia-ai
