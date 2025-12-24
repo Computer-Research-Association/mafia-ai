@@ -11,6 +11,8 @@ class Agent:
         self.character = 0
         self.alive = True
         self.claimed_target = -1  # 주장 대상 초기화
+        self.voted_by_last_turn = []
+        self.vote_history = [0] * config.PLAYER_COUNT  # 투표받은 횟수
 
 
 class MafiaGame:
@@ -40,7 +42,11 @@ class MafiaGame:
         roles_to_assign = config.ROLES.copy()
         random.shuffle(roles_to_assign)
 
-        role_names = {v: k.replace('ROLE_', '') for k, v in config.__dict__.items() if k.startswith('ROLE_')}
+        role_names = {
+            v: k.replace("ROLE_", "")
+            for k, v in config.__dict__.items()
+            if k.startswith("ROLE_")
+        }
 
         for i, role_int in enumerate(roles_to_assign):
             self.players[i].role = role_int
@@ -51,7 +57,6 @@ class MafiaGame:
             role_name = role_names.get(role_int, "Unknown")
             self._log(f"플레이어 {i}: {role_name}")
 
-
         self.alive_status = [True for _ in range(config.PLAYER_COUNT)]
 
         return self._get_game_status()
@@ -61,7 +66,7 @@ class MafiaGame:
         is_over, is_win = self.check_game_over()
         if is_over:
             return self._get_game_status(), is_over, is_win
-            
+
         self._log(f"\n[Day {self.day_count} | {self.phase}]")
 
         # 페이즈별 로직 실행
@@ -115,13 +120,15 @@ class MafiaGame:
 
             max_suspicion = max(p.suspicion)
             max_indices = [
-                i for i, suspicion in enumerate(p.suspicion) 
+                i
+                for i, suspicion in enumerate(p.suspicion)
                 if self.players[i].alive and suspicion == max_suspicion and i != p.id
             ]
             if max_indices:
                 p.claimed_target = random.choice(max_indices)
-                self._log(f"  - 플레이어 {p.id}이(가) {p.claimed_target}을(를) 지목했습니다.")
-
+                self._log(
+                    f"  - 플레이어 {p.id}이(가) {p.claimed_target}을(를) 지목했습니다."
+                )
 
     def _process_day_discussion(self):
         """[단계 2] 토론: 다른 사람의 주장을 듣고 의심도 갱신"""
@@ -165,7 +172,8 @@ class MafiaGame:
 
             max_suspicion = max(p.suspicion)
             max_indices = [
-                i for i, suspicion in enumerate(p.suspicion) 
+                i
+                for i, suspicion in enumerate(p.suspicion)
                 if self.players[i].alive and suspicion == max_suspicion and i != p.id
             ]
 
@@ -177,12 +185,13 @@ class MafiaGame:
         # 처형 집행
         max_votes = max(self.vote_counts)
         if max_votes > 0:
-            executed_targets = [i for i, v in enumerate(self.vote_counts) if v == max_votes]
-            executed_target = random.choice(executed_targets) # 동률일 경우 랜덤 선택
+            executed_targets = [
+                i for i, v in enumerate(self.vote_counts) if v == max_votes
+            ]
+            executed_target = random.choice(executed_targets)  # 동률일 경우 랜덤 선택
             self.players[executed_target].alive = False
             self._log(f"  - 투표 결과: {self.vote_counts}")
             self._log(f"  - {executed_target}번 플레이어가 처형되었습니다.")
-
 
             # 처형된 사람에 대한 의심도 초기화
             for p in self.players:
@@ -203,21 +212,31 @@ class MafiaGame:
         if mafia_list:
             if ai_player.role == config.ROLE_MAFIA and ai_player.alive:
                 mafia_target = ai_action
-                self._log(f"  - [마피아] AI(0)이(가) {mafia_target}을(를) 지목했습니다.")
+                self._log(
+                    f"  - [마피아] AI(0)이(가) {mafia_target}을(를) 지목했습니다."
+                )
             else:
                 # AI가 마피아가 아닐 경우, 살아있는 마피아 중 첫번째가 행동
                 shooter = next((p for p in mafia_list if p.id != 0), mafia_list[0])
-                
+
                 # 살아있고 마피아가 아닌 대상 중에서 가장 의심도가 높은 사람 선택
                 valid_targets = [
-                    i for i in range(player_count)
-                    if self.players[i].alive and self.players[i].role != config.ROLE_MAFIA
+                    i
+                    for i in range(player_count)
+                    if self.players[i].alive
+                    and self.players[i].role != config.ROLE_MAFIA
                 ]
                 if valid_targets:
                     max_suspicion = max(shooter.suspicion[i] for i in valid_targets)
-                    max_targets = [i for i in valid_targets if shooter.suspicion[i] == max_suspicion]
+                    max_targets = [
+                        i
+                        for i in valid_targets
+                        if shooter.suspicion[i] == max_suspicion
+                    ]
                     mafia_target = random.choice(max_targets)
-                    self._log(f"  - [마피아] {shooter.id}이(가) {mafia_target}을(를) 지목했습니다.")
+                    self._log(
+                        f"  - [마피아] {shooter.id}이(가) {mafia_target}을(를) 지목했습니다."
+                    )
 
         # 2. 의사 행동
         doctor_target = None
@@ -225,40 +244,56 @@ class MafiaGame:
             p for p in self.players if p.role == config.ROLE_DOCTOR and p.alive
         ]
         for doctor in doctor_list:
-            if doctor.id == 0: # AI가 의사일 경우
+            if doctor.id == 0:  # AI가 의사일 경우
                 doctor_target = ai_action
                 self._log(f"  - [의사] AI(0)이(가) {doctor_target}을(를) 치료했습니다.")
             else:
                 # 살아있는 사람 중 가장 의심도가 낮은(신뢰하는) 사람 치료
-                valid_targets = [i for i in range(player_count) if self.players[i].alive]
+                valid_targets = [
+                    i for i in range(player_count) if self.players[i].alive
+                ]
                 if valid_targets:
                     min_suspicion = min(doctor.suspicion[i] for i in valid_targets)
-                    min_targets = [i for i in valid_targets if doctor.suspicion[i] == min_suspicion]
+                    min_targets = [
+                        i for i in valid_targets if doctor.suspicion[i] == min_suspicion
+                    ]
                     doctor_target = random.choice(min_targets)
-                    self._log(f"  - [의사] {doctor.id}이(가) {doctor_target}을(를) 치료했습니다.")
+                    self._log(
+                        f"  - [의사] {doctor.id}이(가) {doctor_target}을(를) 치료했습니다."
+                    )
 
         # 3. 경찰 행동
         police_list = [
             p for p in self.players if p.role == config.ROLE_POLICE and p.alive
         ]
         for police in police_list:
-            if police.id == 0: # AI가 경찰일 경우
+            if police.id == 0:  # AI가 경찰일 경우
                 target = ai_action
             else:
                 # 살아있는 사람 중 가장 의심도가 높은 사람 조사
-                valid_targets = [i for i in range(player_count) if self.players[i].alive]
+                valid_targets = [
+                    i for i in range(player_count) if self.players[i].alive
+                ]
                 if valid_targets:
                     max_suspicion = max(police.suspicion[i] for i in valid_targets)
-                    max_targets = [i for i in valid_targets if police.suspicion[i] == max_suspicion]
+                    max_targets = [
+                        i for i in valid_targets if police.suspicion[i] == max_suspicion
+                    ]
                     target = random.choice(max_targets)
                 else:
                     continue
-            
-            target_role = "마피아" if self.players[target].role == config.ROLE_MAFIA else "시민"
+
+            target_role = (
+                "마피아" if self.players[target].role == config.ROLE_MAFIA else "시민"
+            )
             if police.id == 0:
-                self._log(f"  - [경찰] AI(0)이(가) {target}을(를) 조사하여 '{target_role}'임을 확인했습니다.")
+                self._log(
+                    f"  - [경찰] AI(0)이(가) {target}을(를) 조사하여 '{target_role}'임을 확인했습니다."
+                )
             else:
-                self._log(f"  - [경찰] {police.id}이(가) {target}을(를) 조사하여 '{target_role}'임을 확인했습니다.")
+                self._log(
+                    f"  - [경찰] {police.id}이(가) {target}을(를) 조사하여 '{target_role}'임을 확인했습니다."
+                )
 
             if self.players[target].role == config.ROLE_MAFIA:
                 police.suspicion[target] = 1.0
@@ -302,7 +337,7 @@ class MafiaGame:
         citizen_count = sum(
             1 for p in self.players if p.role != config.ROLE_MAFIA and p.alive
         )
-        
+
         is_over = False
         is_win = False
 
@@ -315,7 +350,9 @@ class MafiaGame:
         # 2. 마피아 팀 승리 조건 (마피아 수 >= 시민 수)
         elif mafia_count >= citizen_count:
             am_i_mafia = self.players[0].role == config.ROLE_MAFIA
-            self._log(f"\n게임 종료: 마피아 수가 시민 수와 같거나 많아졌습니다. 마피아 팀 승리!")
+            self._log(
+                f"\n게임 종료: 마피아 수가 시민 수와 같거나 많아졌습니다. 마피아 팀 승리!"
+            )
             is_over, is_win = True, am_i_mafia
 
         # 게임 계속
