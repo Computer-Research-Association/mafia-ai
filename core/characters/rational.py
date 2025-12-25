@@ -73,7 +73,14 @@ class RationalCharacter(BaseCharacter):
                 self._handle_assertion(speaker_id, target_id, assertion, reveal_role, current_day)
         
         if execution_result:
-            self._process_execution(execution_result, alive_players, current_day)
+            # Extract vote_log if available (new format includes 4 elements)
+            vote_log = None
+            if len(execution_result) >= 4:
+                executed_id, team_alignment, day, vote_log = execution_result
+                self._process_execution((executed_id, team_alignment, day), alive_players, current_day, vote_log)
+            else:
+                # Old format (3 elements) for backwards compatibility
+                self._process_execution(execution_result, alive_players, current_day)
         
         if night_result and self.role == config.ROLE_DOCTOR:
             self._process_doctor_heal(night_result, game_status)
@@ -126,7 +133,7 @@ class RationalCharacter(BaseCharacter):
         elif self.role == config.ROLE_MAFIA:
             self._apply_belief_update(speaker_id, config.ROLE_POLICE, 20.0, "accused_me_as_mafia")
     
-    def _process_execution(self, execution_result: Tuple, alive_players: List[int], current_day: int):
+    def _process_execution(self, execution_result: Tuple, alive_players: List[int], current_day: int, vote_log: Dict = None):
         """Process execution results and update beliefs."""
         executed_id, team_alignment, day = execution_result
         
@@ -137,9 +144,15 @@ class RationalCharacter(BaseCharacter):
             self.belief[executed_id, config.ROLE_CITIZEN] = 100.0
             self._penalize_false_accusers(executed_id, day, alive_players)
             self._penalize_counter_claimers(executed_id, alive_players)
+            # NEW: Penalize voters who voted for an innocent citizen
+            if vote_log:
+                self._penalize_false_voters(executed_id, vote_log, alive_players)
         elif team_alignment == "MAFIA":
             self.belief[executed_id, config.ROLE_MAFIA] = 100.0
             self._reward_correct_accusers(executed_id, day)
+            # NEW: Reward voters who voted for a mafia
+            if vote_log:
+                self._reward_correct_voters(executed_id, vote_log)
     
     def _penalize_false_accusers(self, executed_id: int, day: int, alive_players: List[int]):
         """Penalize players who falsely accused an innocent player."""
@@ -179,6 +192,30 @@ class RationalCharacter(BaseCharacter):
                 if self.role != config.ROLE_MAFIA:
                     self._apply_belief_update(accuser_id, config.ROLE_POLICE, 20.0, f"found_mafia_{executed_id}")
                     self._apply_belief_update(accuser_id, config.ROLE_MAFIA, -30.0, f"found_mafia_{executed_id}")
+    
+    def _penalize_false_voters(self, executed_id: int, vote_log: Dict, alive_players: List[int]):
+        """Penalize players who voted for an innocent citizen (retribution logic)."""
+        voters = vote_log.get('voters', [])
+        
+        for voter_id in voters:
+            if voter_id != self.id and voter_id in alive_players:
+                # Significantly increase mafia suspicion for voting out a citizen
+                self.trust_scores[voter_id] = max(0.0, self.trust_scores.get(voter_id, 0.5) - 0.3)
+                self._apply_belief_update(voter_id, config.ROLE_MAFIA, 60.0, 
+                                        f"voted_out_citizen_{executed_id}")
+    
+    def _reward_correct_voters(self, executed_id: int, vote_log: Dict):
+        """Reward players who voted for a mafia member."""
+        voters = vote_log.get('voters', [])
+        
+        for voter_id in voters:
+            if voter_id != self.id:
+                # Increase trust and decrease mafia suspicion for voting out a mafia
+                self.trust_scores[voter_id] = min(1.0, self.trust_scores.get(voter_id, 0.5) + 0.3)
+                self._apply_belief_update(voter_id, config.ROLE_MAFIA, -40.0, 
+                                        f"voted_out_mafia_{executed_id}")
+                self._apply_belief_update(voter_id, config.ROLE_POLICE, 15.0, 
+                                        f"voted_out_mafia_{executed_id}")
     
     def _process_doctor_heal(self, night_result: Dict, game_status: dict):
         """Process doctor's heal results."""
@@ -436,23 +473,27 @@ class RationalCharacter(BaseCharacter):
                               alive_ids: List[int], current_day: int) -> int:
         """Citizen team voting strategy."""
         mafia_scores = [(pid, self.belief[pid, config.ROLE_MAFIA]) for pid in alive_ids]
-        mafia_scores.sort(key=lambda x: (-x[1], x[0]))
         
-        highest_score = mafia_scores[0][1]
+        # Find the highest score
+        highest_score = max(score for _, score in mafia_scores)
         alive_count = self._get_alive_count(players)
         
         if alive_count <= 4:
             if highest_score < 0:
                 unknown_players = self._find_unknown_players(alive_ids)
                 if unknown_players:
-                    unknown_players.sort()
-                    return unknown_players[0]
-            return mafia_scores[0][0]
+                    # Randomly select from unknown players to avoid bias
+                    return np.random.choice(unknown_players)
+            # Randomly select from all players with the highest score
+            top_candidates = [pid for pid, score in mafia_scores if score == highest_score]
+            return np.random.choice(top_candidates)
         
         threshold = 60.0 * self.trust_threshold if current_day <= 2 else 40.0 * self.trust_threshold
         
         if highest_score > threshold:
-            return mafia_scores[0][0]
+            # Randomly select from all players with the highest score
+            top_candidates = [pid for pid, score in mafia_scores if score == highest_score]
+            return np.random.choice(top_candidates)
         
         return -1
     
@@ -487,8 +528,11 @@ class RationalCharacter(BaseCharacter):
             for pid in non_mafia_alive
         ]
         
-        threat_scores.sort(key=lambda x: (-x[1], x[0]))
-        return threat_scores[0][0]
+        # Find the highest threat score
+        highest_threat = max(score for _, score in threat_scores)
+        # Randomly select from all players with the highest threat score
+        top_threats = [pid for pid, score in threat_scores if score == highest_threat]
+        return np.random.choice(top_threats)
     
     def decide_night_action(self, players: List["BaseCharacter"], current_role: int) -> int:
         """Decide night action based on role."""

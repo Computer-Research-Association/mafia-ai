@@ -222,6 +222,18 @@ class MafiaGame:
                 # Only one player with max votes - proceed with execution
                 executed_target = executed_targets[0]
 
+                # Collect voters who voted for the executed target
+                voters_for_target = []
+                for i in range(len(self.players)):
+                    if self.players[i].alive and executed_target in self.players[i].voted_by_last_turn:
+                        continue
+                    if i < len(self.players) and self.vote_counts[executed_target] > 0:
+                        # Check who voted for this target
+                        if executed_target in self.players[executed_target].voted_by_last_turn:
+                            continue
+                # Actually collect voters from voted_by_last_turn of the target
+                voters_for_target = self.players[executed_target].voted_by_last_turn.copy()
+
                 # AI 투표
                 if self.players[0].alive:
                     # 마피아 의심 점수가 양수면 찬성
@@ -254,7 +266,9 @@ class MafiaGame:
                         team_alignment = "CITIZEN"
                         self._log(f"  - [공개] {executed_target}번은 시민 팀이었습니다.")
                     
-                    self.last_execution_result = (executed_target, team_alignment, self.day_count)
+                    # Include vote log in execution result
+                    vote_log = {'voters': voters_for_target, 'target': executed_target}
+                    self.last_execution_result = (executed_target, team_alignment, self.day_count, vote_log)
                 else:
                     self._log(f"  - 투표 결과: 찬성 {self.final_vote}표 (과반 미달)")
                     self._log(f"  - {executed_target}번 플레이어는 처형되지 않았습니다.")
