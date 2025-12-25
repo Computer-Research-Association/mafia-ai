@@ -9,8 +9,8 @@ class MafiaEnv(gym.Env):
     def __init__(self, log_file=None):
         super(MafiaEnv, self).__init__()
         self.game = MafiaGame(log_file=log_file)
-        # Action Space: 0~7번 플레이어 지목
-        self.action_space = spaces.Discrete(config.PLAYER_COUNT)
+        # Action Space: 0~7번 플레이어 지목 + 8번 기권 (NO_ACTION)
+        self.action_space = spaces.Discrete(config.PLAYER_COUNT + 1)
 
         self.observation_space = spaces.Dict(
             {
@@ -21,7 +21,7 @@ class MafiaEnv(gym.Env):
                     dtype=np.float32,  # 8 + 4
                 ),
                 "action_mask": spaces.Box(
-                    low=0, high=1, shape=(config.PLAYER_COUNT,), dtype=np.int8  # 0 or 1
+                    low=0, high=1, shape=(config.PLAYER_COUNT + 1,), dtype=np.int8  # 0 or 1
                 ),
             }
         )
@@ -35,6 +35,10 @@ class MafiaEnv(gym.Env):
         my_id = self.game.players[0].id
         my_role = self.game.players[my_id].role
         prev_alive = [p.alive for p in self.game.players]
+
+        # 기권 액션(config.PLAYER_COUNT)을 -1로 변환
+        if action == config.PLAYER_COUNT:
+            action = -1
 
         status, done, win = self.game.process_turn(action)
 
@@ -65,7 +69,7 @@ class MafiaEnv(gym.Env):
         return self._encode_observation(status), reward, done, False, {}
 
     def _get_action_mask(self):
-        mask = np.ones(config.PLAYER_COUNT, dtype=np.int8)  # 초기에는 모두 지목 가능
+        mask = np.ones(config.PLAYER_COUNT + 1, dtype=np.int8)  # 초기에는 모두 지목 가능 + 기권
         my_id = self.game.players[0].id  # 내 플레이어 ID
         my_role = self.game.players[my_id].role  # 내 직업 ID
         phase = self.game.phase  # 현재 게임 단계
@@ -97,19 +101,27 @@ class MafiaEnv(gym.Env):
                     if i == my_id:
                         mask[i] = 0
 
+        # 기권 액션(config.PLAYER_COUNT) 마스크 설정
+        # 낮 토론, 투표에서는 기권 가능, 밤 행동에서는 불가
+        if phase == config.PHASE_DAY_DISCUSSION or phase == config.PHASE_DAY_VOTE:
+            mask[config.PLAYER_COUNT] = 1  # 기권 허용
+        else:
+            mask[config.PLAYER_COUNT] = 0  # 기권 불가
+
         return mask
 
     def _calculate_citizen_reward(self, action):
+        # 기권 액션일 경우 보상 없음
+        if action == -1:
+            return 0.0
+            
         phase = self.game.phase
-        # 토론 단계에 대한 보상
         reward = 0.0
         if phase == config.PHASE_DAY_DISCUSSION:
-            # 마피아를 지목하면 보상
             if self.game.players[action].role == config.ROLE_MAFIA:
                 reward += 1.0
             else:
                 reward -= 1.0
-        # 투표 단계에 대한 보상
         elif phase == config.PHASE_DAY_VOTE:
             if self.game.players[action].role == config.ROLE_MAFIA:
                 reward += 3.0
@@ -118,10 +130,13 @@ class MafiaEnv(gym.Env):
         return reward
 
     def _calculate_mafia_reward(self, action):
+        # 기권 액션일 경우 보상 없음
+        if action == -1:
+            return 0.0
+            
         phase = self.game.phase
         reward = 0.0
         if phase == config.PHASE_DAY_DISCUSSION:
-            # 마피아는 경찰/의사 지목 시 보상
             if (
                 self.game.players[action].role == config.ROLE_POLICE
                 or self.game.players[action].role == config.ROLE_DOCTOR
@@ -144,6 +159,10 @@ class MafiaEnv(gym.Env):
         return reward
 
     def _calculate_police_reward(self, action):
+        # 기권 액션일 경우 보상 없음
+        if action == -1:
+            return 0.0
+            
         reward = 0.0
         phase = self.game.phase
         if phase == config.PHASE_NIGHT:
