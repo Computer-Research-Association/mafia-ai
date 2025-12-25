@@ -24,11 +24,16 @@ ROLES = [
 ]
 
 # 학습 설정 (Hyperparameters)
-LR = 0.0003  # Learning Rate
+LR = 0.0001  # Learning Rate (더 안정적인 학습을 위해 감소)
 GAMMA = 0.99  # Discount Factor
 EPS_CLIP = 0.2  # PPO Clip range
 K_EPOCHS = 4  # Update epochs
-BATCH_SIZE = 32
+BATCH_SIZE = 64  # 배치 크기 증가 (복잡한 관측 공간에 대응)
+
+# 추가 학습 파라미터
+ENTROPY_COEF = 0.01  # Entropy coefficient (탐험 유도)
+VALUE_LOSS_COEF = 0.5  # Value loss coefficient
+MAX_GRAD_NORM = 0.5  # Gradient clipping (안정성 향상)
 
 # 경로 설정
 LOG_DIR = "./logs"

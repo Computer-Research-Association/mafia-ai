@@ -100,9 +100,11 @@ class MafiaGame:
                 }
                 structured_claims.append(ai_claim)
                 self.players[0].claimed_target = ai_action
+                self.players[0].claimed_role = -1  # AI는 역할 주장 안함 (단순화)
                 self._log(f"  - AI(0)이(가) {ai_action}을(를) 지목했습니다.")
             else:
                 self.players[0].claimed_target = -1
+                self.players[0].claimed_role = -1
                 self._log(f"  - AI(0)이(가) 아무 주장도 하지 않았습니다.")
 
         # === Step 2: Bots debate until consensus (UNLIMITED LOOP) ===
@@ -129,6 +131,13 @@ class MafiaGame:
                     
                     # Set claimed_target for backwards compatibility
                     p.claimed_target = claim_dict["target_id"]
+                    
+                    # Update claimed_role
+                    reveal_role = claim_dict.get("reveal_role", -1)
+                    if reveal_role != -1:
+                        p.claimed_role = reveal_role  # 역할을 주장함
+                    else:
+                        p.claimed_role = -1  # 역할 주장 없음
                     
                     # Enhanced logging based on claim type
                     target_id = claim_dict["target_id"]
@@ -158,6 +167,7 @@ class MafiaGame:
                             self._log(f"  - 플레이어 {p.id}이(가) {target_id}을(를) 의심합니다.")
                 else:
                     p.claimed_target = -1
+                    p.claimed_role = -1  # 침묵
                     if debate_round == 0:  # Only log on first round
                         self._log(f"  - 플레이어 {p.id}이(가) 아무 주장도 하지 않았습니다.")
             

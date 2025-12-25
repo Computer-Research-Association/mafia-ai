@@ -12,6 +12,11 @@ class PPO:
         self.k_epochs = config.K_EPOCHS
         self.lr = config.LR
         
+        # 새로운 하이퍼파라미터
+        self.entropy_coef = config.ENTROPY_COEF
+        self.value_loss_coef = config.VALUE_LOSS_COEF
+        self.max_grad_norm = config.MAX_GRAD_NORM
+        
         # 데이터 수집을 위한 버퍼 생성
         self.buffer = RolloutBuffer()
         
@@ -112,12 +117,21 @@ class PPO:
             surr1 = ratios * advantages
             surr2 = torch.clamp(ratios, 1 - self.eps_clip, 1 + self.eps_clip) * advantages
             
-            # 최종 Loss: Actor Loss + Critic Loss - Entropy Bonus
-            loss = -torch.min(surr1, surr2) + 0.5 * self.MseLoss(state_values, rewards) - 0.01 * dist_entropy
+            # 최종 Loss: Actor Loss + Value Loss - Entropy Bonus
+            # config에서 정의한 계수 사용
+            actor_loss = -torch.min(surr1, surr2)
+            value_loss = self.MseLoss(state_values, rewards)
+            entropy_loss = -dist_entropy
+            
+            loss = actor_loss + self.value_loss_coef * value_loss + self.entropy_coef * entropy_loss
             
             # 역전파
             self.optimizer.zero_grad()
             loss.mean().backward()
+            
+            # Gradient Clipping (학습 안정성 향상)
+            torch.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
+            
             self.optimizer.step()
             
         # 3. 학습된 정책을 Old Policy로 복사

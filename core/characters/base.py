@@ -24,6 +24,7 @@ class BaseCharacter(ABC):
         self.role = role
         self.alive = True
         self.claimed_target = -1
+        self.claimed_role = -1  # 주장한 역할 (-1: 주장 없음, 0~3: 역할)
 
         # Belief Matrix: (N x 4) - 각 플레이어가 각 직업일 것이라는 신뢰 점수
         # 열(Col): [0: 시민, 1: 경찰, 2: 의사, 3: 마피아]

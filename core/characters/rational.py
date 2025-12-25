@@ -58,10 +58,7 @@ class RationalCharacter(BaseCharacter):
         night_result = game_status.get('night_result', None)
         current_day = game_status.get('day', 1)
         
-        # Reset said_today when a new day starts
-        if current_day != self.last_tracked_day:
-            self.said_today = set()
-            self.last_tracked_day = current_day
+        # Note: said_today is now reset in decide_claim() to prevent premature clearing
         
         for claim in claims:
             speaker_id = claim.get('speaker_id')
@@ -299,6 +296,12 @@ class RationalCharacter(BaseCharacter):
             current_day: Current day number
             discussion_context: List of claims made in current discussion (for reactive strategies)
         """
+        # Reset said_today when a new day starts (BEFORE deciding what to say)
+        # This ensures memory is cleared only once per day, at the first speak attempt
+        if current_day != self.last_tracked_day:
+            self.said_today = set()
+            self.last_tracked_day = current_day
+        
         alive_ids = self._get_alive_ids(players, exclude_me=True)
         if not alive_ids:
             self.committed_target = -1
