@@ -282,14 +282,31 @@ class RationalCharacter(BaseCharacter):
         """Count alive players."""
         return sum(1 for p in players if p.alive)
     
-    def decide_claim(self, players: List["BaseCharacter"], current_day: int = 1) -> dict:
-        """Returns a dictionary with structured claim details."""
+    def decide_claim(self, players: List["BaseCharacter"], current_day: int = 1, discussion_context: List[Dict] = None) -> dict:
+        """Returns a dictionary with structured claim details.
+        
+        Args:
+            players: List of all players
+            current_day: Current day number
+            discussion_context: List of claims made in current discussion (for reactive strategies)
+        """
         alive_ids = self._get_alive_ids(players, exclude_me=True)
         if not alive_ids:
             self.committed_target = -1
             return {"type": "NO_ACTION", "reveal_role": -1, "target_id": -1, "assertion": "SUSPECT"}
         
         self.committed_target = -1
+        
+        # Role-specific counter-strategies (context-aware)
+        if discussion_context:
+            if self.role == config.ROLE_MAFIA:
+                mafia_counter = self._check_mafia_counter_claim(alive_ids, discussion_context, players)
+                if mafia_counter:
+                    return mafia_counter
+            elif self.role == config.ROLE_DOCTOR:
+                doctor_save = self._check_doctor_super_save(alive_ids, discussion_context, players)
+                if doctor_save:
+                    return doctor_save
         
         counter_claim = self._check_counter_claim(alive_ids)
         if counter_claim:
@@ -317,6 +334,96 @@ class RationalCharacter(BaseCharacter):
                     "target_id": pid,
                     "assertion": "CONFIRMED_MAFIA"
                 }
+        return None
+    
+    def _check_mafia_counter_claim(self, alive_ids: List[int], discussion_context: List[Dict], players: List["BaseCharacter"]) -> Dict:
+        """Mafia Counter-Claim Strategy: Impersonate police if accused by real police.
+        
+        If someone claims to be police and accuses this mafia or a fellow mafia,
+        immediately counter-claim as police and accuse them back.
+        """
+        if not discussion_context:
+            return None
+        
+        # Find fellow mafia members
+        fellow_mafia = [p.id for p in players if p.role == config.ROLE_MAFIA and p.id != self.id and p.alive]
+        
+        for claim in discussion_context:
+            speaker_id = claim.get('speaker_id')
+            reveal_role = claim.get('reveal_role', -1)
+            target_id = claim.get('target_id', -1)
+            assertion = claim.get('assertion', '')
+            
+            # If someone claims to be police and confirms me or my fellow mafia as MAFIA
+            if (reveal_role == config.ROLE_POLICE and 
+                assertion == "CONFIRMED_MAFIA" and
+                (target_id == self.id or target_id in fellow_mafia) and
+                speaker_id in alive_ids):
+                
+                # Counter-claim: I'm the real police, accuser is mafia!
+                self.committed_target = speaker_id
+                self.should_reveal = True
+                self._log(f"  - [맞경] 마피아 {self.id}가 경찰을 사칭하여 {speaker_id}를 반격합니다!")
+                return {
+                    "type": "CLAIM",
+                    "reveal_role": config.ROLE_POLICE,
+                    "target_id": speaker_id,
+                    "assertion": "CONFIRMED_MAFIA"
+                }
+        
+        return None
+    
+    def _check_doctor_super_save(self, alive_ids: List[int], discussion_context: List[Dict], players: List["BaseCharacter"]) -> Dict:
+        """Doctor Super Save Strategy: Reveal and vouch for healed player under threat.
+        
+        If a player that the doctor saved is being heavily accused,
+        reveal as doctor and confirm them as citizen.
+        """
+        if not discussion_context or not self.healed_players:
+            return None
+        
+        # Check if any healed player is being accused
+        for healed_pid in self.healed_players:
+            if healed_pid not in alive_ids:
+                continue
+            
+            accusations_this_round = 0
+            for claim in discussion_context:
+                target_id = claim.get('target_id', -1)
+                assertion = claim.get('assertion', '')
+                
+                if target_id == healed_pid and assertion in ["SUSPECT", "CONFIRMED_MAFIA"]:
+                    accusations_this_round += 1
+            
+            # If healed player is under heavy fire (2+ accusations), reveal and save
+            if accusations_this_round >= 2:
+                self.committed_target = healed_pid
+                self.should_reveal = True
+                self._log(f"  - [슈퍼세이브] 의사 {self.id}가 자신이 살린 {healed_pid}를 변호합니다!")
+                return {
+                    "type": "CLAIM",
+                    "reveal_role": config.ROLE_DOCTOR,
+                    "target_id": healed_pid,
+                    "assertion": "CONFIRMED_CITIZEN"
+                }
+        
+        # Also check if healed player has high mafia suspicion score
+        for healed_pid in self.healed_players:
+            if healed_pid not in alive_ids:
+                continue
+            
+            # Check overall mafia suspicion score
+            if self.belief[healed_pid, config.ROLE_MAFIA] > 70.0:
+                self.committed_target = healed_pid
+                self.should_reveal = True
+                self._log(f"  - [슈퍼세이브] 의사 {self.id}가 의심받는 {healed_pid}를 변호합니다!")
+                return {
+                    "type": "CLAIM",
+                    "reveal_role": config.ROLE_DOCTOR,
+                    "target_id": healed_pid,
+                    "assertion": "CONFIRMED_CITIZEN"
+                }
+        
         return None
     
     def _police_claim_strategy(self, players: List["BaseCharacter"], 
@@ -352,9 +459,26 @@ class RationalCharacter(BaseCharacter):
     
     def _doctor_claim_strategy(self, players: List["BaseCharacter"], 
                               alive_ids: List[int], current_day: int) -> Dict:
-        """Doctor claim strategy."""
+        """Doctor claim strategy with enhanced super save logic."""
         alive_count = self._get_alive_count(players)
         police_is_dead = self._is_police_dead()
+        
+        # Check if any healed player is in danger (high suspicion)
+        for healed_pid in self.healed_players:
+            if healed_pid in alive_ids:
+                # Check suspicion level
+                mafia_suspicion = self.belief[healed_pid, config.ROLE_MAFIA]
+                accusations_against = sum(1 for _, target, _ in self.accusation_history if target == healed_pid)
+                
+                # Reveal if healed player is under heavy suspicion
+                if mafia_suspicion > 60.0 or accusations_against >= 2:
+                    self.should_reveal = True
+                    return {
+                        "type": "CLAIM",
+                        "reveal_role": config.ROLE_DOCTOR,
+                        "target_id": healed_pid,
+                        "assertion": "CONFIRMED_CITIZEN"
+                    }
         
         if police_is_dead or alive_count <= 3:
             best_citizen = self._find_best_citizen_to_vouch(alive_ids)
@@ -365,17 +489,6 @@ class RationalCharacter(BaseCharacter):
                     "target_id": best_citizen,
                     "assertion": "CONFIRMED_CITIZEN"
                 }
-        
-        for healed_pid in self.healed_players:
-            if healed_pid in alive_ids:
-                accusations_against = sum(1 for _, target, _ in self.accusation_history if target == healed_pid)
-                if accusations_against >= 2 and current_day >= 3:
-                    return {
-                        "type": "CLAIM",
-                        "reveal_role": config.ROLE_DOCTOR,
-                        "target_id": healed_pid,
-                        "assertion": "CONFIRMED_CITIZEN"
-                    }
         
         if current_day <= 2:
             return {"type": "NO_ACTION", "reveal_role": -1, "target_id": -1, "assertion": "SUSPECT"}

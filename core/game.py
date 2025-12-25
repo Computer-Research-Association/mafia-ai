@@ -81,13 +81,13 @@ class MafiaGame:
         return self._get_game_status(), is_over, is_win
 
     def _process_day_discussion(self, ai_action: int):
-        """Merged phase: Claims and discussion happen together with STRUCTURED PROTOCOL"""
+        """Merged phase: Claims and discussion happen together with UNLIMITED DEBATE LOOP"""
         self._log("  - 낮 토론: 플레이어들이 의견을 나누고 의심도를 갱신합니다.")
         
-        # === Step 1: Make structured claims ===
+        # === Step 1: AI(Player 0) makes opening statement ===
         structured_claims = []  # Store all claims in new dictionary format
         
-        # AI(0번) 처리
+        # AI(0번) 먼저 발언
         if self.players[0].alive:
             # For AI, we allow NO_ACTION (-1) to enable learning when to stay silent
             if ai_action != -1 and 0 <= ai_action < len(self.players):
@@ -105,63 +105,92 @@ class MafiaGame:
                 self.players[0].claimed_target = -1
                 self._log(f"  - AI(0)이(가) 아무 주장도 하지 않았습니다.")
 
-        # 봇들 처리 (NEW: Returns dictionary)
-        for p in self.players:
-            if not p.alive or p.id == 0:
-                continue
+        # === Step 2: Bots debate until consensus (UNLIMITED LOOP) ===
+        MAX_DEBATE_ROUNDS = 5
+        
+        for debate_round in range(MAX_DEBATE_ROUNDS):
+            round_claims = []  # Claims made in this debate round
+            all_silent = True  # Track if all bots are silent this round
+            
+            # 봇들 처리 (Player 1~7)
+            for p in self.players:
+                if not p.alive or p.id == 0:
+                    continue
 
-            claim_dict = p.decide_claim(self.players, self.day_count)
+                # Pass current discussion context for reactive claims
+                claim_dict = p.decide_claim(self.players, self.day_count, structured_claims)
 
-            if claim_dict["type"] == "CLAIM":
-                # Add speaker_id to the claim
-                claim_dict["speaker_id"] = p.id
-                structured_claims.append(claim_dict)
-                
-                # Set claimed_target for backwards compatibility
-                p.claimed_target = claim_dict["target_id"]
-                
-                # Enhanced logging based on claim type
-                target_id = claim_dict["target_id"]
-                reveal_role = claim_dict["reveal_role"]
-                assertion = claim_dict["assertion"]
-                
-                if reveal_role != -1:
-                    role_names = {config.ROLE_POLICE: "경찰", config.ROLE_DOCTOR: "의사", 
-                                  config.ROLE_CITIZEN: "시민", config.ROLE_MAFIA: "마피아"}
-                    role_name = role_names.get(reveal_role, "알 수 없음")
+                if claim_dict["type"] == "CLAIM":
+                    all_silent = False
+                    # Add speaker_id to the claim
+                    claim_dict["speaker_id"] = p.id
+                    round_claims.append(claim_dict)
+                    structured_claims.append(claim_dict)  # Add to global claims
                     
-                    if assertion == "CONFIRMED_MAFIA":
-                        self._log(f"  - [중요] 플레이어 {p.id}이(가) {role_name}이라 밝히며 "
-                                  f"{target_id}이(가) 마피아라고 확정 주장합니다!")
-                    elif assertion == "CONFIRMED_CITIZEN":
-                        self._log(f"  - [중요] 플레이어 {p.id}이(가) {role_name}이라 밝히며 "
-                                  f"{target_id}이(가) 시민이라고 확정 주장합니다!")
+                    # Set claimed_target for backwards compatibility
+                    p.claimed_target = claim_dict["target_id"]
+                    
+                    # Enhanced logging based on claim type
+                    target_id = claim_dict["target_id"]
+                    reveal_role = claim_dict["reveal_role"]
+                    assertion = claim_dict["assertion"]
+                    
+                    if reveal_role != -1:
+                        role_names = {config.ROLE_POLICE: "경찰", config.ROLE_DOCTOR: "의사", 
+                                      config.ROLE_CITIZEN: "시민", config.ROLE_MAFIA: "마피아"}
+                        role_name = role_names.get(reveal_role, "알 수 없음")
+                        
+                        if assertion == "CONFIRMED_MAFIA":
+                            self._log(f"  - [중요] 플레이어 {p.id}이(가) {role_name}이라 밝히며 "
+                                      f"{target_id}이(가) 마피아라고 확정 주장합니다!")
+                        elif assertion == "CONFIRMED_CITIZEN":
+                            self._log(f"  - [중요] 플레이어 {p.id}이(가) {role_name}이라 밝히며 "
+                                      f"{target_id}이(가) 시민이라고 확정 주장합니다!")
+                        else:
+                            self._log(f"  - 플레이어 {p.id}이(가) {role_name}이라 밝히며 "
+                                      f"{target_id}을(를) 의심합니다.")
                     else:
-                        self._log(f"  - 플레이어 {p.id}이(가) {role_name}이라 밝히며 "
-                                  f"{target_id}을(를) 의심합니다.")
+                        if assertion == "CONFIRMED_MAFIA":
+                            self._log(f"  - 플레이어 {p.id}이(가) {target_id}을(를) 마피아로 확신합니다!")
+                        elif assertion == "CONFIRMED_CITIZEN":
+                            self._log(f"  - 플레이어 {p.id}이(가) {target_id}을(를) 시민으로 확신합니다!")
+                        else:
+                            self._log(f"  - 플레이어 {p.id}이(가) {target_id}을(를) 의심합니다.")
                 else:
-                    if assertion == "CONFIRMED_MAFIA":
-                        self._log(f"  - 플레이어 {p.id}이(가) {target_id}을(를) 마피아로 확신합니다!")
-                    elif assertion == "CONFIRMED_CITIZEN":
-                        self._log(f"  - 플레이어 {p.id}이(가) {target_id}을(를) 시민으로 확신합니다!")
-                    else:
-                        self._log(f"  - 플레이어 {p.id}이(가) {target_id}을(를) 의심합니다.")
-            else:
-                p.claimed_target = -1
-                self._log(f"  - 플레이어 {p.id}이(가) 아무 주장도 하지 않았습니다.")
+                    p.claimed_target = -1
+                    if debate_round == 0:  # Only log on first round
+                        self._log(f"  - 플레이어 {p.id}이(가) 아무 주장도 하지 않았습니다.")
+            
+            # Update beliefs after each debate round (Real-time reaction)
+            if round_claims:
+                game_status = {
+                    'claims': round_claims,  # Only new claims from this round
+                    'alive_players': [p.id for p in self.players if p.alive],
+                    'day': self.day_count,
+                    'execution_result': self.last_execution_result,
+                    'night_result': self.last_night_result
+                }
+                
+                for player in self.players:
+                    if player.alive:
+                        player.update_belief(game_status)
+            
+            # End debate if all bots are silent
+            if all_silent:
+                if debate_round > 0:
+                    self._log(f"  - [토론 종료] 모든 플레이어가 침묵하여 토론을 종료합니다. (라운드 {debate_round + 1})")
+                break
         
-        # === Step 2: Update beliefs based on structured claims ===
-        
-        # 게임 상태 정보 수집 (NEW FORMAT)
+        # === Step 3: Final belief update with all accumulated claims ===
         game_status = {
-            'claims': structured_claims,  # Now contains full claim dictionaries
+            'claims': structured_claims,  # All claims from entire discussion
             'alive_players': [p.id for p in self.players if p.alive],
             'day': self.day_count,
-            'execution_result': self.last_execution_result,  # From previous day
-            'night_result': self.last_night_result  # From previous night
+            'execution_result': self.last_execution_result,
+            'night_result': self.last_night_result
         }
         
-        # 모든 플레이어의 belief 업데이트 (Trust & Memory System)
+        # Final sync for all players
         for player in self.players:
             if player.alive:
                 player.update_belief(game_status)
