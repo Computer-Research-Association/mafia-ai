@@ -363,7 +363,6 @@ class RationalCharacter(BaseCharacter):
                 # Counter-claim: I'm the real police, accuser is mafia!
                 self.committed_target = speaker_id
                 self.should_reveal = True
-                self._log(f"  - [맞경] 마피아 {self.id}가 경찰을 사칭하여 {speaker_id}를 반격합니다!")
                 return {
                     "type": "CLAIM",
                     "reveal_role": config.ROLE_POLICE,
@@ -399,7 +398,6 @@ class RationalCharacter(BaseCharacter):
             if accusations_this_round >= 2:
                 self.committed_target = healed_pid
                 self.should_reveal = True
-                self._log(f"  - [슈퍼세이브] 의사 {self.id}가 자신이 살린 {healed_pid}를 변호합니다!")
                 return {
                     "type": "CLAIM",
                     "reveal_role": config.ROLE_DOCTOR,
@@ -416,7 +414,6 @@ class RationalCharacter(BaseCharacter):
             if self.belief[healed_pid, config.ROLE_MAFIA] > 70.0:
                 self.committed_target = healed_pid
                 self.should_reveal = True
-                self._log(f"  - [슈퍼세이브] 의사 {self.id}가 의심받는 {healed_pid}를 변호합니다!")
                 return {
                     "type": "CLAIM",
                     "reveal_role": config.ROLE_DOCTOR,
