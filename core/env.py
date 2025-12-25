@@ -77,11 +77,12 @@ class MafiaEnv(gym.Env):
                 continue
 
             # 1. 낮 행동 제약
-            if phase == config.PHASE_DAY_VOTE:
+            if phase == config.PHASE_DAY_DISCUSSION:
+                # 도론 단계: 자신을 지목할 수 없음
                 if i == my_id:
                     mask[i] = 0
 
-            elif phase == config.PHASE_DAY_CLAIM:
+            elif phase == config.PHASE_DAY_VOTE:
                 if i == my_id:
                     mask[i] = 0
 
@@ -100,9 +101,10 @@ class MafiaEnv(gym.Env):
 
     def _calculate_citizen_reward(self, action):
         phase = self.game.phase
-        # 주장 단계에 대한 보상
+        # 토론 단계에 대한 보상
         reward = 0.0
-        if phase == config.PHASE_DAY_CLAIM:
+        if phase == config.PHASE_DAY_DISCUSSION:
+            # 마피아를 지목하면 보상
             if self.game.players[action].role == config.ROLE_MAFIA:
                 reward += 1.0
             else:
@@ -118,7 +120,8 @@ class MafiaEnv(gym.Env):
     def _calculate_mafia_reward(self, action):
         phase = self.game.phase
         reward = 0.0
-        if phase == config.PHASE_DAY_CLAIM:
+        if phase == config.PHASE_DAY_DISCUSSION:
+            # 마피아는 경찰/의사 지목 시 보상
             if (
                 self.game.players[action].role == config.ROLE_POLICE
                 or self.game.players[action].role == config.ROLE_DOCTOR
@@ -151,7 +154,8 @@ class MafiaEnv(gym.Env):
     def _calculate_doctor_reward(self, prev_alive):
         reward = 0.0
         phase = self.game.phase
-        if phase == config.PHASE_DAY_CLAIM:
+        # 의사는 밤에 사람을 살리면 보상
+        if phase == config.PHASE_NIGHT:
             if sum(prev_alive) == sum(self.game.alive_status):
                 reward += 3.0
             else:
