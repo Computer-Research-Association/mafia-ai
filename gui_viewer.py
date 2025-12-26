@@ -71,6 +71,80 @@ class MafiaLogViewerApp:
         self.root.destroy()
         sys.exit(0)
 
+    def _parse_log_file_internal(self):
+        """
+        로그 파일을 읽어 게임 데이터를 리스트로 반환 (Win: True/False 파싱 포함)
+        """
+        games = []
+        if not os.path.exists(self.log_file_path):
+            return games
+
+        current_game = {"winner": None, "roles": {}, "Day": 0, "ai_won": None}
+        in_episode = False
+
+        try:
+            with open(self.log_file_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    if "Episode" in line and "Start" in line:
+                        in_episode = True
+                        current_game = {
+                            "winner": None,
+                            "roles": {},
+                            "Day": 0,
+                            "ai_won": None,
+                        }
+                        continue
+
+                    if not in_episode:
+                        continue
+
+                    # 승자 판별
+                    if "Winner" in line:
+                        if "Mafia" in line:
+                            current_game["winner"] = "Mafia"
+                        elif "Citizen" in line:
+                            current_game["winner"] = "Citizen"
+
+                    # 역할 판별
+                    if "Player 0" in line or "Player0" in line:
+                        upper_line = line.upper()
+                        if "MAFIA" in upper_line:
+                            current_game["roles"][0] = "MAFIA"
+                        elif "POLICE" in upper_line:
+                            current_game["roles"][0] = "POLICE"
+                        elif "DOCTOR" in upper_line:
+                            current_game["roles"][0] = "DOCTOR"
+                        elif "CITIZEN" in upper_line:
+                            current_game["roles"][0] = "CITIZEN"
+
+                    # Day 추출
+                    day_match = re.search(r"Day\s*[:]?\s*(\d+)", line, re.IGNORECASE)
+                    if day_match:
+                        d = int(day_match.group(1))
+                        if d > current_game["Day"]:
+                            current_game["Day"] = d
+
+                    # 종료 및 AI 승패(Win: True/False) 파싱
+                    if "Episode" in line and "End" in line:
+                        win_match = re.search(
+                            r"Win:\s*(True|False)", line, re.IGNORECASE
+                        )
+                        if win_match:
+                            current_game["ai_won"] = (
+                                win_match.group(1).lower() == "true"
+                            )
+
+                        if current_game["Day"] == 0:
+                            current_game["Day"] = 1
+
+                        games.append(current_game)
+                        in_episode = False
+
+        except Exception as e:
+            print(f"[Error] 파싱 중 오류 발생: {e}")
+
+        return games
+
     # ------------------------------------------------------------------
     # 탭 1: 팀별 승률 (Pie Chart) + AI 역할별 상세 승률
     # ------------------------------------------------------------------
@@ -266,32 +340,25 @@ class MafiaLogViewerApp:
         canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
     # ------------------------------------------------------------------
-    # 탭 2: AI 성장 그래프 (Bar Chart) 관련 함수
+    # 탭 2: AI 구간별 승률
     # ------------------------------------------------------------------
     def _init_ai_stats_tab(self):
         frame = ttk.Frame(self.tab_ai_stats)
         frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-
         btn_refresh = ttk.Button(frame, text="새로고침", command=self.refresh_ai_stats)
         btn_refresh.pack(side=tk.TOP, anchor=tk.E, pady=(0, 10))
-
         self.chart_frame_ai = ttk.Frame(frame)
         self.chart_frame_ai.pack(fill=tk.BOTH, expand=True)
 
     def refresh_ai_stats(self):
-        """AI 구간별 승률(막대 차트) 갱신"""
         for widget in self.chart_frame_ai.winfo_children():
             widget.destroy()
 
-        from utils.analysis import parse_game_data
-
-        games = parse_game_data(self.log_file_path)
-
+        games = self._parse_log_file_internal()
         if not games:
             ttk.Label(self.chart_frame_ai, text="데이터가 없습니다.").pack()
             return
 
-        # 100게임 단위 구간 계산
         CHUNK_SIZE = 100
         total_games = len(games)
         x_labels = []
@@ -306,28 +373,19 @@ class MafiaLogViewerApp:
             valid_games = 0
 
             for game in chunk:
-                winner = game.get("winner")
-                my_role = game["roles"].get(0)  # Player 0 (AI)
-
-                if not winner or not my_role:
+                ai_won = game.get("ai_won")
+                if ai_won is None:
                     continue
                 valid_games += 1
-
-                # AI 승리 판별
-                is_mafia_side = my_role == "MAFIA"
-                if (is_mafia_side and winner == "Mafia") or (
-                    not is_mafia_side and winner == "Citizen"
-                ):
+                if ai_won is True:
                     wins += 1
 
             win_rate = (wins / valid_games * 100) if valid_games > 0 else 0
-
             start_ep = i + 1
             end_ep = min(i + CHUNK_SIZE, total_games)
             x_labels.append(f"{start_ep}\n~\n{end_ep}")
             y_values.append(win_rate)
 
-        # 차트 그리기
         self._draw_ai_bar_chart(x_labels, y_values)
 
     def _draw_ai_bar_chart(self, x_labels, y_values):
@@ -336,9 +394,7 @@ class MafiaLogViewerApp:
             return
 
         fig, ax = plt.subplots(figsize=(10, 5), dpi=100)
-
         bars = ax.bar(x_labels, y_values, color="#66b3ff", edgecolor="white")
-
         ax.set_ylim(0, 100)
         ax.set_title("구간별 AI(Player 0) 승률 변화")
         ax.set_ylabel("승률 (%)")
@@ -359,7 +415,6 @@ class MafiaLogViewerApp:
 
         plt.xticks(fontsize=9)
         plt.tight_layout()
-
         canvas = FigureCanvasTkAgg(fig, master=self.chart_frame_ai)
         canvas.draw()
         canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
