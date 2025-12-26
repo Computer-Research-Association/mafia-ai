@@ -58,7 +58,7 @@ class MafiaGame:
         self.alive_status = [True for _ in range(config.PLAYER_COUNT)]
         return self._get_game_status()
 
-    def process_turn(self, action: int) -> Tuple[Dict, bool, bool]:
+    def process_turn(self, action: int, ai_claim_role: int = -1) -> Tuple[Dict, bool, bool]:
         is_over, is_win = self.check_game_over()
         if is_over:
             return self._get_game_status(), is_over, is_win
@@ -67,7 +67,7 @@ class MafiaGame:
 
         # Merged phases: PHASE_DAY_CLAIM removed
         if self.phase == config.PHASE_DAY_DISCUSSION:
-            self._process_day_discussion(action)  # Now includes claims
+            self._process_day_discussion(action, ai_claim_role)  # ai_claim_role 전달
             self.phase = config.PHASE_DAY_VOTE
         elif self.phase == config.PHASE_DAY_VOTE:
             self._process_day_vote(action)
@@ -80,8 +80,10 @@ class MafiaGame:
         is_over, is_win = self.check_game_over()
         return self._get_game_status(), is_over, is_win
 
-    def _process_day_discussion(self, ai_action: int):
-        """Merged phase: Claims and discussion happen together with UNLIMITED DEBATE LOOP"""
+    def _process_day_discussion(self, ai_action: int, ai_claim_role: int = -1):
+        """Merged phase: Claims and discussion happen together with UNLIMITED DEBATE LOOP
+        ai_claim_role: AI가 주장하는 역할 (-1: 주장 없음, 0-3: 역할)
+        """
         self._log("  - 낮 토론: 플레이어들이 의견을 나누고 의심도를 갱신합니다.")
         
         # === Step 1: AI(Player 0) makes opening statement ===
@@ -89,8 +91,43 @@ class MafiaGame:
         
         # AI(0번) 먼저 발언
         if self.players[0].alive:
-            # For AI, we allow NO_ACTION (-1) to enable learning when to stay silent
-            if ai_action != -1 and 0 <= ai_action < len(self.players):
+            # === [AI 역할 주장 처리 v2.0] ===
+            if ai_claim_role != -1:
+                # AI가 역할을 주장함
+                role_names = {config.ROLE_POLICE: "경찰", config.ROLE_DOCTOR: "의사", 
+                              config.ROLE_CITIZEN: "시민", config.ROLE_MAFIA: "마피아"}
+                role_name = role_names.get(ai_claim_role, "알 수 없음")
+                
+                # 역할 주장 + 선택적 지목
+                if ai_action != -1 and 0 <= ai_action < len(self.players):
+                    # 역할 주장 + 지목 복합 (주로 경찰이 조사 결과 발표)
+                    assertion = "CONFIRMED_MAFIA" if ai_claim_role == config.ROLE_POLICE else "SUSPECT"
+                    ai_claim = {
+                        "speaker_id": 0,
+                        "type": "CLAIM",
+                        "reveal_role": ai_claim_role,
+                        "target_id": ai_action,
+                        "assertion": assertion
+                    }
+                    structured_claims.append(ai_claim)
+                    self.players[0].claimed_target = ai_action
+                    self.players[0].claimed_role = ai_claim_role
+                    self._log(f"  - [AI 주장] AI(0)이(가) {role_name}이라 밝히며 {ai_action}을(를) 지목했습니다.")
+                else:
+                    # 역할 주장만 (지목 없음)
+                    ai_claim = {
+                        "speaker_id": 0,
+                        "type": "CLAIM",
+                        "reveal_role": ai_claim_role,
+                        "target_id": -1,
+                        "assertion": "NONE"
+                    }
+                    structured_claims.append(ai_claim)
+                    self.players[0].claimed_target = -1
+                    self.players[0].claimed_role = ai_claim_role
+                    self._log(f"  - [AI 주장] AI(0)이(가) 자신이 {role_name}이라고 밝혔습니다.")
+            elif ai_action != -1 and 0 <= ai_action < len(self.players):
+                # 역할 주장 없이 단순 지목
                 ai_claim = {
                     "speaker_id": 0,
                     "type": "CLAIM",
@@ -100,9 +137,10 @@ class MafiaGame:
                 }
                 structured_claims.append(ai_claim)
                 self.players[0].claimed_target = ai_action
-                self.players[0].claimed_role = -1  # AI는 역할 주장 안함 (단순화)
+                self.players[0].claimed_role = -1
                 self._log(f"  - AI(0)이(가) {ai_action}을(를) 지목했습니다.")
             else:
+                # 침묵
                 self.players[0].claimed_target = -1
                 self.players[0].claimed_role = -1
                 self._log(f"  - AI(0)이(가) 아무 주장도 하지 않았습니다.")
