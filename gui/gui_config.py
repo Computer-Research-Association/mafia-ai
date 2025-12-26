@@ -23,7 +23,8 @@ def configure_fonts():
 
 
 # 2. 경로 설정
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))  # mafia-ai/gui
+BASE_DIR = os.path.dirname(CURRENT_DIR)  # mafia-ai/
 LOG_DIR = os.path.join(BASE_DIR, "logs")
 LOG_FILE_NAME = "mafia_game_log.txt"
 LOG_FILE_PATH = os.path.join(LOG_DIR, LOG_FILE_NAME)

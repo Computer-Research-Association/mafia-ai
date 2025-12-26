@@ -4,10 +4,10 @@ from tkinter import ttk
 import matplotlib.pyplot as plt
 
 # 모듈 임포트
-from gui_config import configure_fonts, LOG_FILE_PATH
-from tabs.team_stats import TeamStatsTab
-from tabs.ai_stats import AIStatsTab
-from tabs.replay import ReplayTab
+from .gui_config import configure_fonts, LOG_FILE_PATH
+from .tabs.team_stats import TeamStatsTab
+from .tabs.ai_stats import AIStatsTab
+from .tabs.replay import ReplayTab
 
 
 class MafiaLogViewerApp:
