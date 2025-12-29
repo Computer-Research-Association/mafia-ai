@@ -1,5 +1,5 @@
 """
-Character module - now simplified to use only RationalCharacter
+Character module
 """
 
 import config
