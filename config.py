@@ -7,6 +7,7 @@ ROLE_MAFIA = 3
 # 게임 단계 (PHASE_DAY_CLAIM removed - merged with PHASE_DAY_DISCUSSION)
 PHASE_DAY_DISCUSSION = "day_discussion"  # 낮: 토론 및 주장 단계
 PHASE_DAY_VOTE = "day_vote"  # 낮: 투표 단계
+PHASE_DAY_EXECUTE = "day_execute"  # 낮: 처형 단계
 PHASE_NIGHT = "night"  # 밤: 행동 단계
 
 # 게임 설정

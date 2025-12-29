@@ -41,11 +41,13 @@ class LLMAgent(BaseAgent):
         phase = game_status.get("phase")
 
         # 1. 상황별 핸들러 호출
-        if phase == 0:  # PHASE_DAY_DISCUSSION (config.PHASE_DAY_DISCUSSION)
+        if phase == config.PHASE_DAY_DISCUSSION:
             return self._handle_discussion(game_status, conversation_log)
-        elif phase == 1:  # PHASE_DAY_VOTE (config.PHASE_DAY_VOTE)
+        elif phase == config.PHASE_DAY_VOTE:
             return self._handle_vote(game_status, conversation_log)
-        elif phase == 2:  # PHASE_NIGHT (config.PHASE_NIGHT)
+        elif phase == config.PHASE_DAY_EXECUTE:
+            return self._handle_final_vote(game_status, conversation_log)
+        elif phase == config.PHASE_NIGHT:
             return self._handle_night(game_status, conversation_log)
 
         return json.dumps({"error": "Unknown phase"})
@@ -55,7 +57,6 @@ class LLMAgent(BaseAgent):
     def _handle_discussion(self, game_status: Dict, conversation_log: str) -> str:
         """낮 토론: 신념 업데이트 + 전략 수립 + 대사 생성"""
         input_data = self._prepare_input_data(game_status, conversation_log)
-
         prompt = f"""
         ### SYSTEM ROLE
         당신은 냉철한 마피아 게임 전략가입니다. 현재 단계는 [낮 토론]입니다.
@@ -75,14 +76,42 @@ class LLMAgent(BaseAgent):
         - 마피아 팀: 무고한 시민을 몰아가거나 동료를 방어하는 기만 전략 사용.
         - Speech: 실제 채팅처럼 자연스러운 한국어로 작성하십시오. (예: "3번님, 아까 말씀이 좀 이상하신데요?")
 
+        ### Task 3:
+        상황이 명확하지 않을 때 토론을 자제할 확률을 조절하기 위해
+        침묵 지수(silence_bias)를 0에서 100 사이의 실수로 설정하십시오.
+        설정한 침묵 지수만큼 발언을 자제할 확률이 증가합니다.
+        침묵할 경우에 silence 필드를 true로 설정하십시오.
+
+        ### Task 4:
+        토론을 계속 진행할지(Proceed) 아니면 종료할지(End) 결정하십시오.
+        - 토론 종료 시점 : 모든 사람이 침묵하였을 때에 discussion_status를 "End"로 설정하십시오.
+
+        ### Task 5: 
+        토론에서는 3가지 주장만 가능 (본인의 직업, 타인의 직업, 침묵)
+        - 본인의 직업 주장 시 : 본인은 시민(0)/경찰(1)/의사(2)라고 주장 및 role 필드에 주장한 직업 기록
+        - 타인의 직업 주장 시 : 특정 플레이어가 경찰(1)/의사(2)/마피아(3)/라고 주장 
+          및 target_id 필드에 대상 id 기록 및 role 필드에 주장한 직업 기록
+        - 침묵 시 : 아무 말도 하지 않음
+        - 각 주장한 것을 claim 필드에 기록 (본인의 직업: 0, 타인의 직업: 1, 침묵: 2)
+
         ### OUTPUT FORMAT (JSON)
         {{
+            "belief_updates": [{{
+                "player_id": int,
+                "role": "CITIZEN" or "POLICE" or "DOCTOR" or "MAFIA",
+                "delta": int (-100 to 100)
+            }}],
             "action_strategy": {{
                 "biases": [float, float, float, float, float, float, float, float],
                 "silence_bias": float,
                 "strategy_note": "전략 요약"
             }},
-            "speech": "실제 내뱉을 한국어 문장"
+            "speech": "실제 내뱉을 한국어 문장",
+            "discussion_status": "Proceed" or "End",
+            "silence" : bool,
+            "claim": int,
+            "target_id": Optional[int],
+            "role": Optional[int],
         }}
         """
         response_json = self._call_llm(prompt)
@@ -100,11 +129,32 @@ class LLMAgent(BaseAgent):
 
         가장 마피아로 의심되는 생존자 1명을 선택하십시오. 
         만약 본인이 마피아라면, 팀의 승리를 위해 무고한 시민을 타겟팅하십시오.
+        상황이 확실 시 않은 경우에는 투표를 기권할 수 있습니다 (target_id에 -1).
 
         ### OUTPUT FORMAT (JSON)
         {{
             "target_id": int,
             "reason": "해당 플레이어를 투표한 결정적 이유"
+        }}
+        """
+        return self._call_llm(prompt)
+
+    def _handle_final_vote(self, game_status: Dict, conversation_log: str) -> str:
+        """사형 찬반 투표: 최종 결정 내리기"""
+        input_data = self._prepare_input_data(game_status, conversation_log)
+        input_data["excute_target"] = game_status.get("execution_target")
+
+        prompt = f"""
+        ### TASK: DAY VOTE
+        토론이 종료되었습니다. 당신은 [{input_data['my_role_name']}]로서 현재 {game_status.get("execution_target")}을 죽일지 살릴지 선택해야 합니다.
+        [GAME STATE]: {input_data}
+
+        신뢰도를 기반으로 
+        처형에 찬성하면 1, 반대하면 -1, 기권하면 0을 선택하여 주세요.
+
+        ### OUTPUT FORMAT (JSON)
+        {{
+            agree_execution: int,
         }}
         """
         return self._call_llm(prompt)
@@ -124,18 +174,28 @@ class LLMAgent(BaseAgent):
         - 경찰: 마피아 의심자 조사. (중복 조사 금지)
         - 의사: 공격받을 것 같은 인물(본인 포함) 보호.
 
+        ### 신뢰도 기반 행동 결정
+        각 플레이어에 대한 신뢰도 점수를 분석하여 최적의 행동 대상을 선택하십시오.
+        경찰의 조사 대상이나 의사의 보호 대상도 신뢰도에 기반하여 결정하십시오.
+        경찰의 조사 결과를 바탕으로 신념 행렬을 업데이트하는 것도 잊지 마십시오.
+
         ### OUTPUT FORMAT (JSON)
         {{
+            "belief_updates": [{{
+                "player_id": int,
+                "role": "CITIZEN" or "POLICE" or "DOCTOR" or "MAFIA",
+                "delta": int (-100 to 100)
+            }}],
             "target_id": int,
-            "reasoning": "선택 근거",
-            "confidence": int (0-100)
         }}
         """
+        response_json = self._call_llm(prompt)
+        self._apply_belief_updates(response_json)
         return self._call_llm(prompt)
 
     # --- 유틸리티 및 헬퍼 메서드 ---
 
-    def _prepare_input_data(self, game_status: Dict, conversation_log: str) -> Dict:
+    def _prepare_input_data(self, game_status: Dict, conversation_log) -> Dict:
         """프롬프트에 주입할 공통 데이터 구조 생성"""
         return {
             "my_id": self.id,
@@ -146,7 +206,9 @@ class LLMAgent(BaseAgent):
             "last_night_kill": game_status.get("last_night_kill"),
             "mafia_team": game_status.get("mafia_team_members"),
             "police_results": game_status.get("police_investigation_results"),
-            "discussion_history": conversation_log,
+            "doctor_protections": game_status.get("doctor_protection_results"),
+            "belief_matrix": self.belief.tolist(),
+            "conversation_history": conversation_log,
         }
 
     def _call_llm(self, prompt: str) -> str:

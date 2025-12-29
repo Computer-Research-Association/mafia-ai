@@ -4,6 +4,7 @@ import threading
 import tkinter as tk
 
 from core.env import MafiaEnv
+from core.game import MafiaGame  # LLM 에이전트용 MafiaGame 직접 임포트
 from ai.ppo import PPO
 from ai.reinforce import REINFORCEAgent
 from core.runner import train, test
@@ -27,32 +28,46 @@ def run_simulation(args):
     os.makedirs(log_dir, exist_ok=True)
     log_file_path = os.path.join(log_dir, "mafia_game_log.txt")
 
-    print(f"[{args.mode.upper()}] Simulation started with {args.agent} agent.")
+    print(f"Simulation started with {args.agent} agent.")
 
     # 1. 게임 실행 및 로그 기록
     with open(log_file_path, "w", encoding="utf-8") as f:
-        # 환경 및 에이전트 초기화
-        env = MafiaEnv(log_file=f)
-        state_dim = env.observation_space["observation"].shape[0]
-        action_dim = env.action_space.n
+        # LLM 에이전트 모드
+        if args.agent == "llm":
+            print("Running LLM-only simulation.")
+            game = MafiaGame(log_file=f)
+            game.reset()
+            done = False
+            while not done:
+                # LLM 에이전트는 내부적으로 스스로 행동을 결정하므로,
+                # process_turn에 전달하는 action은 의미 없음 (-1 전달)
+                status, done, win = game.process_turn(action=-1)
+            print("\nLLM simulation finished. Winner determined by game log.")
 
-        if args.agent == "ppo":
-            agent = PPO(state_dim, action_dim)
-        elif args.agent == "reinforce":
-            agent = REINFORCEAgent(state_dim, action_dim)
+        # PPO 또는 REINFORCE 에이전트 모드
+        else:
+            print(f"[{args.mode.upper()}] mode for {args.agent.upper()} agent.")
+            # 환경 및 에이전트 초기화
+            env = MafiaEnv(log_file=f)
+            state_dim = env.observation_space["observation"].shape[0]
+            action_dim = env.action_space.n
 
-        # 모드별 실행
-        if args.mode == "train":
-            train(env, agent, args, f)
-        elif args.mode == "test":
-            test(env, agent, args)
+            if args.agent == "ppo":
+                agent = PPO(state_dim, action_dim)
+            elif args.agent == "reinforce":
+                agent = REINFORCEAgent(state_dim, action_dim)
 
-    # 2. 학습 종료 후 로그 정밀 분석 실행
-    if args.mode == "train":
+            # 모드별 실행
+            if args.mode == "train":
+                train(env, agent, args, f)
+            elif args.mode == "test":
+                test(env, agent, args)
+
+    # 2. 학습 종료 후 로그 정밀 분석 실행 (train 모드였을 경우)
+    if args.agent != "llm" and args.mode == "train":
         print("\n" + "=" * 30)
         print(" Start Post-Training Analysis")
         print("=" * 30)
-        # analyze_log_file 함수가 메인 스레드 UI와 충돌하지 않도록 주의
         try:
             analyze_log_file(log_file_path, output_img="analysis_detailed.png")
         except Exception as e:
@@ -68,13 +83,13 @@ def main():
         type=str,
         default="train",
         choices=["train", "test"],
-        help="Execution mode",
+        help="Execution mode (ignored for 'llm' agent)",
     )
     parser.add_argument(
         "--agent",
         type=str,
         default="ppo",
-        choices=["ppo", "reinforce"],
+        choices=["ppo", "reinforce", "llm"],  # llm 옵션 추가
         help="Agent type",
     )
     parser.add_argument(

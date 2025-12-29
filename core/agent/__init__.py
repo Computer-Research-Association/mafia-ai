@@ -1,16 +1,16 @@
 """
 Character module - now simplified to use only RationalCharacter
 """
+
 import config
-from core.characters.base import BaseCharacter
-from core.characters.rational import RationalCharacter
+from core.agent.baseAgent import BaseAgent
+from core.agent.llmAgent import LLMAgent
 
 
-def create_player(char_id: int, player_id: int) -> BaseCharacter:
+def create_player(char_id: int, player_id: int) -> BaseAgent:
     """
     Create a rational player (personality-based agents removed).
     char_id parameter is kept for backward compatibility but ignored.
     """
     # All players now use RationalCharacter
-    return RationalCharacter(player_id)
-
+    return LLMAgent(player_id)
