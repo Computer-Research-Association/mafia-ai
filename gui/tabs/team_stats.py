@@ -89,20 +89,52 @@ class TeamStatsTab:
         self.lbl_avg_days.config(text=f"평균 진행: {avg:.1f}일")
 
     def _draw_chart(self, team_wins):
-        if sum(team_wins.values()) == 0:
+        total_games = sum(team_wins.values())
+        if total_games == 0:
             ttk.Label(self.chart_frame, text="승리 데이터가 충분하지 않습니다.").pack()
             return
 
+        # 캔버스 생성
         fig, ax = plt.subplots(figsize=(6, 4), dpi=100)
-        ax.pie(
-            [team_wins["CITIZEN"], team_wins["MAFIA"]],
-            labels=["CITIZEN", "MAFIA"],
+
+        # 데이터 준비
+        sizes = [team_wins["CITIZEN"], team_wins["MAFIA"]]
+        labels = ["CITIZEN", "MAFIA"]
+        colors = ["#8AB4F8", "#174EA6"]
+
+        # [변경점] 도넛 차트 그리기
+        # wedgeprops: 도넛의 두께(width)와 테두리 색상(edgecolor) 설정
+        wedges, texts, autotexts = ax.pie(
+            sizes,
+            labels=labels,
             autopct="%1.1f%%",
             startangle=90,
-            colors=["#99ff99", "#ff9999"],
+            colors=colors,
             textprops={"fontsize": 12, "weight": "bold"},
+            wedgeprops={"width": 0.4, "edgecolor": "white"},  # 가운데 구멍 뚫기
+            pctdistance=0.85,  # % 표시 위치를 도넛 안쪽으로 조정
         )
-        ax.set_title("팀별 승리 점유율")
+
+        # [변경점] 도넛 차트 가운데에 총 게임 수 표시
+        ax.text(
+            0,
+            0,
+            f"Total\n{total_games}",
+            ha="center",
+            va="center",
+            fontsize=14,
+            fontweight="bold",
+            color="#333333",
+        )
+
+        ax.set_title(
+            "팀별 승리 점유율",
+            fontdict={
+                "fontsize": 14,
+                "fontweight": "bold",
+                "fontname": "Malgun Gothic",  # Tkinter 라벨과 동일한 폰트
+            },
+        )
 
         canvas = FigureCanvasTkAgg(fig, master=self.chart_frame)
         canvas.draw()
