@@ -6,7 +6,7 @@ from openai import OpenAI
 from dotenv import load_dotenv
 
 # 프로젝트 구조에 따라 import 경로는 수정이 필요할 수 있습니다.
-from core.agent.base import BaseAgent
+from core.agent.baseAgent import BaseAgent
 import config
 
 load_dotenv()
