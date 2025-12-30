@@ -60,34 +60,29 @@ class LLMAgent(BaseAgent):
         input_data = self._prepare_input_data(game_status, conversation_log)
 
         prompt = f"""
-### ROLE: 마피아 게임 전략가 (단계: 낮 토론)
-당신은 Player {self.id}이며, 실제 직업은 [{input_data['my_role_name']}]입니다.
+### 페르소나 (절대 빙의)
+- **플레이어 ID**: {self.id}
+- **부여된 역할**: [{input_data.get('my_role_name')}]
+- **지시**: 당신은 오직 이 역할에 입각해서만 생각하고, 발언하고, 행동해야 합니다. 다른 사람의 역할을 흉내내거나 추측해서 말하지 마십시오.
+
+### 핵심 지침
+1. **독립적 사고**: 다른 플레이어의 주장을 맹목적으로 따라하지 마십시오. `conversation_history`는 참고 자료일 뿐, `belief_matrix_summary`와 게임의 객관적 사실에 근거하여 스스로 판단해야 합니다.
+2. **신념 업데이트**: `GAME STATE`를 분석하여 각 플레이어가 마피아일 확률(신념)의 변화량($\Delta$)을 -100에서 100 사이로 계산합니다.
+3. **전략적 발언**: 계산된 신념을 바탕으로, 이번 토론에서 어떤 주장을 할지 결정합니다. (자신을 변호, 타인을 공격, 혹은 침묵)
 
 ### [GAME STATE]
-{input_data}
+{json.dumps(input_data, indent=2, ensure_ascii=False)}
 
-### INSTRUCTIONS
-1. **Belief Update**: 타인의 마피아 확률 변화량($\Delta$)을 -100~100 사이로 계산.
-2. **Strategy**: $L_i = S_{{belief, i}} + Bias_i$ 기반으로 타겟 편향($Bias$) 설정.
-3. **Claiming Logic (절대 준수)**: 
-   - **내가 누구인지 밝힐 때**: "claim": 0, "target_id": {self.id}, "role": (주장할 직업 번호)
-   - **남을 지목할 때 (예: "3번이 마피아다")**: "claim": 1, "target_id": (대상 ID), "role": (그 사람의 예상 직업 번호)
-   - **일반적인 대화/침묵**: "claim": 2, "target_id": null, "role": null
-4. **직업 번호**: 0:시민, 1:경찰, 2:의사, 3:마피아
-
-### OUTPUT FORMAT (Strict JSON)
+### 출력 포맷 (반드시 JSON 형식 준수)
 {{
-    "belief_updates": [{{"player_id": int, "role": "CITIZEN"|"POLICE"|"DOCTOR"|"MAFIA", "delta": int}}],
+    "belief_updates": [{{"player_id": int, "role": "MAFIA", "delta": int}}],
     "action_strategy": {{
-        "biases": [8 floats],
-        "silence_bias": float(0-100),
-        "strategy_note": "STR"
+        "biases": [float], "silence_bias": float, "strategy_note": "전략 요약"
     }},
-    "discussion_status": "Proceed/End",
-    "silence": bool,
-    "claim": 0|1|2,
-    "target_id": int|null,
-    "role": 0|1|2|3|null
+    "claim": int (0: 내 직업 주장, 1: 남의 직업 주장, 2: 침묵/기타 발언),
+    "target_id": int or null,
+    "role": int or null (주장하는 직업 번호: 0:시민, 1:경찰, 2:의사, 3:마피아),
+    "reason": "왜 그렇게 주장했는지에 대한 논리적 근거"
 }}
 """
         response_json = self._call_llm(prompt)
@@ -118,9 +113,18 @@ class LLMAgent(BaseAgent):
         target = game_status.get("execution_target")
 
         prompt = f"""
-### TASK: FINAL VOTE
-플레이어 {target}의 처형 찬반을 결정하십시오.
-당신의 역할: {input_data['my_role_name']}
+### TASK: FINAL VOTE (찬반 투표)
+당신은 [{input_data.get('my_role_name')}]입니다.
+토론과 1차 투표 결과, 플레이어 {target}이(가) 최다 득표를 하여 처형 후보가 되었습니다.
+이제 플레이어 {target}의 처형에 대한 찬반을 최종 결정하십시오.
+
+### [FULL GAME STATE]
+{json.dumps(input_data, indent=2, ensure_ascii=False)}
+
+### INSTRUCTIONS
+- 제공된 게임 상태와 당신의 신념 매트릭스를 종합하여 합리적인 결정을 내리십시오.
+- 당신이 이전에 그를 마피아라고 의심하여 투표했다면, 일관성 있게 찬성표를 던지는 것이 논리적입니다.
+- 만약 그가 당신의 팀원(예: 같은 마피아)이거나, 무고한 시민이라는 확신이 있다면 반대하십시오.
 
 ### [OUTPUT FORMAT (JSON)]
 {{
@@ -134,16 +138,23 @@ class LLMAgent(BaseAgent):
         input_data = self._prepare_input_data(game_status, conversation_log)
 
         prompt = f"""
-### TASK: NIGHT ACTION
-당신의 역할 [{input_data['my_role_name']}]에 따라 행동하십시오.
-- 마피아: 시민 제거, 경찰: 마피아 조사, 의사: 보호
+### TASK: NIGHT ACTION (밤 행동)
+- **당신의 역할**: [{input_data.get('my_role_name')}]
+- **당신의 ID**: {self.id}
+
+### [GAME STATE]
+{json.dumps(input_data, indent=2, ensure_ascii=False)}
+
+### INSTRUCTIONS
+1.  **당신의 역할에 맞는 행동을 수행하십시오.**
+    -   **마피아**: `alive_players` 목록에 있는 플레이어 중에서만 제거할 대상을 선택하십시오. 죽은 사람은 선택할 수 없습니다. 당신의 팀원도 선택하지 마십시오.
+    -   **경찰**: `alive_players` 목록에 있는 플레이어 중에서만 조사할 대상을 선택하십시오.
+    -   **의사**: `alive_players` 목록에 있는 플레이어 중에서만 보호할 대상을 선택하십시오. (자신 포함 가능)
+2.  **선택한 대상의 ID를 `target_id`에 명시하십시오.**
 
 ### [OUTPUT FORMAT (JSON)]
 {{
-    "belief_updates": [
-        {{"player_id": int, "role": "MAFIA"|"CITIZEN"|"POLICE"|"DOCTOR", "delta": int}}
-    ],
-    "target_id": int(0-7)
+    "target_id": int
 }}
 """
         response_json = self._call_llm(prompt)
@@ -154,16 +165,22 @@ class LLMAgent(BaseAgent):
 
     def _prepare_input_data(self, game_status: Dict, conversation_log: str) -> Dict:
         """프롬프트 주입용 데이터 가공"""
-        return {
+        base_data = {
             "my_id": self.id,
-            "my_role_name": self._get_role_name(self.role),
+            "my_role_name": self.inv_role_map.get(game_status.get("my_role")),
             "current_day": game_status.get("day", 1),
+            "current_phase": game_status.get("phase"),
             "alive_players": game_status.get("alive_status", []),
             "last_execution_result": game_status.get("last_execution_result"),
             "last_night_result": game_status.get("last_night_result"),
+            "mafia_members": game_status.get("mafia_team_members"),
+            "police_investigations": game_status.get("police_investigation_results"),
+            "vote_history": game_status.get("vote_records", []),
             "conversation_history": conversation_log,
             "belief_matrix_summary": self.belief.tolist(),
         }
+        # Filter out keys where the value is None to prevent information leakage
+        return {k: v for k, v in base_data.items() if v is not None}
 
     def _call_llm(self, prompt: str) -> str:
         """Upstage API 호출 및 예외 처리"""
@@ -173,7 +190,7 @@ class LLMAgent(BaseAgent):
                 messages=[
                     {
                         "role": "system",
-                        "content": "당신은 냉철한 마피아 게임 전략가입니다. 반드시 JSON으로만 답변하십시오.",
+                        "content": "당신은 마피아 게임을 하는 AI 플레이어입니다. 당신의 역할과 생각은 프롬프트에 주어집니다. 반드시 당신에게 주어진 역할에 입각해서만 추론하고 JSON 형식으로만 답변해야 합니다. 다른 사람의 역할을 흉내내지 마십시오.",
                     },
                     {"role": "user", "content": prompt},
                 ],
@@ -205,7 +222,3 @@ class LLMAgent(BaseAgent):
                     )
         except Exception:
             pass
-
-    def _get_role_name(self, role_int: int) -> str:
-        mapping = {0: "시민", 1: "경찰", 2: "의사", 3: "마피아"}
-        return mapping.get(role_int, "알 수 없음")
