@@ -3,6 +3,7 @@ from typing import List
 import numpy as np
 import random
 from config import config, Role
+from state import GameStatus, GameEvent
 
 
 # Softmax 유틸리티 함수
@@ -23,6 +24,8 @@ class BaseAgent(ABC):
         self.id = player_id
         self.role = role
         self.alive = True
+        self.current_status: GameStatus = None
+        
         self.claimed_target = -1
         self.claimed_role = -1  # 주장한 역할 (-1: 주장 없음, 0~3: 역할)
 
@@ -41,10 +44,17 @@ class BaseAgent(ABC):
         self.should_reveal = False  # 경찰이 공개할지 여부
         self.char_name = self.__class__.__name__
 
+    def observe(self, status: GameStatus):
+        """정보를 수신하는 유일한 입구"""
+        self.current_status = status
+        self.update_belief(status.action_history)
+
     @abstractmethod
-    def update_belief(self, game_status: dict):
+    def update_belief(self, history: List[GameEvent]):
+        """객관적 사실(Fact) 반영"""
         pass
 
     @abstractmethod
-    def get_action(self, players: List["BaseAgent"], current_role: int):
+    def get_action(self, conversation_log: str) -> str:
+        """주관적 추론(Hunch) 및 결정"""
         pass

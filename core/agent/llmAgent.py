@@ -5,16 +5,15 @@ from typing import List, Dict, Optional
 from openai import OpenAI
 from dotenv import load_dotenv
 
-# 프로젝트 구조에 따라 import 경로는 수정이 필요할 수 있습니다.
 from core.agent.baseAgent import BaseAgent
-from config import config, Role, Phase
+from config import config, Role, Phase, EventType
+from state import GameStatus, GameEvent
 
 load_dotenv()
 
 
 class LLMAgent(BaseAgent):
     def __init__(self, player_id: int, role: Role = Role.CITIZEN):
-        # 부모 클래스(BaseAgent) 초기화: self.id, self.role, self.belief(N x 4 행렬) 생성
         super().__init__(player_id, role)
 
         # API 설정
@@ -24,45 +23,59 @@ class LLMAgent(BaseAgent):
         )
         self.model = "solar-mini"
 
-        # 내부 역할 매핑 표준화 (신념 행렬 인덱스와 일치시킴)
-        # 0: CITIZEN, 1: POLICE, 2: DOCTOR, 3: MAFIA
-        self.role_map = {"CITIZEN": Role.CITIZEN, "POLICE": Role.POLICE, "DOCTOR": Role.DOCTOR, "MAFIA": Role.MAFIA}
-        self.inv_role_map = {v: k for k, v in self.role_map.items()}
+    def update_belief(self, history: List[GameEvent]):
+        """객관적 사실(Fact) 반영"""
+        for event in history:
+            if event.event_type == EventType.EXECUTE:
+                # 처형된 플레이어는 확실히 죽음 (이미 alive status에 반영되지만, 신념에도 반영 가능)
+                pass
+            elif event.event_type == EventType.POLICE_RESULT:
+                # 경찰 조사 결과 (내가 경찰일 때만 의미 있음, 혹은 공개된 경우)
+                # GameStatus에서 이미 필터링되어 들어오므로, 여기 있는 정보는 믿을 수 있음
+                target_id = event.target_id
+                role_found = event.value # Role Enum or int
+                if target_id is not None and role_found is not None:
+                    # role_found가 Role Enum인지 int인지 확인 필요. 
+                    # GameEvent value는 Any이므로 안전하게 처리
+                    try:
+                        role_idx = int(role_found)
+                        self.belief[target_id, role_idx] = 100.0
+                        # 다른 역할일 확률은 0으로
+                        for r in Role:
+                            if r != role_idx:
+                                self.belief[target_id, r] = -100.0
+                    except:
+                        pass
 
-    def update_belief(self, game_status: Dict):
-        """
-        BaseAgent의 추상 메서드 구현.
-        게임 엔진에서 확정된 정보(사망자 등)가 있을 때 수치적으로 기본 업데이트를 수행합니다.
-        """
-        pass
+    def get_action(self, conversation_log: str) -> str:
+        """주관적 추론(Hunch) 및 결정"""
+        if not self.current_status:
+            return json.dumps({"error": "No game status observed"})
 
-    def get_action(self, game_status: Dict, conversation_log: str) -> str:
-        """
-        [핵심 함수] Phase별로 분기하여 적절한 프롬프트를 실행하고 결과를 반환합니다.
-        """
-        phase = game_status.get("phase")
+        phase = self.current_status.phase
 
         if phase == Phase.DAY_DISCUSSION:
-            return self._handle_discussion(game_status, conversation_log)
+            return self._handle_discussion(conversation_log)
         elif phase == Phase.DAY_VOTE:
-            return self._handle_vote(game_status, conversation_log)
+            return self._handle_vote(conversation_log)
         elif phase == Phase.DAY_EXECUTE:
-            return self._handle_final_vote(game_status, conversation_log)
+            return self._handle_final_vote(conversation_log)
         elif phase == Phase.NIGHT:
-            return self._handle_night(game_status, conversation_log)
+            return self._handle_night(conversation_log)
 
         return json.dumps({"error": f"Unknown phase: {phase}"})
 
     # --- 내부 핸들러 메서드 ---
 
-    def _handle_discussion(self, game_status: Dict, conversation_log: str) -> str:
+    def _handle_discussion(self, conversation_log: str) -> str:
         """낮 토론: 신념 분석 -> 전략 수립 -> 대사 생성"""
-        input_data = self._prepare_input_data(game_status, conversation_log)
-
+        # Pydantic 모델을 dict로 변환하여 프롬프트에 주입
+        status_json = self.current_status.model_dump_json(exclude_none=True)
+        
         prompt = f"""
 ### 당신의 페르소나
 - 당신의 ID: {self.id}
-- 당신의 실제 역할: [{input_data.get('my_role_name')}]
+- 당신의 실제 역할: [{self.role.name}]
 - **절대 원칙**: 당신은 자신의 팀(시민 혹은 마피아)의 승리를 위해 행동해야 합니다. 스스로를 마피아라고 주장하거나 동료를 투표하는 것은 금지됩니다.
 
 ### 논리적 사고 단계
@@ -71,11 +84,17 @@ class LLMAgent(BaseAgent):
 3. **결정**: 어떤 주장을 할 것인가?
 
 ### [GAME STATE]
-{json.dumps(input_data, indent=2, ensure_ascii=False)}
+{status_json}
+
+### [CONVERSATION LOG]
+{conversation_log}
+
+### [BELIEF MATRIX SUMMARY]
+{self.belief.tolist()}
 
 ### 출력 포맷 (반드시 JSON 형식 준수)
 {{
-    "belief_updates": [{{"player_id": int, "role": "MAFIA", "delta": int}}],
+    "belief_updates": [{{"player_id": int, "role": "MAFIA"|"POLICE"|"DOCTOR"|"CITIZEN", "delta": int}}],
     "action_strategy": {{
         "biases": [float], "silence_bias": float, "strategy_note": "전략 요약"
     }},
@@ -87,17 +106,18 @@ class LLMAgent(BaseAgent):
 }}
 """
         response_json = self._call_llm(prompt)
-        self._apply_belief_updates(response_json)
+        self._apply_llm_belief_updates(response_json)
         return response_json
 
-    def _handle_vote(self, game_status: Dict, conversation_log: str) -> str:
+    def _handle_vote(self, conversation_log: str) -> str:
         """낮 투표: 최적의 처형 대상 선정"""
-        input_data = self._prepare_input_data(game_status, conversation_log)
+        status_json = self.current_status.model_dump_json(exclude_none=True)
 
         prompt = f"""
 ### TASK: DAY VOTE
-당신은 [{input_data['my_role_name']}]입니다. 오늘 누구를 처형할지 결정하십시오.
-[상태]: {input_data}
+당신은 [{self.role.name}]입니다. 오늘 누구를 처형할지 결정하십시오.
+[상태]: {status_json}
+[대화]: {conversation_log}
 -1은 기권을 의미합니다.
 
 ### [OUTPUT FORMAT (JSON)]
@@ -108,19 +128,20 @@ class LLMAgent(BaseAgent):
 """
         return self._call_llm(prompt)
 
-    def _handle_final_vote(self, game_status: Dict, conversation_log: str) -> str:
+    def _handle_final_vote(self, conversation_log: str) -> str:
         """사형 찬반 투표"""
-        input_data = self._prepare_input_data(game_status, conversation_log)
-        target = game_status.get("execution_target")
-
+        status_json = self.current_status.model_dump_json(exclude_none=True)
+        # execution_target 정보는 conversation_log나 status 어딘가에 있어야 함.
+        # 현재 GameStatus 구조상 action_history 등을 통해 유추하거나 별도 필드가 필요할 수 있음.
+        # 여기서는 status에 포함되어 있다고 가정하거나, conversation_log를 통해 판단.
+        
         prompt = f"""
 ### TASK: FINAL VOTE (찬반 투표)
-당신은 [{input_data.get('my_role_name')}]입니다.
-토론과 1차 투표 결과, 플레이어 {target}이(가) 최다 득표를 하여 처형 후보가 되었습니다.
-이제 플레이어 {target}의 처형에 대한 찬반을 최종 결정하십시오.
+당신은 [{self.role.name}]입니다.
+처형 후보에 대한 찬반을 최종 결정하십시오.
 
 ### [FULL GAME STATE]
-{json.dumps(input_data, indent=2, ensure_ascii=False)}
+{status_json}
 
 ### INSTRUCTIONS
 - 제공된 게임 상태와 당신의 신념 매트릭스를 종합하여 합리적인 결정을 내리십시오.
@@ -134,23 +155,23 @@ class LLMAgent(BaseAgent):
 """
         return self._call_llm(prompt)
 
-    def _handle_night(self, game_status: Dict, conversation_log: str) -> str:
+    def _handle_night(self, conversation_log: str) -> str:
         """밤 행동: 특수 능력 수행"""
-        input_data = self._prepare_input_data(game_status, conversation_log)
+        status_json = self.current_status.model_dump_json(exclude_none=True)
 
         prompt = f"""
 ### TASK: NIGHT ACTION (밤 행동)
-- **당신의 역할**: [{input_data.get('my_role_name')}]
+- **당신의 역할**: [{self.role.name}]
 - **당신의 ID**: {self.id}
 
 ### [GAME STATE]
-{json.dumps(input_data, indent=2, ensure_ascii=False)}
+{status_json}
 
 ### INSTRUCTIONS
 1.  **당신의 역할에 맞는 행동을 수행하십시오.**
-    -   **마피아**: `alive_players` 목록에 있는 플레이어 중에서만 제거할 대상을 선택하십시오. 죽은 사람은 선택할 수 없습니다. 당신의 팀원도 선택하지 마십시오.
-    -   **경찰**: `alive_players` 목록에 있는 플레이어 중에서만 조사할 대상을 선택하십시오.
-    -   **의사**: `alive_players` 목록에 있는 플레이어 중에서만 보호할 대상을 선택하십시오. (자신 포함 가능)
+    -   **마피아**: `players` 목록 중 살아있는 플레이어(is_alive=True) 중에서만 제거할 대상을 선택하십시오. 당신의 팀원도 선택하지 마십시오.
+    -   **경찰**: 살아있는 플레이어 중에서만 조사할 대상을 선택하십시오.
+    -   **의사**: 살아있는 플레이어 중에서만 보호할 대상을 선택하십시오. (자신 포함 가능)
 2.  **선택한 대상의 ID를 `target_id`에 명시하십시오.**
 
 ### [OUTPUT FORMAT (JSON)]
@@ -159,29 +180,8 @@ class LLMAgent(BaseAgent):
 }}
 """
         response_json = self._call_llm(prompt)
-        self._apply_belief_updates(response_json)
+        # 밤 행동에 대한 추론 결과도 신념에 반영할 수 있다면 여기서 처리
         return response_json
-
-    # --- 유틸리티 및 헬퍼 메서드 ---
-
-    def _prepare_input_data(self, game_status: Dict, conversation_log: str) -> Dict:
-        """프롬프트 주입용 데이터 가공"""
-        base_data = {
-            "my_id": self.id,
-            "my_role_name": self.inv_role_map.get(game_status.get("my_role")),
-            "current_day": game_status.get("day", 1),
-            "current_phase": game_status.get("phase"),
-            "alive_players": game_status.get("alive_status", []),
-            "last_execution_result": game_status.get("last_execution_result"),
-            "last_night_result": game_status.get("last_night_result"),
-            "mafia_members": game_status.get("mafia_team_members"),
-            "police_investigations": game_status.get("police_investigation_results"),
-            "vote_history": game_status.get("vote_records", []),
-            "conversation_history": conversation_log,
-            "belief_matrix_summary": self.belief.tolist(),
-        }
-        # Filter out keys where the value is None to prevent information leakage
-        return {k: v for k, v in base_data.items() if v is not None}
 
     def _call_llm(self, prompt: str) -> str:
         """Upstage API 호출 및 예외 처리"""
@@ -198,28 +198,27 @@ class LLMAgent(BaseAgent):
                 response_format={"type": "json_object"},
                 temperature=0.7,
             )
-            print(response.choices[0].message.content, end="\n\n")
+            # print(response.choices[0].message.content, end="\n\n")
             return response.choices[0].message.content
         except Exception as e:
             return json.dumps({"error": str(e)})
 
-    def _apply_belief_updates(self, raw_json: str):
+    def _apply_llm_belief_updates(self, raw_json: str):
         """LLM 분석 결과를 신념 행렬에 반영"""
         try:
             data = json.loads(raw_json)
             updates = data.get("belief_updates", [])
             for up in updates:
                 p_id = up.get("player_id")
-                role_key = up.get("role")
+                role_str = up.get("role")
                 delta = up.get("delta", 0)
-                if (
-                    p_id is not None
-                    and 0 <= p_id < config.game.PLAYER_COUNT
-                    and role_key in self.role_map
-                ):
-                    col_idx = self.role_map[role_key]
-                    self.belief[p_id, col_idx] = np.clip(
-                        self.belief[p_id, col_idx] + delta, -100, 100
-                    )
+                
+                if p_id is not None and role_str in Role.__members__:
+                    role_enum = Role[role_str]
+                    col_idx = int(role_enum)
+                    if 0 <= p_id < config.game.PLAYER_COUNT:
+                        self.belief[p_id, col_idx] = np.clip(
+                            self.belief[p_id, col_idx] + delta, -100, 100
+                        )
         except Exception:
             pass

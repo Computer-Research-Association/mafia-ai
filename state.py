@@ -4,7 +4,8 @@ from config import Role, Phase, EventType
 
 class PlayerStatus(BaseModel):
     id: int
-    is_alive: bool
+    alive: bool
+    role: Role = Role.UNKNOWN
 
 class GameEvent(BaseModel):
     day: int
