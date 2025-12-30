@@ -2,7 +2,7 @@ from abc import *
 from typing import List
 import numpy as np
 import random
-import config
+from config import config, Role
 
 
 # Softmax 유틸리티 함수
@@ -19,7 +19,7 @@ def softmax(scores: np.ndarray, temperature: float = 1.0) -> np.ndarray:
 
 
 class BaseAgent(ABC):
-    def __init__(self, player_id: int, role: int = config.ROLE_CITIZEN):
+    def __init__(self, player_id: int, role: Role = Role.CITIZEN):
         self.id = player_id
         self.role = role
         self.alive = True
@@ -28,14 +28,14 @@ class BaseAgent(ABC):
 
         # Belief Matrix: (N x 4) - 각 플레이어가 각 직업일 것이라는 신뢰 점수
         # 열(Col): [0: 시민, 1: 경찰, 2: 의사, 3: 마피아]
-        self.belief = np.zeros((config.PLAYER_COUNT, 4), dtype=np.float32)
+        self.belief = np.zeros((config.game.PLAYER_COUNT, 4), dtype=np.float32)
 
         # 자신의 belief는 확실하게 설정
         self.belief[self.id, self.role] = 100.0
 
         # 게임 히스토리 추적
         self.voted_by_last_turn = []
-        self.vote_history = [0] * config.PLAYER_COUNT
+        self.vote_history = [0] * config.game.PLAYER_COUNT
         self.investigated_players = set()  # 경찰이 조사한 플레이어 추적
         self.confirmed_mafia = set()  # 경찰이 확인한 마피아
         self.should_reveal = False  # 경찰이 공개할지 여부

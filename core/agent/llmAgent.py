@@ -7,13 +7,13 @@ from dotenv import load_dotenv
 
 # 프로젝트 구조에 따라 import 경로는 수정이 필요할 수 있습니다.
 from core.agent.baseAgent import BaseAgent
-import config
+from config import config, Role, Phase
 
 load_dotenv()
 
 
 class LLMAgent(BaseAgent):
-    def __init__(self, player_id: int, role: int = config.ROLE_CITIZEN):
+    def __init__(self, player_id: int, role: Role = Role.CITIZEN):
         # 부모 클래스(BaseAgent) 초기화: self.id, self.role, self.belief(N x 4 행렬) 생성
         super().__init__(player_id, role)
 
@@ -26,7 +26,7 @@ class LLMAgent(BaseAgent):
 
         # 내부 역할 매핑 표준화 (신념 행렬 인덱스와 일치시킴)
         # 0: CITIZEN, 1: POLICE, 2: DOCTOR, 3: MAFIA
-        self.role_map = {"CITIZEN": 0, "POLICE": 1, "DOCTOR": 2, "MAFIA": 3}
+        self.role_map = {"CITIZEN": Role.CITIZEN, "POLICE": Role.POLICE, "DOCTOR": Role.DOCTOR, "MAFIA": Role.MAFIA}
         self.inv_role_map = {v: k for k, v in self.role_map.items()}
 
     def update_belief(self, game_status: Dict):
@@ -42,13 +42,13 @@ class LLMAgent(BaseAgent):
         """
         phase = game_status.get("phase")
 
-        if phase == config.PHASE_DAY_DISCUSSION:
+        if phase == Phase.DAY_DISCUSSION:
             return self._handle_discussion(game_status, conversation_log)
-        elif phase == config.PHASE_DAY_VOTE:
+        elif phase == Phase.DAY_VOTE:
             return self._handle_vote(game_status, conversation_log)
-        elif phase == config.PHASE_DAY_EXECUTE:
+        elif phase == Phase.DAY_EXECUTE:
             return self._handle_final_vote(game_status, conversation_log)
-        elif phase == config.PHASE_NIGHT:
+        elif phase == Phase.NIGHT:
             return self._handle_night(game_status, conversation_log)
 
         return json.dumps({"error": f"Unknown phase: {phase}"})
@@ -214,7 +214,7 @@ class LLMAgent(BaseAgent):
                 delta = up.get("delta", 0)
                 if (
                     p_id is not None
-                    and 0 <= p_id < config.PLAYER_COUNT
+                    and 0 <= p_id < config.game.PLAYER_COUNT
                     and role_key in self.role_map
                 ):
                     col_idx = self.role_map[role_key]

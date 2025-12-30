@@ -1,5 +1,5 @@
 from typing import List, Dict, Tuple, Optional
-import config
+from config import config, Role, Phase
 import random
 import json
 
@@ -12,7 +12,7 @@ class MafiaGame:
     def __init__(self, log_file=None):
         # players 리스트에는 RationalCharacter가 들어갑니다.
         self.players: List[LLMAgent] = []
-        self.phase = config.PHASE_DAY_DISCUSSION  # Start with discussion phase
+        self.phase = Phase.DAY_DISCUSSION  # Start with discussion phase
         self.day_count = 1
         self.alive_status = []
         self.vote_counts = []
@@ -24,9 +24,8 @@ class MafiaGame:
 
         # 역할 번호 -> 역할 이름 문자열 맵
         self.role_names = {
-            v: k.replace("ROLE_", "")
-            for k, v in config.__dict__.items()
-            if k.startswith("ROLE_")
+            role: role.name
+            for role in Role
         }
 
     def _log(self, message):
@@ -36,19 +35,19 @@ class MafiaGame:
     def reset(self) -> Dict:
         self._log("\n--- 새 게임 시작 ---")
         self.day_count = 1
-        self.phase = config.PHASE_DAY_DISCUSSION  # Start with discussion phase
+        self.phase = Phase.DAY_DISCUSSION  # Start with discussion phase
         self.players = []
         self.last_execution_result = None
         self.last_night_result = None
 
         # 1. 플레이어 생성 (All use LLMAgent)
-        for i in range(config.PLAYER_COUNT):
+        for i in range(config.game.PLAYER_COUNT):
             # Create rational agent for all players
             player = LLMAgent(player_id=i)
             self.players.append(player)
 
         # 2. 역할 할당
-        roles_to_assign = config.ROLES.copy()
+        roles_to_assign = config.game.DEFAULT_ROLES.copy()
         random.shuffle(roles_to_assign)
 
         for i, role_int in enumerate(roles_to_assign):
@@ -58,7 +57,7 @@ class MafiaGame:
             role_name = self.role_names.get(role_int, "Unknown")
             self._log(f"플레이어 {i}: {role_name} (LLM Agent)")
 
-        self.alive_status = [True for _ in range(config.PLAYER_COUNT)]
+        self.alive_status = [True for _ in range(config.game.PLAYER_COUNT)]
 
     def process_turn(
         self, action: int, ai_claim_role: int = -1
@@ -70,18 +69,18 @@ class MafiaGame:
         self._log(f"\n[Day {self.day_count} | {self.phase}]")
 
         # Merged phases: PHASE_DAY_CLAIM removed
-        if self.phase == config.PHASE_DAY_DISCUSSION:
+        if self.phase == Phase.DAY_DISCUSSION:
             self._process_day_discussion()
-            self.phase = config.PHASE_DAY_VOTE
-        elif self.phase == config.PHASE_DAY_VOTE:
+            self.phase = Phase.DAY_VOTE
+        elif self.phase == Phase.DAY_VOTE:
             self._process_day_vote()
-            self.phase = config.PHASE_DAY_EXECUTE
-        elif self.phase == config.PHASE_DAY_EXECUTE:
+            self.phase = Phase.DAY_EXECUTE
+        elif self.phase == Phase.DAY_EXECUTE:
             self._process_day_execute()
-            self.phase = config.PHASE_NIGHT
-        elif self.phase == config.PHASE_NIGHT:
+            self.phase = Phase.NIGHT
+        elif self.phase == Phase.NIGHT:
             self._process_night()
-            self.phase = config.PHASE_DAY_DISCUSSION
+            self.phase = Phase.DAY_DISCUSSION
             self.day_count += 1
 
         is_over, is_win = self.check_game_over()
@@ -244,7 +243,7 @@ class MafiaGame:
 
                     # === ROLE REVEAL: Show team alignment (Citizen Team vs Mafia Team) ===
                     executed_role = self.players[executed_target].role
-                    if executed_role == config.ROLE_MAFIA:
+                    if executed_role == Role.MAFIA:
                         self._log(
                             f"  - [공개] {executed_target}번은 마피아 팀이었습니다!"
                         )
@@ -269,7 +268,7 @@ class MafiaGame:
         for p in self.players:
             if not p.alive:
                 continue
-            if p.role == config.ROLE_CITIZEN:
+            if p.role == Role.CITIZEN:
                 continue
             night_dict = self._get_game_status(p.id)
             night_dict["living_players"] = [
@@ -291,11 +290,11 @@ class MafiaGame:
                 and 0 <= target < len(self.players)
                 and self.players[target].alive
             ):
-                if p.role == config.ROLE_MAFIA:
+                if p.role == Role.MAFIA:
                     mafia_target = target
-                elif p.role == config.ROLE_DOCTOR:
+                elif p.role == Role.DOCTOR:
                     doctor_target = target
-                elif p.role == config.ROLE_POLICE:
+                elif p.role == Role.POLICE:
                     police_target = target
 
         self._log("- 밤 행동 결과:")
@@ -343,7 +342,7 @@ class MafiaGame:
                         p.id: p.role for p in self.players
                     },  # 전체 역할 명단
                     "mafia_team_members": [
-                        p.id for p in self.players if p.role == config.ROLE_MAFIA
+                        p.id for p in self.players if p.role == Role.MAFIA
                     ],
                     "police_investigation_results": self.police_logs,
                 }
@@ -353,12 +352,12 @@ class MafiaGame:
                 {
                     "my_role": viewer.role,
                     "mafia_team_members": (
-                        [p.id for p in self.players if p.role == config.ROLE_MAFIA]
-                        if viewer.role == config.ROLE_MAFIA
+                        [p.id for p in self.players if p.role == Role.MAFIA]
+                        if viewer.role == Role.MAFIA
                         else None
                     ),
                     "police_investigation_results": (
-                        self.police_logs if viewer.role == config.ROLE_POLICE else None
+                        self.police_logs if viewer.role == Role.POLICE else None
                     ),
                 }
             )
@@ -367,15 +366,15 @@ class MafiaGame:
 
     def check_game_over(self) -> Tuple[bool, bool]:
         mafia_count = sum(
-            1 for p in self.players if p.role == config.ROLE_MAFIA and p.alive
+            1 for p in self.players if p.role == Role.MAFIA and p.alive
         )
         citizen_count = sum(
-            1 for p in self.players if p.role != config.ROLE_MAFIA and p.alive
+            1 for p in self.players if p.role != Role.MAFIA and p.alive
         )
 
         # 무승부 조건: 최대 턴 수 초과
-        if self.day_count > config.MAX_DAYS:
-            self._log(f"\n게임 종료: {config.MAX_DAYS}일이 지나 무승부입니다!")
+        if self.day_count > config.game.MAX_DAYS:
+            self._log(f"\n게임 종료: {config.game.MAX_DAYS}일이 지나 무승부입니다!")
             return True, False  # 무승부는 패배로 처리
 
         if mafia_count == 0:
