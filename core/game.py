@@ -1,4 +1,4 @@
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Optional
 import config
 import random
 import json
@@ -20,6 +20,7 @@ class MafiaGame:
         self.final_vote = 0
         self.last_execution_result = None  # Track execution results
         self.last_night_result = None  # Track night results
+        self.police_logs = {}  # 경찰 조사 결과 기록
 
     def _log(self, message):
         if self.log_file:
@@ -57,14 +58,13 @@ class MafiaGame:
             self._log(f"플레이어 {i}: {role_name} (LLM Agent)")
 
         self.alive_status = [True for _ in range(config.PLAYER_COUNT)]
-        return self._get_game_status()
 
     def process_turn(
         self, action: int, ai_claim_role: int = -1
     ) -> Tuple[Dict, bool, bool]:
         is_over, is_win = self.check_game_over()
         if is_over:
-            return self._get_game_status(), is_over, is_win
+            return is_over, is_win
 
         self._log(f"\n[Day {self.day_count} | {self.phase}]")
 
@@ -87,19 +87,6 @@ class MafiaGame:
         return self._get_game_status(), is_over, is_win
 
     def _process_day_discussion(self):
-        self._log("  - 낮 토론: 플레이어들이 의견을 나누고 의심도를 갱신합니다.")
-        structured_claims = []  # Store all claims in new dictionary format
-
-        MAX_DEBATE_ROUNDS = 2  # 최대 토론 라운드 수
-        for debate_round in range(MAX_DEBATE_ROUNDS):
-            self._log(f"  - 토론 라운드 {debate_round + 1}")
-            discussion_ended = False
-            # Agent들의 주장
-            for p in self.players:
-                if not p.alive:
-                    continue
-
-    def _process_day_discussion(self):
         self._log("  - 낮 토론 시작")
         structured_claims = []
 
@@ -109,7 +96,7 @@ class MafiaGame:
                 if not p.alive:
                     continue
 
-                game_state_dict = self._get_game_status()
+                game_state_dict = self._get_game_status(p.id)
                 # 대화 기록을 넘길 때 화자 ID를 포함한 JSON 전달
                 conversation_log_str = json.dumps(structured_claims, ensure_ascii=False)
 
@@ -128,6 +115,8 @@ class MafiaGame:
                 role_name = {0: "시민", 1: "경찰", 2: "의사", 3: "마피아"}.get(
                     role_id, "알 수 없음"
                 )
+                discussion_ended = claim_dict.get("discussion_status")
+                reason = claim_dict.get("reason", "")
 
                 # 발언 로깅
                 if claim == 0:  # 본인의 직업 주장
@@ -138,6 +127,7 @@ class MafiaGame:
                     speech = f"- 플레이어 {p.id}이(가) 침묵합니다."
 
                 self._log(speech)
+                self._log(f"  - 플레이어 {p.id}의 주장 이유: {reason}")
                 # structured_claims에 추가
                 structured_claims.append(
                     {
@@ -146,7 +136,7 @@ class MafiaGame:
                     }
                 )
 
-            if discussion_ended:
+            if discussion_ended == "End":
                 break
 
     def _process_day_vote(self):
@@ -163,7 +153,7 @@ class MafiaGame:
         for p in self.players:
             if not p.alive:
                 continue
-            game_state_dict = self._get_game_status()
+            game_state_dict = self._get_game_status(p.id)
             conversation_log_str = json.dumps(structured_votes, ensure_ascii=False)
 
             # get_action 호출 및 JSON 파싱
@@ -219,7 +209,7 @@ class MafiaGame:
                 for p in self.players:
                     if not p.alive:
                         continue
-                    game_state_dict = self._get_game_status()
+                    game_state_dict = self._get_game_status(p.id)
                     conversation_log_str = json.dumps(
                         structured_executes, ensure_ascii=False
                     )
@@ -282,7 +272,7 @@ class MafiaGame:
                 continue
             if p.role == config.ROLE_CITIZEN:
                 continue
-            night_dict = self._get_game_status()
+            night_dict = self._get_game_status(p.id)
             conversation_log_str = ""  # No conversation log for night actions
             response_str = p.get_action(night_dict, conversation_log_str)
             try:
@@ -303,13 +293,21 @@ class MafiaGame:
         # 결과 정산
         no_death = False
         if mafia_target is not None:
-            if mafia_target != doctor_target:
-                self.players[mafia_target].alive = False
-                self._log(f"  - {mafia_target}번 플레이어가 마피아에게 살해당했습니다.")
-                no_death = False
+            # [FIX] 마피아 타겟이 유효하고 살아있는지 확인
+            if 0 <= mafia_target < len(self.players) and self.players[mafia_target].alive:
+                if mafia_target != doctor_target:
+                    self.players[mafia_target].alive = False
+                    self._log(f"  - {mafia_target}번 플레이어가 마피아에게 살해당했습니다.")
+                    no_death = False
+                else:
+                    self._log(f"  - 의사가 {doctor_target}을(를) 살려냈습니다.")
+                    no_death = True
             else:
-                self._log(f"  - 의사가 {doctor_target}을(를) 살려냈습니다.")
+                self._log(f"  - 마피아의 공격 대상({mafia_target})이 잘못되었거나 이미 사망한 플레이어입니다. 공격이 무산되었습니다.")
                 no_death = True
+        else:
+            self._log("  - 마피아가 아무도 공격하지 않았습니다.")
+            no_death = True
 
         # 경찰 조사 결과 로그 (경찰이 있고, 대상을 지정했을 때만)
         if police_target is not None:
@@ -323,6 +321,7 @@ class MafiaGame:
             self._log(
                 f"  - 경찰의 조사 결과: {police_target}번 플레이어는 [{role_name}]입니다."
             )
+            self.police_logs[police_target] = self.players[police_target].role
 
         # Store night result for belief updates (Doctor's Logic)
         self.last_night_result = {
@@ -336,13 +335,46 @@ class MafiaGame:
     def _update_alive_status(self):
         self.alive_status = [1 if p.alive else 0 for p in self.players]
 
-    def _get_game_status(self) -> Dict:
-        return {
+    def _get_game_status(self, viewer_id: Optional[int] = None) -> Dict:
+        is_admin = viewer_id is None
+        viewer = self.players[viewer_id] if not is_admin else None
+        status = {
             "day": self.day_count,
+            "phase": self.phase,
             "alive_status": self.alive_status,
             "last_execution_result": self.last_execution_result,
             "last_night_result": self.last_night_result,
+            "vote_records": self.vote_counts,
         }
+        if is_admin:
+            status.update(
+                {
+                    "my_role": "ADMIN",
+                    "all_player_roles": {
+                        p.id: p.role for p in self.players
+                    },  # 전체 역할 명단
+                    "mafia_team_members": [
+                        p.id for p in self.players if p.role == config.ROLE_MAFIA
+                    ],
+                    "police_investigation_results": self.police_logs,
+                }
+            )
+        else:
+            status.update(
+                {
+                    "my_role": viewer.role,
+                    "mafia_team_members": (
+                        [p.id for p in self.players if p.role == config.ROLE_MAFIA]
+                        if viewer.role == config.ROLE_MAFIA
+                        else None
+                    ),
+                    "police_investigation_results": (
+                        self.police_logs if viewer.role == config.ROLE_POLICE else None
+                    ),
+                }
+            )
+
+        return status
 
     def check_game_over(self) -> Tuple[bool, bool]:
         mafia_count = sum(
@@ -363,6 +395,6 @@ class MafiaGame:
         elif mafia_count >= citizen_count:
             self._log(f"\n게임 종료: 마피아 승리!")
             # [변경]
-            return False, False
+            return True, False
 
         return False, False
