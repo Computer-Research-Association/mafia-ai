@@ -128,6 +128,7 @@ class MafiaGame:
                 role_name = {0: "시민", 1: "경찰", 2: "의사", 3: "마피아"}.get(
                     role_id, "알 수 없음"
                 )
+                discussion_ended = claim_dict.get("discussion_status")
 
                 # 발언 로깅
                 if claim == 0:  # 본인의 직업 주장
@@ -146,7 +147,7 @@ class MafiaGame:
                     }
                 )
 
-            if discussion_ended:
+            if discussion_ended == "End":
                 break
 
     def _process_day_vote(self):

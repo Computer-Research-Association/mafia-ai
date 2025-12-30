@@ -36,3 +36,5 @@ tqdm==4.67.1
 typing_extensions==4.15.0
 openai>=1.58.14
 python-dotenv==1.2.1
+PyQt6==6.7.1
+PyQt6-Qt6==6.7.1
