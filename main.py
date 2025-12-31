@@ -27,49 +27,100 @@ def run_simulation(args):
     """
     AI 학습/테스트 로직
     LogManager를 통한 통합 로깅 시스템 사용
+    새로운 player_configs 구조 지원
     """
-    # 실험 이름 생성
-    experiment_name = f"{args.agent}_{getattr(args, 'backbone', 'mlp')}_{args.mode}"
+    # 하위 호환성: 이전 구조(args.agent) 지원
+    if hasattr(args, 'agent'):
+        # CLI에서 실행된 경우 (레거시 구조)
+        player_configs = None
+        experiment_name = f"{args.agent}_{getattr(args, 'backbone', 'mlp')}_{args.mode}"
+    else:
+        # GUI에서 실행된 경우 (새로운 구조)
+        player_configs = args.player_configs
+        
+        # Player 0의 설정으로 실험 이름 생성
+        player0_config = player_configs[0]
+        if player0_config['type'] == 'rl':
+            experiment_name = f"{player0_config['algo']}_{player0_config['backbone']}_{args.mode}"
+        else:
+            experiment_name = f"llm_{args.mode}"
     
     # LogManager 초기화
-    logger = LogManager(experiment_name=experiment_name, log_dir="logs")
+    log_dir = str(getattr(args, 'paths', {}).get('log_dir', 'logs'))
+    logger = LogManager(experiment_name=experiment_name, log_dir=log_dir)
     
     print(f"Simulation started: {experiment_name}")
+    print(f"Player configurations: {player_configs if player_configs else 'Legacy mode'}")
 
     try:
-        # LLM 에이전트 모드
-        if args.agent == "llm":
-            print("Running LLM-only simulation.")
-            # TODO: LLM 전용 시뮬레이션 로직 구현
-            # MafiaGame에 LogManager 통합 필요
-            print("LLM simulation finished.")
+        # 레거시 구조 처리
+        if player_configs is None:
+            # LLM 에이전트 모드
+            if args.agent == "llm":
+                print("Running LLM-only simulation.")
+                # TODO: LLM 전용 시뮬레이션 로직 구현
+                print("LLM simulation finished.")
 
-        # RL 에이전트 모드 (PPO, REINFORCE)
+            # RL 에이전트 모드 (PPO, REINFORCE)
+            else:
+                print(f"[{args.mode.upper()}] mode for {args.agent.upper()} agent.")
+                
+                # 환경 및 에이전트 초기화
+                env = MafiaEnv()
+                state_dim = env.observation_space["observation"].shape[0]
+                action_dim = env.action_space.n
+
+                agent = RLAgent(
+                    player_id=0,
+                    role=Role.CITIZEN,
+                    state_dim=state_dim,
+                    action_dim=action_dim,
+                    algorithm=args.agent,
+                    backbone=getattr(args, "backbone", "mlp"),
+                    use_il=getattr(args, "use_il", False),
+                    hidden_dim=getattr(args, "hidden_dim", 128),
+                    num_layers=getattr(args, "num_layers", 2),
+                )
+
+                # 모드별 실행
+                if args.mode == "train":
+                    train(env, agent, args, logger)
+                elif args.mode == "test":
+                    test(env, agent, args)
+        
+        # 새로운 player_configs 구조 처리
         else:
-            print(f"[{args.mode.upper()}] mode for {args.agent.upper()} agent.")
+            print(f"[{args.mode.upper()}] mode with player_configs.")
             
-            # 환경 및 에이전트 초기화
-            env = MafiaEnv()
-            state_dim = env.observation_space["observation"].shape[0]
-            action_dim = env.action_space.n
+            # Player 0 설정 추출
+            player0_config = player_configs[0]
+            
+            # Player 0이 RL인 경우에만 학습/테스트 진행
+            if player0_config['type'] == 'rl':
+                env = MafiaEnv()
+                state_dim = env.observation_space["observation"].shape[0]
+                action_dim = env.action_space.n
 
-            agent = RLAgent(
-                player_id=0,
-                role=Role.CITIZEN,
-                state_dim=state_dim,
-                action_dim=action_dim,
-                algorithm=args.agent,
-                backbone=getattr(args, "backbone", "mlp"),
-                use_il=getattr(args, "use_il", False),
-                hidden_dim=getattr(args, "hidden_dim", 128),
-                num_layers=getattr(args, "num_layers", 2),
-            )
+                agent = RLAgent(
+                    player_id=0,
+                    role=Role.CITIZEN,
+                    state_dim=state_dim,
+                    action_dim=action_dim,
+                    algorithm=player0_config['algo'],
+                    backbone=player0_config['backbone'],
+                    use_il=False,  # GUI에서는 기본적으로 IL 비활성화
+                    hidden_dim=player0_config.get('hidden_dim', 128),
+                    num_layers=player0_config.get('num_layers', 2),
+                )
 
-            # 모드별 실행
-            if args.mode == "train":
-                train(env, agent, args, logger)
-            elif args.mode == "test":
-                test(env, agent, args)
+                # 모드별 실행
+                if args.mode == "train":
+                    train(env, agent, args, logger)
+                elif args.mode == "test":
+                    test(env, agent, args)
+            else:
+                print("Player 0 is LLM. Full game simulation not yet implemented.")
+                # TODO: 전체 게임 시뮬레이션 로직 구현
     
     finally:
         # LogManager 리소스 정리
