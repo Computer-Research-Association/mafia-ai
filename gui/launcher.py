@@ -207,6 +207,23 @@ class Launcher(QWidget):
 
         layout.addStretch()
         
+        # 로그 뷰어 버튼
+        self.btn_log_viewer = QPushButton("📊 게임 로그 뷰어 열기")
+        self.btn_log_viewer.setStyleSheet(
+            """
+            QPushButton {
+                background-color: #2196F3; 
+                color: white; 
+                font-size: 14px; 
+                padding: 10px;
+                border-radius: 6px;
+            }
+            QPushButton:hover { background-color: #0b7dda; }
+            """
+        )
+        self.btn_log_viewer.clicked.connect(self.open_log_viewer)
+        layout.addWidget(self.btn_log_viewer)
+        
         # 에이전트 설정 버튼
         self.btn_expand = QPushButton("⚙️ 개별 에이전트 상세 설정")
         self.btn_expand.setCheckable(True)
@@ -286,6 +303,16 @@ class Launcher(QWidget):
         path = QFileDialog.getExistingDirectory(self, "로그 출력 경로 선택", self.log_path_input.text())
         if path:
             self.log_path_input.setText(path)
+    
+    def open_log_viewer(self):
+        """로그 뷰어 창 열기"""
+        import tkinter as tk
+        from gui.gui_viewer import MafiaLogViewerApp
+        
+        # Tkinter 창 생성
+        root = tk.Tk()
+        app = MafiaLogViewerApp(root)
+        root.mainloop()
 
     def on_click_start(self):
         """시뮬레이션 시작 버튼 클릭 - 개별 에이전트 설정 수집"""

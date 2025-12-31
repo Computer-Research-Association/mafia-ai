@@ -74,10 +74,6 @@ class LLMAgent(BaseAgent):
         elif event_type == EventType.VOTE:
             return f"{actor}가 {target}에게 투표했습니다."
         
-        elif event_type == EventType.ROLE_ASSIGN:
-            role_name = Role(event.value).name if event.value is not None else "알 수 없음"
-            return f"{target}에게 {role_name} 역할이 배정되었습니다."
-        
         elif event_type == EventType.EXECUTE:
             role_name = Role(event.value).name if event.value is not None else "알 수 없음"
             return f"{target}({role_name})이(가) 처형되었습니다."
