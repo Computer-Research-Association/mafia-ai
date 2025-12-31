@@ -1,19 +1,22 @@
 import torch
 import torch.optim as optim
 from torch.distributions import Categorical
-from ai.model import ActorCritic
+from ai.model import DynamicActorCritic
 from config import config
 
 
-class REINFORCEAgent:
-    def __init__(self, state_dim, action_dim):
-        self.policy = ActorCritic(state_dim, action_dim)
+class REINFORCE:
+    def __init__(self, policy):
+        self.policy = policy
         self.optimizer = optim.Adam(self.policy.parameters(), lr=config.train.LR)
         self.gamma = config.train.GAMMA
+        self.max_grad_norm = config.train.MAX_GRAD_NORM
         self.log_probs = []
         self.rewards = []
+        self.states = []
+        self.is_rnn = self.policy.backbone_type in ["lstm", "gru"]
 
-    def select_action(self, state):
+    def select_action(self, state, hidden_state=None):
         if isinstance(state, dict):
             obs = state['observation']
             mask = state['action_mask']
@@ -24,7 +27,7 @@ class REINFORCEAgent:
         state_tensor = torch.FloatTensor(obs).unsqueeze(0)
         mask_tensor = torch.FloatTensor(mask).unsqueeze(0) if mask is not None else None
         
-        probs, _, _ = self.policy(state_tensor)
+        probs, _, new_hidden = self.policy(state_tensor, hidden_state)
         
         if mask_tensor is not None:
             probs = probs * mask_tensor
@@ -34,10 +37,14 @@ class REINFORCEAgent:
         dist = Categorical(probs)
         action = dist.sample()
         self.log_probs.append(dist.log_prob(action))
+        self.states.append(state_tensor.squeeze(0))
         
-        return action.item()
+        return action.item(), new_hidden
 
-    def update(self):
+    def update(self, il_loss_fn=None):
+        if len(self.rewards) == 0:
+            return
+            
         R = 0
         returns = []
         
@@ -53,12 +60,20 @@ class REINFORCEAgent:
         for log_prob, R in zip(self.log_probs, returns):
             policy_loss.append(-log_prob * R)
             
+        loss = torch.stack(policy_loss).mean()
+        
+        if il_loss_fn is not None:
+            old_states = torch.stack(self.states, dim=0).detach()
+            il_loss = il_loss_fn(old_states)
+            loss = loss + config.train.IL_COEF * il_loss
+        
         self.optimizer.zero_grad()
-        loss = torch.stack(policy_loss).sum()
         loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
         self.optimizer.step()
         self.clear_memory()
 
     def clear_memory(self):
         del self.log_probs[:]
         del self.rewards[:]
+        del self.states[:]
