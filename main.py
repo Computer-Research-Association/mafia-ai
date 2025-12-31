@@ -7,10 +7,11 @@ import tkinter as tk
 from core.env import MafiaEnv
 from core.game import MafiaGame
 from core.agent.rlAgent import RLAgent
+from core.logger import LogManager
 from config import Role
 from PyQt6.QtWidgets import QApplication
 from core.runner import train, test
-from utils.analysis import analyze_log_file
+
 from gui.launcher import Launcher
 
 # GUI 모듈 임포트 (gui 패키지가 없어도 에러 안 나게 처리)
@@ -24,59 +25,34 @@ except ImportError:
 
 def run_simulation(args):
     """
-    기존 main() 함수에 있던 AI 학습/테스트 로직을 별도 함수로 분리
+    AI 학습/테스트 로직
+    LogManager를 통한 통합 로깅 시스템 사용
     """
+    # 실험 이름 생성
+    experiment_name = f"{args.agent}_{getattr(args, 'backbone', 'mlp')}_{args.mode}"
+    
+    # LogManager 초기화
+    logger = LogManager(experiment_name=experiment_name, log_dir="logs")
+    
+    print(f"Simulation started: {experiment_name}")
 
-    log_dir = "logs"
-    os.makedirs(log_dir, exist_ok=True)
-    log_file_path = os.path.join(log_dir, "mafia_game_log.txt")
-
-    print(f"Simulation started with {args.agent} agent.")
-
-    """ agent 개별 지정 부분 추후 구현 필요
-    with open(log_file_path, "w", encoding="utf-8") as f:
-        # 게임 인스턴스 생성 (로그 파일 연결)
-        game = MafiaGame(log_file=f)
-        
-        # 에피소드 반복 실행
-        episodes = getattr(args, "episodes", 1)
-        for ep in range(episodes):
-            f.write(f"\n{'='*20} Episode {ep+1} Start {'='*20}\n")
-            print(f"Running Episode {ep+1}/{episodes}...")
-            game.reset(args.others)
-            done = False
-            
-            while not done:
-                # 게임 진행 (내부 에이전트들의 행동으로 진행됨)
-                status, done, win = game.process_turn()
-            
-            f.write(f"Episode {ep+1} End. Win: {win}\n")
-            f.flush()"""
-
-    # 1. 게임 실행 및 로그 기록
-    with open(log_file_path, "w", encoding="utf-8") as f:
-        args.others = ["llm"] * 8  # 나머지 8명은 모두 LLM 에이전트로 고정
+    try:
         # LLM 에이전트 모드
         if args.agent == "llm":
             print("Running LLM-only simulation.")
-            game = MafiaGame(log_file=f)
-            game.reset(args.others)
-            done = False
-            while not done:
-                # LLM 에이전트는 내부적으로 스스로 행동을 결정하므로,
-                # process_turn에 전달하는 action은 의미 없음
-                status, done, win = game.process_turn()
-            print("\nLLM simulation finished. Winner determined by game log.")
+            # TODO: LLM 전용 시뮬레이션 로직 구현
+            # MafiaGame에 LogManager 통합 필요
+            print("LLM simulation finished.")
 
-        # PPO 또는 REINFORCE 에이전트 모드
+        # RL 에이전트 모드 (PPO, REINFORCE)
         else:
             print(f"[{args.mode.upper()}] mode for {args.agent.upper()} agent.")
+            
             # 환경 및 에이전트 초기화
-            env = MafiaEnv(log_file=f)
+            env = MafiaEnv()
             state_dim = env.observation_space["observation"].shape[0]
             action_dim = env.action_space.n
 
-            # RLAgent 인스턴스 생성
             agent = RLAgent(
                 player_id=0,
                 role=Role.CITIZEN,
@@ -91,20 +67,14 @@ def run_simulation(args):
 
             # 모드별 실행
             if args.mode == "train":
-                train(env, agent, args, f)
+                train(env, agent, args, logger)
             elif args.mode == "test":
                 test(env, agent, args)
-
-    # 2. 학습 종료 후 로그 정밀 분석 실행 (train 모드였을 경우)
-    if args.agent != "llm" and args.mode == "train":
-        print("\n" + "=" * 30)
-        print(" Start Post-Training Analysis")
-        print("=" * 30)
-        try:
-            analyze_log_file(log_file_path, output_img="analysis_detailed.png")
-        except Exception as e:
-            print(f"Analysis failed: {e}")
-    print("Simulation finished.")
+    
+    finally:
+        # LogManager 리소스 정리
+        logger.close()
+        print("Simulation finished.")
 
 
 def start_gui():

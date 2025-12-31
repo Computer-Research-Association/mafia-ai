@@ -2,7 +2,7 @@ import os
 import json
 import yaml
 import numpy as np
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, TYPE_CHECKING
 from openai import OpenAI
 from dotenv import load_dotenv
 
@@ -10,12 +10,18 @@ from core.agent.baseAgent import BaseAgent
 from config import config, Role, Phase, EventType
 from state import GameStatus, GameEvent
 
+if TYPE_CHECKING:
+    from core.logger import LogManager
+
 load_dotenv()
 
 
 class LLMAgent(BaseAgent):
-    def __init__(self, player_id: int, role: Role = Role.CITIZEN):
+    def __init__(self, player_id: int, role: Role = Role.CITIZEN, logger: Optional['LogManager'] = None):
         super().__init__(player_id, role)
+
+        # LogManager 인스턴스 (내러티브 해석용)
+        self.logger = logger
 
         # API 설정
         self.client = OpenAI(
@@ -101,11 +107,15 @@ class LLMAgent(BaseAgent):
 
         user_template = prompt_data.get("user", "")
         conversation_log = self._create_conversation_log()
+        
+        # 신뢰도 행렬을 마크다운 테이블로 변환
+        belief_markdown = self._belief_to_markdown()
+        
         game_data = self.game_data_block.format(
             role_name=self.role.name,
             id=self.id,
             status_json=status_json,
-            belief_matrix=self.belief.tolist(),
+            belief_matrix=belief_markdown,
             conversation_log=conversation_log,
         )
         print(f"[Player {self.id}] Game Data for LLM:\n{game_data}\n")
@@ -131,32 +141,75 @@ class LLMAgent(BaseAgent):
             return json.dumps({"error": str(e)})
 
     def _create_conversation_log(self) -> str:
+        """
+        대화 기록을 생성합니다.
+        LogManager의 interpret_event()를 사용하여 일관된 내러티브를 생성합니다.
+        """
         if self.current_status.phase != Phase.DAY_DISCUSSION:
             return "토론 단계가 아님"
-        phase_name = self.current_status.phase.name
-        day = self.current_status.day
-        log_lines = []
 
-        action_string = ""
+        log_lines = []
 
         for event in self.current_status.action_history:
             if event.event_type != EventType.CLAIM:
                 continue
-            actor_id = event.actor_id
-            target_id = event.target_id if event.target_id is not None else -1
-            claimed_role = event.value if isinstance(event.value, Role) else None
-            if claimed_role is not None:
-                if target_id == actor_id or target_id == -1:
-                    action_string = (
-                        f"Player {actor_id}는 자신이 {claimed_role.name}라고 주장"
-                    )
-                else:
-                    action_string = f"Player {actor_id}는 Player {target_id}가 {claimed_role.name}라고 주장"
+            
+            # LogManager를 통한 통합 해석
+            if self.logger:
+                narrative = self.logger.interpret_event(event)
+                log_lines.append(narrative)
             else:
-                action_string = f"Player {actor_id}가 침묵."
-            log_lines.append(f"{day}일 {phase_name} | " + action_string)
+                # Fallback: LogManager가 없을 경우 기본 포맷
+                actor_id = event.actor_id
+                target_id = event.target_id if event.target_id is not None else -1
+                claimed_role = event.value if isinstance(event.value, Role) else None
+                
+                if claimed_role is not None:
+                    role_name = self._get_role_korean_name(claimed_role)
+                    if target_id == actor_id or target_id == -1:
+                        action_string = f"Player {actor_id}는 자신이 {role_name}라고 주장"
+                    else:
+                        action_string = f"Player {actor_id}는 Player {target_id}가 {role_name}라고 주장"
+                else:
+                    action_string = f"Player {actor_id}가 침묵."
+                
+                log_lines.append(f"{event.day}일 {event.phase.name} | {action_string}")
 
         if not log_lines:
             return "아직 아무도 주장하지 않았습니다."
         else:
             return "\n".join(log_lines)
+
+    @staticmethod
+    def _get_role_korean_name(role: Role) -> str:
+        """역할의 한국어 이름 반환"""
+        role_names = {
+            Role.CITIZEN: "시민",
+            Role.POLICE: "경찰",
+            Role.DOCTOR: "의사",
+            Role.MAFIA: "마피아",
+        }
+        return role_names.get(role, str(role))
+
+    def _belief_to_markdown(self) -> str:
+        """
+        신뢰도 행렬을 마크다운 테이블 형식으로 변환합니다.
+        LLM이 더 쉽게 이해할 수 있도록 구조화된 형식을 제공합니다.
+        
+        Returns:
+            마크다운 형식의 신뢰도 테이블
+        """
+        # 헤더 생성
+        headers = ["Player ID", "시민", "경찰", "의사", "마피아"]
+        lines = ["| " + " | ".join(headers) + " |"]
+        lines.append("|" + "---|" * len(headers))
+        
+        # 각 플레이어의 신뢰도 값
+        for player_id in range(config.game.PLAYER_COUNT):
+            row = [f"Player {player_id}"]
+            for role_idx in range(len(Role)):
+                belief_value = self.belief[player_id, role_idx]
+                row.append(f"{belief_value:.1f}")
+            lines.append("| " + " | ".join(row) + " |")
+        
+        return "\n".join(lines)

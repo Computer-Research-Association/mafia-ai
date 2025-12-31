@@ -1,0 +1,213 @@
+"""
+LogManager: 통합 로그 및 모니터링 시스템
+
+주요 기능:
+1. JSONL 로깅: GameEvent를 .jsonl 형식으로 기록
+2. TensorBoard 통합: 학습 메트릭을 실시간 모니터링
+3. 내러티브 해석: 이벤트를 자연어 문장으로 변환 (GUI/LLM용)
+"""
+
+import os
+import json
+import yaml
+from typing import Optional, Dict, Any, List
+from datetime import datetime
+from pathlib import Path
+
+from torch.utils.tensorboard import SummaryWriter
+
+from state import GameEvent
+from config import Role, Phase, EventType
+
+
+class LogManager:
+    """게임 이벤트 로깅 및 해석 매니저"""
+
+    def __init__(self, experiment_name: str, log_dir: str = "./logs"):
+        """
+        Args:
+            experiment_name: 실험 이름 (예: "ppo_mlp_20231231")
+            log_dir: 로그 저장 디렉토리
+        """
+        self.experiment_name = experiment_name
+        self.log_dir = Path(log_dir)
+        self.log_dir.mkdir(parents=True, exist_ok=True)
+
+        # 타임스탬프 기반 고유 디렉토리 생성
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.session_dir = self.log_dir / f"{experiment_name}_{timestamp}"
+        self.session_dir.mkdir(parents=True, exist_ok=True)
+
+        # JSONL 로그 파일 경로
+        self.jsonl_path = self.session_dir / "events.jsonl"
+        self.jsonl_file = open(self.jsonl_path, "w", encoding="utf-8")
+
+        # TensorBoard writer
+        tensorboard_dir = self.session_dir / "tensorboard"
+        self.writer = SummaryWriter(log_dir=str(tensorboard_dir))
+
+        # 내러티브 템플릿 로드
+        self.narrative_templates = self._load_narrative_templates()
+
+        print(f"[LogManager] Initialized: {self.session_dir}")
+        print(f"  - JSONL: {self.jsonl_path}")
+        print(f"  - TensorBoard: {tensorboard_dir}")
+
+    def _load_narrative_templates(self) -> Dict[str, str]:
+        """YAML에서 내러티브 템플릿 로드"""
+        template_path = Path(__file__).parent / "narrative_templates.yaml"
+        
+        # 기본 템플릿
+        default_templates = {
+            "CLAIM_SELF": "Day {day} | Player {actor_id}는 자신이 {role_name}라고 주장했습니다.",
+            "CLAIM_OTHER": "Day {day} | Player {actor_id}는 Player {target_id}가 {role_name}라고 주장했습니다.",
+            "VOTE": "Day {day} | Player {actor_id}가 Player {target_id}에게 투표했습니다.",
+            "EXECUTE": "Day {day} | Player {target_id}가 처형되었습니다. (역할: {role_name})",
+            "KILL": "Night {day} | Player {target_id}가 마피아에게 살해당했습니다.",
+            "PROTECT": "Night {day} | 의사가 Player {target_id}를 보호했습니다.",
+            "POLICE_RESULT": "Night {day} | 경찰이 Player {target_id}를 조사: {role_name}",
+            "SILENCE": "Day {day} | Player {actor_id}가 침묵했습니다.",
+        }
+
+        # YAML 파일이 있으면 로드
+        if template_path.exists():
+            try:
+                with open(template_path, "r", encoding="utf-8") as f:
+                    yaml_templates = yaml.safe_load(f)
+                    if yaml_templates:
+                        default_templates.update(yaml_templates)
+            except Exception as e:
+                print(f"[LogManager] Warning: Failed to load narrative templates: {e}")
+
+        return default_templates
+
+    def log_event(self, event: GameEvent):
+        """GameEvent를 JSONL 형식으로 기록"""
+        event_json = event.model_dump_json(exclude_none=False)
+        self.jsonl_file.write(event_json + "\n")
+        self.jsonl_file.flush()
+
+    def log_metrics(
+        self,
+        episode: int,
+        total_reward: float,
+        is_win: bool,
+        win_rate: Optional[float] = None,
+        **kwargs,
+    ):
+        """TensorBoard에 학습 메트릭 기록"""
+        self.writer.add_scalar("Reward/Total", total_reward, episode)
+        self.writer.add_scalar("Win/IsWin", 1 if is_win else 0, episode)
+
+        if win_rate is not None:
+            self.writer.add_scalar("Win/Rate", win_rate, episode)
+
+        # 추가 메트릭
+        for key, value in kwargs.items():
+            self.writer.add_scalar(f"Metrics/{key}", value, episode)
+
+    def interpret_event(self, event: GameEvent) -> str:
+        """
+        GameEvent를 자연어 문장으로 변환
+        
+        이 메서드는 GUI 리플레이와 LLM 에이전트의 프롬프트 생성에 사용됩니다.
+        로그 파일에는 저장되지 않습니다.
+        
+        Args:
+            event: 해석할 게임 이벤트
+            
+        Returns:
+            자연어 문장
+        """
+        event_type = event.event_type
+        day = event.day
+        actor_id = event.actor_id
+        target_id = event.target_id
+        value = event.value
+
+        # 역할 이름 변환
+        role_name = ""
+        if isinstance(value, Role):
+            role_name = self._get_role_korean_name(value)
+
+        # 이벤트 타입별 템플릿 선택 및 포맷팅
+        if event_type == EventType.CLAIM:
+            if value is None:
+                # 침묵
+                template = self.narrative_templates.get("SILENCE", "")
+                return template.format(day=day, actor_id=actor_id)
+            elif target_id is None or target_id == actor_id:
+                # 자기 주장
+                template = self.narrative_templates.get("CLAIM_SELF", "")
+                return template.format(day=day, actor_id=actor_id, role_name=role_name)
+            else:
+                # 타인 지목
+                template = self.narrative_templates.get("CLAIM_OTHER", "")
+                return template.format(
+                    day=day, actor_id=actor_id, target_id=target_id, role_name=role_name
+                )
+
+        elif event_type == EventType.VOTE:
+            template = self.narrative_templates.get("VOTE", "")
+            return template.format(day=day, actor_id=actor_id, target_id=target_id)
+
+        elif event_type == EventType.EXECUTE:
+            template = self.narrative_templates.get("EXECUTE", "")
+            return template.format(day=day, target_id=target_id, role_name=role_name)
+
+        elif event_type == EventType.KILL:
+            template = self.narrative_templates.get("KILL", "")
+            return template.format(day=day, target_id=target_id)
+
+        elif event_type == EventType.PROTECT:
+            template = self.narrative_templates.get("PROTECT", "")
+            return template.format(day=day, target_id=target_id)
+
+        elif event_type == EventType.POLICE_RESULT:
+            template = self.narrative_templates.get("POLICE_RESULT", "")
+            return template.format(day=day, target_id=target_id, role_name=role_name)
+
+        return f"[Unknown Event] {event.model_dump_json()}"
+
+    @staticmethod
+    def _get_role_korean_name(role: Role) -> str:
+        """역할의 한국어 이름 반환"""
+        role_names = {
+            Role.CITIZEN: "시민",
+            Role.POLICE: "경찰",
+            Role.DOCTOR: "의사",
+            Role.MAFIA: "마피아",
+        }
+        return role_names.get(role, str(role))
+
+    def load_events(self) -> List[GameEvent]:
+        """JSONL 파일에서 모든 이벤트 로드"""
+        events = []
+        if not self.jsonl_path.exists():
+            return events
+
+        with open(self.jsonl_path, "r", encoding="utf-8") as f:
+            for line in f:
+                if line.strip():
+                    event_dict = json.loads(line)
+                    events.append(GameEvent(**event_dict))
+        return events
+
+    def load_events_by_episode(self, episode_num: int) -> List[GameEvent]:
+        """특정 에피소드의 이벤트만 로드 (향후 구현 가능)"""
+        # TODO: 에피소드 구분자가 필요한 경우 구현
+        raise NotImplementedError("Episode filtering not yet implemented")
+
+    def close(self):
+        """리소스 정리"""
+        if self.jsonl_file and not self.jsonl_file.closed:
+            self.jsonl_file.close()
+        if self.writer:
+            self.writer.close()
+        print(f"[LogManager] Closed: {self.session_dir}")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
