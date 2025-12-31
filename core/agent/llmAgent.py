@@ -76,14 +76,29 @@ class LLMAgent(BaseAgent):
                     f"[Player {self.id}] Belief update failed: {e}\nResponse from LLM: {response_json}"
                 )
 
+    def translate_to_engine(self, action_dict: Dict[str, Any]) -> EngineAction:
+        """
+        LLM JSON 응답을 EngineAction 튜플로 변환하는 순수 번역기
+        
+        Stateless Translator:
+        - 속성에 의존하지 않고 인자로 받은 action_dict만 사용
+        - ActionTranslator를 통한 즉시 변환
+        - 테스트 및 디버깅이 용이함
+        
+        Args:
+            action_dict: LLM이 반환한 JSON 딕셔너리
+        
+        Returns:
+            (ActionType, target_id, role_value) 튜플
+        """
+        return ActionTranslator.to_engine_action(action_dict)
+    
     def get_action(self) -> EngineAction:
         """
         LLM의 JSON 응답을 EngineAction 튜플로 변환하여 반환
         
-        LLMAgent의 Translator 레이어:
-        - LLM에서 JSON 응답을 받음
-        - ActionTranslator를 통해 EngineAction으로 변환
-        - 엔진에는 정제된 튜플만 전달
+        Note: 이 메서드는 내부적으로 _execute_ai_logic()을 호출하여
+        LLM 응답을 얻은 후 translate_to_engine()으로 변환합니다.
         """
         if not self.current_status:
             from core.action import ActionType
@@ -101,8 +116,8 @@ class LLMAgent(BaseAgent):
         # LLM 실행 및 JSON 응답 파싱
         action_dict = self._execute_ai_logic(prompt_key)
         
-        # ActionTranslator를 통해 EngineAction으로 변환
-        return ActionTranslator.to_engine_action(action_dict)
+        # translate_to_engine()을 통한 변환
+        return self.translate_to_engine(action_dict)
 
     def _execute_ai_logic(self, prompt_key: str) -> Dict[str, Any]:
         """LLM 실행 및 응답을 딕셔너리로 파싱하여 반환"""

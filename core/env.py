@@ -61,12 +61,18 @@ class MafiaEnv(gym.Env):
         self.last_vote_record = np.zeros((config.game.PLAYER_COUNT, config.game.PLAYER_COUNT), dtype=np.float32)
         return self._encode_observation(status), {}
 
-    def step(self, action):
+    def step(self, action_idx: int):
         """
-        환경 스텝 실행 - RLAgent에 액션을 주입하고 게임을 진행
+        환경 스텝 실행 - Lunar Lander 스타일
+        
+        Stateless Design:
+        1. 학습 루프: action_idx = agent.select_action(obs)
+        2. 환경: env.step(action_idx) ← 숫자를 직접 받음
+        3. 번역: action_obj = agent.translate_to_engine(action_idx)
+        4. 엔진: game에 번역된 객체 전달
         
         Args:
-            action: Discrete action index (0~20)
+            action_idx: PPO/REINFORCE가 출력한 액션 인덱스 (0~20)
         
         Returns:
             observation, reward, done, truncated, info
@@ -78,14 +84,21 @@ class MafiaEnv(gym.Env):
         prev_alive = [p.alive for p in self.game.players]
         prev_phase = self.game.phase
 
-        # RLAgent에 액션 전달 (last_action 속성에 저장)
-        self.game.players[my_id].last_action = action
+        # ★ Lunar Lander 스타일: action_idx를 즉시 EngineAction으로 변환
+        # RLAgent는 단순히 번역기 역할만 수행 (속성에 저장하지 않음)
+        rl_agent = self.game.players[my_id]
+        if hasattr(rl_agent, 'translate_to_engine'):
+            # RLAgent의 translate_to_engine() 메서드를 사용
+            # 이를 위해 임시로 속성에 저장 (향후 game.apply_action()으로 대체 예정)
+            engine_action = rl_agent.translate_to_engine(action_idx)
+            # 임시: get_action()이 이 값을 반환하도록 monkey patching
+            rl_agent._temp_engine_action = engine_action
         
         # TODO: 구조적 개선 필요
         # 현재 process_turn()은 전체 페이즈(discussion, vote, execute, night)를 한 번에 처리합니다.
         # 이로 인해 토론 단계에서 여러 발언 기회가 있어도 같은 액션만 반복하게 됩니다.
-        # 해결 방안: 페이즈를 더 세분화하여 각 발언마다 새로운 step()을 호출하도록 구조 변경 필요
-        # 예: step_discussion_turn(), step_vote(), step_execute(), step_night()
+        # 해결 방안: game.apply_action(player_id, engine_action) 메서드 추가
+        # 예: game.apply_action(my_id, engine_action) → status
         
         # 게임 진행 (엔진이 에이전트에게 직접 의사를 물음)
         status, done, win = self.game.process_turn()
@@ -124,7 +137,7 @@ class MafiaEnv(gym.Env):
             
             # RLActionMapper를 통해 액션 인덱스를 EngineAction 튜플로 변환
             from core.action import RLActionMapper, ActionType
-            engine_action = RLActionMapper.action_index_to_engine(action)
+            engine_action = RLActionMapper.action_index_to_engine(action_idx)
             action_type, target_id, claim_role = engine_action
             
             # === [역할 주장 보상] ===

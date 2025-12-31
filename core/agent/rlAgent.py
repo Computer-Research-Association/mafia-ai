@@ -69,7 +69,7 @@ class RLAgent(BaseAgent):
             raise ValueError(f"Unknown algorithm: {algorithm}")
         
         self.hidden_state = None
-        self.last_action = None  # select_action에서 결정된 discrete action index 저장
+        # last_action 제거: stateless 번역기로 전환
         
         self.expert_agent = None
         if use_il:
@@ -87,32 +87,53 @@ class RLAgent(BaseAgent):
         """BaseAgent의 추상 메서드 구현"""
         pass
     
+    def translate_to_engine(self, action_idx: int) -> EngineAction:
+        """
+        액션 인덱스를 EngineAction 튜플로 변환하는 순수 번역기
+        
+        Stateless Translator:
+        - 속성에 의존하지 않고 인자로 받은 action_idx만 사용
+        - 모든 '해석'은 이 메서드 내부에서 완료
+        - 테스트 및 디버깅이 용이함
+        
+        Args:
+            action_idx: PPO/REINFORCE가 출력한 액션 인덱스 (0~20)
+        
+        Returns:
+            (ActionType, target_id, role_value) 튜플
+        """
+        return RLActionMapper.action_index_to_engine(action_idx)
+    
     def get_action(self) -> EngineAction:
         """
-        BaseAgent의 추상 메서드 구현 - EngineAction 튜플 반환
+        BaseAgent 호환성을 위한 메서드
         
-        RLAgent의 Translator 레이어:
-        - 내부적으로 last_action(인덱스)를 RLActionMapper를 통해 EngineAction으로 변환
-        - 엔진에는 정제된 튜플만 전달
+        Note: env.step()에서 translate_to_engine()으로 변환한 결과를
+        임시 속성(_temp_engine_action)에 저장하고, 이 메서드가 반환합니다.
+        
+        향후 game.apply_action() 구조로 변경되면 이 메서드는 제거될 예정입니다.
         """
-        if self.last_action is None:
-            # 기본값: 기권
-            from core.action import ActionType
-            return (ActionType.NO_ACTION, -1, None)
+        if hasattr(self, '_temp_engine_action'):
+            return self._temp_engine_action
         
-        # RLActionMapper를 통한 변환 (모든 '해석'은 여기서 끝)
-        return RLActionMapper.action_index_to_engine(self.last_action)
+        # 폴백: 기권
+        from core.action import ActionType
+        return (ActionType.NO_ACTION, -1, None)
     
-    def select_action(self, state, action_mask: Optional[np.ndarray] = None):
+    def select_action(self, state, action_mask: Optional[np.ndarray] = None) -> int:
         """
-        상태를 받아 행동을 선택
+        상태를 받아 행동을 선택 (순수 함수)
+        
+        Stateless Design:
+        - 속성에 저장하지 않고 즉시 반환
+        - 반환된 인덱스는 translate_to_engine()으로 변환
         
         Args:
             state: 상태 벡터 또는 딕셔너리
             action_mask: 유효한 행동 마스크
         
         Returns:
-            action: 선택된 행동 인덱스
+            action_idx: 선택된 행동 인덱스 (0~20)
         """
         if isinstance(state, dict):
             obs = state['observation']
@@ -124,10 +145,7 @@ class RLAgent(BaseAgent):
         state_dict = {'observation': obs, 'action_mask': mask}
         action, self.hidden_state = self.learner.select_action(state_dict, self.hidden_state)
         
-        # last_action에 저장하여 get_action()에서 사용할 수 있도록 함
-        self.last_action = action
-        
-        return action
+        return action  # 속성에 저장하지 않고 즉시 반환
     
     def store_reward(self, reward: float, is_terminal: bool = False):
         """보상 저장"""
