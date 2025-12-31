@@ -100,13 +100,19 @@ class LLMAgent(BaseAgent):
         final_system_msg = f"{role_specific_system_msg}\n{json_instruction}"
 
         user_template = prompt_data.get("user", "")
+        conversation_log = self._create_conversation_log()
         game_data = self.game_data_block.format(
             role_name=self.role.name,
             id=self.id,
             status_json=status_json,
             belief_matrix=self.belief.tolist(),
+            conversation_log=conversation_log,
         )
+        print(f"[Player {self.id}] Game Data for LLM:\n{game_data}\n")
         final_user_msg = user_template.format(game_data=game_data)
+        print(
+            f"[Player {self.id}] Final System Msg:\n{final_system_msg}\n Final User Msg:\n{final_user_msg}\n"
+        )
         return self._call_llm(final_system_msg, final_user_msg)
 
     def _call_llm(self, system_prompt: str, user_prompt: str) -> str:
@@ -123,3 +129,34 @@ class LLMAgent(BaseAgent):
             return response.choices[0].message.content
         except Exception as e:
             return json.dumps({"error": str(e)})
+
+    def _create_conversation_log(self) -> str:
+        if self.current_status.phase != Phase.DAY_DISCUSSION:
+            return "토론 단계가 아님"
+        phase_name = self.current_status.phase.name
+        day = self.current_status.day
+        log_lines = []
+
+        action_string = ""
+
+        for event in self.current_status.action_history:
+            if event.event_type != EventType.CLAIM:
+                continue
+            actor_id = event.actor_id
+            target_id = event.target_id if event.target_id is not None else -1
+            claimed_role = event.value if isinstance(event.value, Role) else None
+            if claimed_role is not None:
+                if target_id == actor_id or target_id == -1:
+                    action_string = (
+                        f"Player {actor_id}는 자신이 {claimed_role.name}라고 주장"
+                    )
+                else:
+                    action_string = f"Player {actor_id}는 Player {target_id}가 {claimed_role.name}라고 주장"
+            else:
+                action_string = f"Player {actor_id}가 침묵."
+            log_lines.append(f"{day}일 {phase_name} | " + action_string)
+
+        if not log_lines:
+            return "아직 아무도 주장하지 않았습니다."
+        else:
+            return "\n".join(log_lines)

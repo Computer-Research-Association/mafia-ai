@@ -30,9 +30,8 @@ PHASE_SCHEMAS:
       "silence_bias": "float",
       "strategy_note": "string (전략 요약)"
     },
-    "claim": "integer (0: 내 직업 주장, 1: 남의 직업 주장, 2: 침묵/기타 발언)",
-    "target_id": "integer 또는 null (0 to 7, null if no target)",
-    "role": "integer 또는 null (주장하는 직업 번호: 0:시민, 1:경찰, 2:의사, 3:마피아)",
+    "target_id": "integer 또는 null (0 to 7, None if no target) 본인 주장시 본인의 ID 입력",
+    "role": "integer 또는 null (주장하는 직업 번호: 0:시민, 1:경찰, 2:의사, 3:마피아 , None if no claim)",
     "reason": "string (왜 그렇게 주장했는지에 대한 논리적 근거)"
     }
   DAY_VOTE: |
@@ -58,6 +57,7 @@ GAME_DATA_BLOCK: &game_data_block |
   - 당신의 역할: {role_name} / ID: {id}
   - 현재 신념 행렬: {belief_matrix}
   - 게임 상태 및 이력: {status_json}
+  - 대화 및 행동 기록 : {conversation_log}
 
 # ==========================================================
 # 2. 인지 및 복기 단계 (BELIEF UPDATE)

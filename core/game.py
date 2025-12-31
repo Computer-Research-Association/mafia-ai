@@ -76,20 +76,20 @@ class MafiaGame:
                     role_id = data.get("role")
                     target_id = data.get("target_id")
                     reason = data.get("reason", "")
-                    claim = data.get("claim")
                     role = p.role.name if role_id is None else Role(role_id).name
 
-                    if claim == 0:
-                        self._log(
-                            f"플레이어 {p.id} :  본인은 {role}이라고 주장. 이유: {reason}"
-                        )
-                    elif claim == 1:
-                        self._log(
-                            f"플레이어 {p.id} : {target_id}가 {role}이라고 주장. 이유: {reason}"
-                        )
+                    action_string = ""
+                    if role_id is not None:
+                        if target_id == p.id or target_id == -1:
+                            action_string = (
+                                f"Player {p.id}는 자신이 {role}이이라고 주장"
+                            )
+                        else:
+                            action_string = f"Player {p.actor_id}는 Player {target_id}가 {role}라고 주장"
                     else:
-                        self._log(f"플레이어 {p.id} : 침묵 : {reason}")
-
+                        action_string = f"Player {p.id}가 침묵."
+                    argue = action_string + (f" 이유: {reason}")
+                    self._log(argue)
                     self.history.append(
                         GameEvent(
                             day=self.day,
@@ -121,7 +121,6 @@ class MafiaGame:
             p.observe(self.get_game_status(p.id))
             try:
                 data = json.loads(p.get_action())
-
                 target = data.get("target_id")
                 reason = data.get("reason", "")
 
