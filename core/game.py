@@ -16,6 +16,8 @@ class MafiaGame:
     def _log(self, message):
         if self.log_file:
             self.log_file.write(message + "\n")
+            self.log_file.flush()
+
 
     def reset(self) -> GameStatus:
         self.day = 1

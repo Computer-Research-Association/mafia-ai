@@ -49,7 +49,9 @@ class PathSettings(BaseSettings):
 class Settings(BaseSettings):
     game: GameSettings = GameSettings()
     train: TrainSettings = TrainSettings()
-    path: PathSettings = PathSettings()
+    paths: PathSettings = PathSettings()
+
+    upstage_api_key: str = Field(..., env="UPSTAGE_API_KEY")
 
     class Config:
         env_file = ".env"
