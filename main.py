@@ -207,6 +207,10 @@ def start_gui():
 
 
 def main():
+    # 사용자 환영 메시지
+    print("안녕하세요! 마피아 AI 시뮬레이터에 오신 것을 환영합니다.")
+    print("=" * 60)
+    
     if len(sys.argv) > 1:
         parser = argparse.ArgumentParser(description="Mafia AI Training/Testing Script")
         parser.add_argument(
