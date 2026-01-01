@@ -37,53 +37,43 @@ def train(env, agent, args, logger: 'LogManager'):
         total_reward = 0
         is_win = False
 
+        # Helper to convert int ID to string ID
+        def id_to_agent(i): return f"player_{i}"
+
         while not done:
             actions = {}
             
             # 1. RL Agent Action (Player 0)
-            if agent.id in obs_dict:
-                # RL Agent는 obs_dict에서 자신의 관측값을 받아 액션 결정
-                # select_action_vector returns list [type, target, role]
-                # But agent.select_action (from BaseAgent/RLAgent) might return something else?
-                # RLAgent.select_action_vector is the new method.
-                # RLAgent.select_action (inherited) calls select_action_vector if implemented?
-                # Let's check RLAgent. It has select_action_vector.
-                # But BaseAgent doesn't enforce select_action signature for RL.
-                # RLAgent usually has select_action(obs).
-                # Let's assume agent.select_action_vector is what we want for env.step input.
-                
-                # Note: RLAgent in rlAgent.py has select_action_vector.
-                # It does NOT have select_action that returns vector.
-                # It has get_action() which returns MafiaAction (for engine).
-                # We need the vector for env.step (Multi-Discrete).
-                
-                action_vector = agent.select_action_vector(obs_dict[agent.id])
-                actions[agent.id] = action_vector
+            agent_key = id_to_agent(agent.id)
+            if agent_key in obs_dict:
+                action_vector = agent.select_action_vector(obs_dict[agent_key])
+                actions[agent_key] = action_vector
             
             # 2. Other Agents (LLM/Bot) - Async Execution
             threads = []
             lock = threading.Lock()
             
-            def get_llm_action(player):
+            def get_llm_action(player, p_key):
                 try:
                     a = player.get_action()
                     with lock:
-                        actions[player.id] = a
+                        actions[p_key] = a
                 except Exception as e:
                     print(f"Error in LLM action: {e}")
 
             # env.game.players 접근
             for p in env.game.players:
-                if p.id not in actions and p.alive:
+                p_key = id_to_agent(p.id)
+                if p_key not in actions and p.alive:
                     # LLMAgent인 경우 비동기 호출
                     if isinstance(p, LLMAgent):
-                        t = threading.Thread(target=get_llm_action, args=(p,))
+                        t = threading.Thread(target=get_llm_action, args=(p, p_key))
                         threads.append(t)
                         t.start()
                     else:
                         # 그 외(Rule-based Bot 등)는 동기 호출
                         try:
-                            actions[p.id] = p.get_action()
+                            actions[p_key] = p.get_action()
                         except Exception as e:
                             print(f"Error in Bot action: {e}")
             
@@ -92,20 +82,22 @@ def train(env, agent, args, logger: 'LogManager'):
                 t.join()
 
             # 3. Environment Step
-            next_obs_dict, rewards, done, truncated, _ = env.step(actions)
+            next_obs_dict, rewards, terminations, truncations, infos = env.step(actions)
+            
+            # Check if game is over
+            done = any(terminations.values()) or any(truncations.values())
 
             # 보상 저장 (RL Agent)
-            if agent.id in rewards:
-                reward = rewards[agent.id]
+            if agent_key in rewards:
+                reward = rewards[agent_key]
                 if hasattr(agent, 'store_reward'):
                     agent.store_reward(reward, done)
                 total_reward += reward
 
             # 승리 판정 (Player 0 기준)
-            if done and total_reward > 5.0: # 임시 기준
-                # 실제 승리 여부는 env.step에서 info나 reward로 판단해야 함
-                # 여기서는 reward가 양수면 승리로 간주 (임시)
-                is_win = reward > 0
+            if done:
+                # env.step에서 반환된 info를 통해 승리 여부 확인
+                is_win = info.get("win", False)
 
             obs_dict = next_obs_dict
 
@@ -146,25 +138,33 @@ def test(env, agent, args):
     done = False
     total_reward = 0
 
+    # Helper to convert int ID to string ID
+    def id_to_agent(i): return f"player_{i}"
+
     while not done:
         actions = {}
         
         # RL Agent
-        if agent.id in obs_dict:
-            action_vector = agent.select_action_vector(obs_dict[agent.id])
-            actions[agent.id] = action_vector
+        agent_key = id_to_agent(agent.id)
+        if agent_key in obs_dict:
+            action_vector = agent.select_action_vector(obs_dict[agent_key])
+            actions[agent_key] = action_vector
             
         # Other Agents (Sync for test to avoid complexity or Async if needed)
         # For test, we can keep it sync or async. Let's use sync for simplicity or copy async logic.
         # Using sync for now as test speed is less critical or we want deterministic debug.
         for p in env.game.players:
-            if p.id not in actions and p.alive:
-                actions[p.id] = p.get_action()
+            p_key = id_to_agent(p.id)
+            if p_key not in actions and p.alive:
+                actions[p_key] = p.get_action()
 
-        next_obs_dict, rewards, done, truncated, _ = env.step(actions)
+        next_obs_dict, rewards, terminations, truncations, infos = env.step(actions)
         
-        if agent.id in rewards:
-            total_reward += rewards[agent.id]
+        # Check if game is over
+        done = any(terminations.values()) or any(truncations.values())
+        
+        if agent_key in rewards:
+            total_reward += rewards[agent_key]
             
         obs_dict = next_obs_dict
         env.render()

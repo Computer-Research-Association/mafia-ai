@@ -21,9 +21,11 @@ class PPO:
         self.optimizer = torch.optim.Adam(self.policy.parameters(), lr=self.lr)
         
         if policy_old is None:
+            # DynamicActorCritic ignores action_dim for heads (hardcoded 9, 5)
+            # So we can pass any value or the sum
             self.policy_old = DynamicActorCritic(
                 state_dim=policy.state_dim,
-                action_dim=policy.actor.out_features,
+                action_dim=14, 
                 backbone=policy.backbone_type,
                 hidden_dim=policy.hidden_dim,
                 num_layers=policy.num_layers
@@ -61,9 +63,11 @@ class PPO:
                 mask_target = mask_tensor[:9]
                 mask_role = mask_tensor[9:]
                 
-                # Apply mask (set logits to -inf for invalid actions)
-                target_logits = target_logits.masked_fill(mask_target == 0, -1e9)
-                role_logits = role_logits.masked_fill(mask_role == 0, -1e9)
+                # Safety check: if all masked, ignore mask
+                if mask_target.sum() > 0:
+                    target_logits = target_logits.masked_fill(mask_target == 0, -1e9)
+                if mask_role.sum() > 0:
+                    role_logits = role_logits.masked_fill(mask_role == 0, -1e9)
 
             # Create distributions
             dist_target = Categorical(logits=target_logits)
@@ -151,46 +155,6 @@ class PPO:
                 
             self.optimizer.zero_grad()
             loss.backward()
-            self.optimizer.step()
-            
-        self.policy_old.load_state_dict(self.policy.state_dict())
-        self.buffer.clear()
-                    if len(ep_states) == 0:
-                        continue
-                    ep_states_3d = ep_states.unsqueeze(0)
-                    action_probs, state_values, _ = self.policy(ep_states_3d)
-                    all_action_probs.append(action_probs.squeeze(0))
-                    all_state_values.append(state_values.squeeze(0))
-                
-                action_probs = torch.cat(all_action_probs, dim=0)
-                state_values = torch.cat(all_state_values, dim=0)
-            else:
-                action_probs, state_values, _ = self.policy(old_states)
-            
-            dist = Categorical(action_probs)
-            logprobs = dist.log_prob(old_actions)
-            dist_entropy = dist.entropy()
-            
-            state_values = torch.squeeze(state_values)
-            ratios = torch.exp(logprobs - old_logprobs)
-            
-            advantages = rewards - state_values.detach()
-            surr1 = ratios * advantages
-            surr2 = torch.clamp(ratios, 1 - self.eps_clip, 1 + self.eps_clip) * advantages
-            
-            actor_loss = -torch.min(surr1, surr2)
-            value_loss = self.MseLoss(state_values, rewards)
-            entropy_loss = -dist_entropy
-            
-            loss = actor_loss + self.value_loss_coef * value_loss + self.entropy_coef * entropy_loss
-            
-            if il_loss_fn is not None:
-                il_loss = il_loss_fn(old_states)
-                loss = loss + config.train.IL_COEF * il_loss
-            
-            self.optimizer.zero_grad()
-            loss.mean().backward()
-            torch.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
             self.optimizer.step()
             
         self.policy_old.load_state_dict(self.policy.state_dict())

@@ -125,14 +125,17 @@ def run_simulation(args):
         # Player 0이 RL인 경우 학습/테스트 진행
         if player0_config['type'] == 'rl':
             env = MafiaEnv()
-            state_dim = env.observation_space["observation"].shape[0]
-            action_dim = env.action_space.n
+            # PettingZoo API: observation_space(agent)
+            # All agents have same obs space
+            agent_id = env.possible_agents[0]
+            state_dim = env.observation_space(agent_id)["observation"].shape[0]
+            # action_dims is fixed to [9, 5] in MafiaEnv
 
             agent = RLAgent(
                 player_id=0,
                 role=Role.CITIZEN,
                 state_dim=state_dim,
-                action_dim=action_dim,
+                action_dims=[9, 5],
                 algorithm=player0_config['algo'],
                 backbone=player0_config['backbone'],
                 use_il=False,  # GUI에서는 기본적으로 IL 비활성화

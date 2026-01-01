@@ -37,7 +37,7 @@ class RLAgent(BaseAgent):
         player_id: int,
         role: Role,
         state_dim: int,
-        action_dims: List[int] = [3, 9, 5],  # [Type, Target, Role]
+        action_dims: List[int] = [9, 5],  # [Target, Role]
         algorithm: str = "ppo",
         backbone: str = "mlp",
         use_il: bool = False,
