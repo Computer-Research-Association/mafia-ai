@@ -204,18 +204,18 @@ class LLMAgent(BaseAgent):
         
         # 토론 종료 → PASS
         if discussion_status == "End":
-            return MafiaAction(action_type=ActionType.PASS, target_id=-1, claim_role=None)
+            return MafiaAction(target_id=-1, claim_role=None)
         
         # 역할 주장 (타겟 포함 여부 무관하게 CLAIM으로 통합)
         if claim_role is not None:
-            return MafiaAction(action_type=ActionType.CLAIM, target_id=target_id, claim_role=claim_role)
+            return MafiaAction(target_id=target_id, claim_role=claim_role)
         
         # 단순 지목
         if target_id != -1:
-            return MafiaAction(action_type=ActionType.TARGET_ACTION, target_id=target_id, claim_role=None)
+            return MafiaAction(target_id=target_id, claim_role=None)
         
         # 기권
-        return MafiaAction(action_type=ActionType.PASS, target_id=-1, claim_role=None)
+        return MafiaAction(target_id=-1, claim_role=None)
     
     def get_action(self) -> MafiaAction:
         """
@@ -225,7 +225,7 @@ class LLMAgent(BaseAgent):
         LLM 응답을 얻은 후 translate_to_engine()으로 변환합니다.
         """
         if not self.current_status:
-            return MafiaAction(action_type=ActionType.PASS, target_id=-1, claim_role=None)
+            return MafiaAction(target_id=-1, claim_role=None)
 
         phase_name = self.current_status.phase.name
         role_name = self.role.name

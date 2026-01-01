@@ -103,8 +103,7 @@ class RLAgent(BaseAgent):
             return self.current_action
         
         # 폴백: PASS 액션
-        from config import ActionType
-        return MafiaAction(action_type=ActionType.PASS, target_id=-1, claim_role=None)
+        return MafiaAction(target_id=-1, claim_role=None)
     
     def select_action_vector(self, state, action_mask: Optional[np.ndarray] = None) -> List[int]:
         """

@@ -59,8 +59,7 @@ class DynamicActorCritic(nn.Module):
             raise ValueError(f"Unknown backbone: {backbone}. Choose 'mlp', 'lstm', or 'gru'")
         
         # Multi-Discrete Action Heads
-        # Action Space: [Type(3), Target(9), Role(5)]
-        self.actor_type = nn.Linear(feature_dim, 3)
+        # Action Space: [Target(9), Role(5)]
         self.actor_target = nn.Linear(feature_dim, 9)
         self.actor_role = nn.Linear(feature_dim, 5)
         
@@ -82,7 +81,7 @@ class DynamicActorCritic(nn.Module):
             hidden_state: RNN 은닉 상태 (LSTM의 경우 (h, c), GRU의 경우 h)
         
         Returns:
-            action_logits: (type_logits, target_logits, role_logits) 튜플
+            action_logits: (target_logits, role_logits) 튜플
             state_value: 상태 가치 [batch_size, 1]
             new_hidden_state: 새로운 은닉 상태 (RNN의 경우)
         """
@@ -104,13 +103,12 @@ class DynamicActorCritic(nn.Module):
             features = features[:, -1, :]
         
         # Multi-Head Output
-        type_logits = self.actor_type(features)
         target_logits = self.actor_target(features)
         role_logits = self.actor_role(features)
         
         state_value = self.critic(features)
         
-        return (type_logits, target_logits, role_logits), state_value, new_hidden_state
+        return (target_logits, role_logits), state_value, new_hidden_state
     
     def init_hidden(self, batch_size=1):
         """RNN 은닉 상태 초기화"""

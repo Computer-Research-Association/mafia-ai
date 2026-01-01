@@ -92,11 +92,11 @@ class MafiaGame:
         pass_count = 0
         for player_id, action in actions.items():
             # PASS 카운트
-            if action.action_type == ActionType.PASS:
+            if action.target_id == -1 and action.claim_role is None:
                 pass_count += 1
             
             # CLAIM 이벤트만 기록
-            if action.action_type == ActionType.CLAIM:
+            if action.claim_role is not None:
                 event = GameEvent(
                     day=self.day,
                     phase=self.phase,

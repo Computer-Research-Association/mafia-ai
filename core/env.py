@@ -14,11 +14,10 @@ class MafiaEnv(gym.Env):
         self.logger = logger
         
         # === [Multi-Discrete Action Space] ===
-        # 형태: [Type, Target, Role]
-        # - Type: 0=PASS, 1=TARGET_ACTION, 2=CLAIM (3개)
-        # - Target: -1~7 (지목 대상, 8개 + 없음)
-        # - Role: -1~3 (주장 역할, 4개 + 없음)
-        self.action_space = spaces.MultiDiscrete([3, 9, 5])
+        # 형태: [Target, Role]
+        # - Target: 0=None, 1~8=Player 0~7 (9개)
+        # - Role: 0=None, 1~4=Role Enum (5개)
+        self.action_space = spaces.MultiDiscrete([9, 5])
 
         # Observation Space: 공적 정보만 포함
         # - alive_status: 8 (생존 여부)
@@ -40,7 +39,7 @@ class MafiaEnv(gym.Env):
                     dtype=np.float32,
                 ),
                 "action_mask": spaces.Box(
-                    low=0, high=1, shape=(3, 9, 5), dtype=np.int8  # Multi-Discrete 마스크
+                    low=0, high=1, shape=(14,), dtype=np.int8  # [Target(9), Role(5)]
                 ),
             }
         )
@@ -169,12 +168,11 @@ class MafiaEnv(gym.Env):
 
         # 3. 역할 기반 행동 보상
         if agent.alive and mafia_action:
-            action_type = mafia_action.action_type
             target_id = mafia_action.target_id
             claim_role = mafia_action.claim_role
             
             # === [역할 주장 보상] ===
-            if action_type == ActionType.CLAIM:
+            if claim_role is not None:
                 if claim_role == role:
                     reward += 2.0
                     if role in [Role.POLICE, Role.DOCTOR]:
@@ -186,7 +184,8 @@ class MafiaEnv(gym.Env):
                         reward -= 2.0
             
             # === [행동 보상] ===
-            if action_type == ActionType.TARGET_ACTION and target_id != -1:
+            # Target Action: Target != -1 and Role == None
+            if target_id != -1 and claim_role is None:
                 if role == Role.CITIZEN:
                     reward += self._calculate_citizen_reward(target_id, prev_phase)
                 elif role == Role.MAFIA:
@@ -405,7 +404,7 @@ class MafiaEnv(gym.Env):
         assert observation.shape == (152,), f"Expected 152 dims, got {observation.shape}"
         
         # 액션 마스크 계산
-        action_mask = self._compute_action_mask(status, my_id, my_role)
+        action_mask = self._compute_action_mask(status, status.my_id, status.my_role)
         
         return {"observation": observation, "action_mask": action_mask}
     
@@ -413,43 +412,53 @@ class MafiaEnv(gym.Env):
         """
         Multi-Discrete 액션 마스크 계산
         
-        마스크 구조: [Type(3), Target(9), Role(5)]
-        - Type: [PASS, TARGET_ACTION, CLAIM]
-        - Target: [-1, 0, 1, 2, 3, 4, 5, 6, 7]
-        - Role: [-1, CITIZEN, POLICE, DOCTOR, MAFIA]
+        마스크 구조: [Target(9), Role(5)] -> Flattened (14,)
+        - Target: 0~8 (0=None, 1~8=Player)
+        - Role: 9~13 (9=None, 10~13=Role)
         """
-        mask = np.ones((3, 9, 5), dtype=np.int8)
+        mask = np.zeros(14, dtype=np.int8)
         phase = status.phase
         
-        # === Type 마스크 ===
-        if phase in (Phase.DAY_DISCUSSION, Phase.DAY_VOTE):
-            mask[0, :, :] = 1  # PASS 허용
-            mask[1, :, :] = 1  # TARGET_ACTION 허용
-            mask[2, :, :] = 1  # CLAIM 허용 (토론에서)
-        elif phase == Phase.NIGHT:
-            mask[0, :, :] = 0  # PASS 불가
-            mask[1, :, :] = 1  # TARGET_ACTION 허용
-            mask[2, :, :] = 0  # CLAIM 불가
+        # === Target Mask (0~8) ===
+        # 0: None (PASS or Self/NoTarget)
+        mask[0] = 1
         
-        # === Target 마스크 ===
-        mask[:, 0, :] = 1  # -1 (타겟 없음) 항상 허용
         for i in range(config.game.PLAYER_COUNT):
-            target_idx = i + 1  # -1 제외하고 0~7은 1~8번 인덱스
-            if not status.players[i].alive:
-                mask[:, target_idx, :] = 0  # 죽은 플레이어 지목 불가
-            elif i == my_id:
-                # 자기 자신 지목 제한
-                if phase in (Phase.DAY_DISCUSSION, Phase.DAY_VOTE):
-                    mask[1, target_idx, :] = 0  # TARGET_ACTION 불가
-                elif phase == Phase.NIGHT and my_role == Role.POLICE:
-                    mask[1, target_idx, :] = 0  # 경찰은 자신 조사 불가
+            target_idx = i + 1
+            # player = status.players[i]
+            is_alive = status.players[i].alive
+            
+            if not is_alive:
+                continue
+                
+            # 기본적으로 살아있는 대상 지목 허용
+            mask[target_idx] = 1
+            
+            # 제약 조건
+            if i == my_id:
+                # 자기 자신 지목 제한 (투표, 킬 등)
+                if phase in (Phase.DAY_VOTE, Phase.NIGHT):
+                    mask[target_idx] = 0
+            
+            # 밤 행동 제약
+            if phase == Phase.NIGHT:
+                # 시민은 밤에 아무것도 못함 (PASS만 가능)
+                if my_role == Role.CITIZEN:
+                    mask[target_idx] = 0
+                # 경찰: 자신 조사 불가
+                elif my_role == Role.POLICE and i == my_id:
+                    mask[target_idx] = 0
         
-        # === Role 마스크 ===
-        mask[:, :, 0] = 1  # -1 (역할 없음) 항상 허용
+        # === Role Mask (9~13) ===
+        # 9: None (No Claim)
+        mask[9] = 1
+        
         if phase == Phase.DAY_DISCUSSION:
-            mask[2, :, 1:] = 1  # CLAIM 타입에서 모든 역할 주장 허용
+            # 모든 역할 주장 허용
+            mask[10:] = 1
         else:
-            mask[2, :, 1:] = 0  # 토론 외에는 역할 주장 불가
+            # 토론 외에는 역할 주장 불가
+            mask[10:] = 0
         
         return mask
 

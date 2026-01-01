@@ -29,24 +29,21 @@ class REINFORCE:
         # logits_tuple: (type_logits, target_logits, role_logits)
         logits_tuple, _, new_hidden = self.policy(state_tensor, hidden_state)
         
-        type_logits, target_logits, role_logits = logits_tuple
-        type_logits = type_logits.squeeze(0)
+        target_logits, role_logits = logits_tuple
         target_logits = target_logits.squeeze(0)
         role_logits = role_logits.squeeze(0)
         
         # Masking skipped for now (see PPO)
         
-        dist_type = Categorical(logits=type_logits)
         dist_target = Categorical(logits=target_logits)
         dist_role = Categorical(logits=role_logits)
         
-        action_type = dist_type.sample()
         action_target = dist_target.sample()
         action_role = dist_role.sample()
         
-        log_prob = dist_type.log_prob(action_type) + dist_target.log_prob(action_target) + dist_role.log_prob(action_role)
+        log_prob = dist_target.log_prob(action_target) + dist_role.log_prob(action_role)
         
-        action = [action_type.item(), action_target.item(), action_role.item()]
+        action = [action_target.item(), action_role.item()]
         
         self.log_probs.append(log_prob)
         self.states.append(state_tensor.squeeze(0))
