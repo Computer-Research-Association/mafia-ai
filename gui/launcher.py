@@ -22,6 +22,8 @@ from pathlib import Path
 class AgentConfigWidget(QGroupBox):
     """각 플레이어(0~7)를 개별 설정하는 위젯"""
     
+    typeChanged = pyqtSignal()
+
     def __init__(self, player_id):
         super().__init__(f"Player {player_id}")
         self.player_id = player_id
@@ -68,9 +70,13 @@ class AgentConfigWidget(QGroupBox):
         self.layout.addWidget(self.rl_config_area)
         
         # 타입 변경 시 RL 설정 영역 토글
-        self.type_combo.currentTextChanged.connect(self._toggle_rl_area)
+        self.type_combo.currentTextChanged.connect(self._on_type_changed)
         self._toggle_rl_area(self.type_combo.currentText())
     
+    def _on_type_changed(self, text):
+        self._toggle_rl_area(text)
+        self.typeChanged.emit()
+
     def _toggle_rl_area(self, agent_type):
         """에이전트 타입에 따라 RL 설정 영역 표시/숨김"""
         self.rl_config_area.setVisible(agent_type == "RL")
@@ -126,7 +132,7 @@ class Launcher(QWidget):
         layout.addWidget(title)
 
         # 1. 실행 모드
-        mode_group = QGroupBox("실행 모드")
+        self.mode_group = QGroupBox("실행 모드")
         mode_layout = QHBoxLayout()
         self.radio_train = QRadioButton("학습 (Train)")
         self.radio_test = QRadioButton("평가 (Test)")
@@ -138,8 +144,8 @@ class Launcher(QWidget):
 
         mode_layout.addWidget(self.radio_train)
         mode_layout.addWidget(self.radio_test)
-        mode_group.setLayout(mode_layout)
-        layout.addWidget(mode_group)
+        self.mode_group.setLayout(mode_layout)
+        layout.addWidget(self.mode_group)
 
         # 2. 에피소드 수
         ep_group = QGroupBox("진행 에피소드 수")
@@ -260,6 +266,7 @@ class Launcher(QWidget):
         # 8개의 AgentConfigWidget 생성
         for i in range(8):
             agent_widget = AgentConfigWidget(i)
+            agent_widget.typeChanged.connect(self.update_mode_visibility)
             self.agent_config_widgets.append(agent_widget)
             
             row = i // 2
@@ -268,6 +275,9 @@ class Launcher(QWidget):
 
         self.main_layout.addWidget(self.left_widget)
         self.main_layout.addWidget(self.right_panel)
+        
+        # 초기 상태 업데이트
+        self.update_mode_visibility()
 
     def toggle_right_panel(self):
         """설정 버튼 클릭 시 패널 열기/닫기"""
@@ -279,12 +289,28 @@ class Launcher(QWidget):
             self.resize(400, 550)
             self.adjustSize()
     
+    def update_mode_visibility(self):
+        """RL 에이전트 존재 여부에 따라 실행 모드 박스 표시/숨김"""
+        has_rl_agent = False
+        for widget in self.agent_config_widgets:
+            if widget.get_config()["type"] == "rl":
+                has_rl_agent = True
+                break
+        
+        self.mode_group.setVisible(has_rl_agent)
+        
+        # RL 에이전트가 없으면 강제로 Test 모드로 전환
+        if not has_rl_agent:
+            self.radio_test.setChecked(True)
+
     def apply_to_all_agents(self):
         """빠른 설정을 모든 에이전트에 일괄 적용"""
         agent_type = self.quick_type_combo.currentText()
         
         for widget in self.agent_config_widgets:
             widget.set_config(agent_type=agent_type)
+        
+        self.update_mode_visibility()
         
         QMessageBox.information(
             self,
