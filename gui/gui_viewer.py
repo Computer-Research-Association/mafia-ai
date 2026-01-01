@@ -1,39 +1,28 @@
 import sys
-import tkinter as tk
-from tkinter import ttk
+from PyQt6.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget
+from PyQt6.QtGui import QFont
 
-# 모듈 임포트
-from .gui_config import configure_fonts, LOG_FILE_PATH
 from .tabs.log_viewer import LogViewerTab
 
 
-class MafiaLogViewerApp:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("Mafia AI 게임 로그 뷰어")
-        self.root.geometry("1100x750")
-
-        # 폰트 설정 적용
-        configure_fonts()
-
-        # 게임 로그 탭만 사용
-        self.log_viewer = LogViewerTab(root, LOG_FILE_PATH)
-        self.log_viewer.frame.pack(fill=tk.BOTH, expand=True)
-
-        # 종료 이벤트 연결
-        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
-
-    def on_closing(self):
-        try:
-            self.root.quit()
-            self.root.destroy()
-        except:
-            pass
-        finally:
-            sys.exit(0)
+class MafiaLogViewerWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Mafia AI 게임 로그 뷰어")
+        self.resize(1100, 750)
+        self.setFont(QFont("Malgun Gothic", 10))  # 폰트 설정
+        # 중앙 위젯, 레이아웃 설정
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        layout = QVBoxLayout()
+        central_widget.setLayout(layout)
+        # 탭 추가
+        self.log_viewer_tab = LogViewerTab(self)
+        layout.addWidget(self.log_viewer_tab)
 
 
 if __name__ == "__main__":
-    root = tk.Tk()
-    app = MafiaLogViewerApp(root)
-    root.mainloop()
+    app = QApplication(sys.argv)
+    window = MafiaLogViewerWindow()
+    window.show()
+    sys.exit(app.exec())
