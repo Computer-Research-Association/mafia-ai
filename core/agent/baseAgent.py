@@ -1,5 +1,5 @@
 from abc import *
-from typing import List
+from typing import List, Dict, Any
 import numpy as np
 import random
 from config import config, Role
@@ -24,7 +24,7 @@ class BaseAgent(ABC):
         self.id = player_id
         self.role = role
         self.alive = True
-        rent_status: GameStatus = None
+        self.current_status: GameStatus = None
 
         # Belief Matrix: (N x 4) - 각 플레이어가 각 직업일 것이라는 신뢰 점수
         # 열(Col): [0: 시민, 1: 경찰, 2: 의사, 3: 마피아]
@@ -50,6 +50,6 @@ class BaseAgent(ABC):
         pass
 
     @abstractmethod
-    def get_action(self, conversation_log: str) -> str:
-        """주관적 추론(Hunch) 및 결정"""
+    def get_action(self) -> 'EngineAction':
+        """주관적 추론(Hunch) 및 결정 - EngineAction 튜플 반환"""
         pass
