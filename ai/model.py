@@ -58,7 +58,12 @@ class DynamicActorCritic(nn.Module):
         else:
             raise ValueError(f"Unknown backbone: {backbone}. Choose 'mlp', 'lstm', or 'gru'")
         
-        self.actor = nn.Linear(feature_dim, action_dim)
+        # Multi-Discrete Action Heads
+        # Action Space: [Type(3), Target(9), Role(5)]
+        self.actor_type = nn.Linear(feature_dim, 3)
+        self.actor_target = nn.Linear(feature_dim, 9)
+        self.actor_role = nn.Linear(feature_dim, 5)
+        
         self.critic = nn.Linear(feature_dim, 1)
         
         self._initialize_weights()
@@ -77,7 +82,7 @@ class DynamicActorCritic(nn.Module):
             hidden_state: RNN 은닉 상태 (LSTM의 경우 (h, c), GRU의 경우 h)
         
         Returns:
-            action_probs: 행동 확률 분포 [batch_size, action_dim]
+            action_logits: (type_logits, target_logits, role_logits) 튜플
             state_value: 상태 가치 [batch_size, 1]
             new_hidden_state: 새로운 은닉 상태 (RNN의 경우)
         """
@@ -98,10 +103,14 @@ class DynamicActorCritic(nn.Module):
             # 마지막 타임스텝의 출력 사용
             features = features[:, -1, :]
         
-        action_probs = F.softmax(self.actor(features), dim=-1)
+        # Multi-Head Output
+        type_logits = self.actor_type(features)
+        target_logits = self.actor_target(features)
+        role_logits = self.actor_role(features)
+        
         state_value = self.critic(features)
         
-        return action_probs, state_value, new_hidden_state
+        return (type_logits, target_logits, role_logits), state_value, new_hidden_state
     
     def init_hidden(self, batch_size=1):
         """RNN 은닉 상태 초기화"""
@@ -116,7 +125,3 @@ class DynamicActorCritic(nn.Module):
             return (h, c)
         else:  # gru
             return h
-
-
-# 레거시 호환성을 위한 별칭
-ActorCritic = DynamicActorCritic

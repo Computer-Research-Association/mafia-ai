@@ -124,20 +124,12 @@ class RLAgent(BaseAgent):
             obs = state
             mask = action_mask
         
-        # TODO: Multi-Discrete 지원을 위한 learner 수정 필요
-        # 현재는 임시로 Discrete 방식 사용
         state_dict = {'observation': obs, 'action_mask': mask}
-        action_idx, self.hidden_state = self.learner.select_action(state_dict, self.hidden_state)
         
-        # 임시: action_idx를 Multi-Discrete 벡터로 변환
-        # Type (0~2), Target (0~8), Role (0~4) 순서로 분해
-        action_type = action_idx % 3
-        action_idx //= 3
-        target = action_idx % 9
-        action_idx //= 9
-        role = action_idx % 5
+        # learner.select_action returns ([type, target, role], hidden_state)
+        action_vector, self.hidden_state = self.learner.select_action(state_dict, self.hidden_state)
         
-        return [action_type, target, role]
+        return action_vector
     
     def store_reward(self, reward: float, is_terminal: bool = False):
         """보상 저장"""

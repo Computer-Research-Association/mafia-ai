@@ -8,40 +8,31 @@ from core.agent.baseAgent import BaseAgent
 
 
 class MafiaGame:
-    def __init__(self, log_file=None, agents: Optional[List[BaseAgent]] = None, logger=None):
+    def __init__(self, agents: List[BaseAgent], logger=None):
         """
         Args:
-            log_file: (Deprecated) 레거시 로그 파일 핸들 - 하위 호환성을 위해 유지
-            agents: 외부에서 주입받을 에이전트 리스트 (선택적)
+            agents: 외부에서 주입받을 에이전트 리스트 (필수)
             logger: LogManager 인스턴스 (선택적)
         """
-        self.players: List[BaseAgent] = agents if agents is not None else []
+        self.players: List[BaseAgent] = agents
         self.day = 1
         self.phase = Phase.DAY_DISCUSSION
         self.discussion_round = 0
         self.history: List[GameEvent] = []
-        self.log_file = log_file
         self.logger = logger
 
-    def reset(self, agents: Optional[List[BaseAgent]] = None) -> GameStatus:
+    def reset(self) -> GameStatus:
         """
-        Args:
-            agents: 외부에서 주입받을 에이전트 리스트 (선택적)
+        게임 상태 초기화
         """
         self.day = 1
         self.phase = Phase.DAY_DISCUSSION
         self.discussion_round = 0
         self.history = []
-        self._last_votes = []  # \ud22c\ud45c \uacb0\uacfc \ucd08\uae30\ud654
+        self._last_votes = []  # 투표 결과 초기화
         
-        # \uc5d0\uc774\uc804\ud2b8 \ucd08\uae30\ud654: \uc678\ubd80 \uc8fc\uc785 \ub610\ub294 \uae30\ubcf8 LLMAgent \uc0dd\uc131
-        if agents is not None:
-            self.players = agents
-        elif not self.players:  # \uc0dd\uc131\uc790\uc5d0\uc11c\ub3c4 \ubc1b\uc9c0 \uc54a\uc558\uc73c\uba74 \uae30\ubcf8 \uc0dd\uc131
-            self.players = [
-                LLMAgent(player_id=i, logger=self.logger) 
-                for i in range(config.game.PLAYER_COUNT)
-            ]
+        # 에이전트 상태 초기화 (필요 시)
+        # 외부에서 주입된 에이전트를 그대로 사용
 
         roles = config.game.DEFAULT_ROLES.copy()
         random.shuffle(roles)
@@ -62,9 +53,10 @@ class MafiaGame:
 
         return self.get_game_status()
 
-    def process_turn(self, actions: Dict[int, MafiaAction]) -> Tuple[GameStatus, bool, bool]:
+    def step_phase(self, actions: Dict[int, MafiaAction]) -> Tuple[GameStatus, bool, bool]:
         """
-        게임 턴 진행 - 외부에서 주입된 액션 처리
+        게임 페이즈 진행 - 외부에서 주입된 액션 처리
+        단일 페이즈(Phase) 단위로 실행을 멈추고 제어권을 반환
         """
         is_over, is_win = self.check_game_over()
         if is_over:
@@ -99,8 +91,6 @@ class MafiaGame:
         # Phase 2: 모든 행동을 한 번에 처리 (이벤트 생성)
         pass_count = 0
         for player_id, action in actions.items():
-            print(f"[Engine] Player {player_id} action: {action}")
-            
             # PASS 카운트
             if action.action_type == ActionType.PASS:
                 pass_count += 1
@@ -129,7 +119,6 @@ class MafiaGame:
         
         # 전원 침묵 시 또는 최대 라운드 도달 시 종료
         if pass_count >= alive_count or self.discussion_round >= 2:
-            print(f"[Engine] Discussion ended: pass_count={pass_count}, round={self.discussion_round}")
             self.discussion_round = 0
             return True
             
@@ -167,13 +156,15 @@ class MafiaGame:
         for p in self.players:
             if p.alive:
                 p.observe(self.get_game_status(p.id))
+        
+        return True
 
-    def _process_execute(self, actions: Dict[int, MafiaAction]):
+    def _process_execute(self, actions: Dict[int, MafiaAction]) -> bool:
         """
         처형 단계 처리 - 외부에서 주입된 액션 처리
         """
         if not self._last_votes:
-            return
+            return True
         
         max_v = max(self._last_votes)
         if max_v > 0:
@@ -228,8 +219,10 @@ class MafiaGame:
         for p in self.players:
             if p.alive:
                 p.observe(self.get_game_status(p.id))
+        
+        return True
 
-    def _process_night(self, actions: Dict[int, MafiaAction]):
+    def _process_night(self, actions: Dict[int, MafiaAction]) -> bool:
         """
         밤 단계 처리 - 외부에서 주입된 액션 처리
         """
@@ -287,6 +280,8 @@ class MafiaGame:
         for p in self.players:
             if p.alive:
                 p.observe(self.get_game_status(p.id))
+        
+        return True
 
     def get_game_status(self, viewer_id: Optional[int] = None) -> GameStatus:
         if viewer_id is None:

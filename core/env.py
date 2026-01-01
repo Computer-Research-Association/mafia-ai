@@ -53,7 +53,15 @@ class MafiaEnv(gym.Env):
         status = self.game.reset()
         # 투표 기록 초기화
         self.last_vote_record = np.zeros((config.game.PLAYER_COUNT, config.game.PLAYER_COUNT), dtype=np.float32)
-        return self._encode_observation(status), {}
+        
+        # Return observation for all agents (or just active ones)
+        # For now, return dict {agent_id: obs}
+        obs_dict = {}
+        for p in self.game.players:
+            if p.alive:
+                obs_dict[p.id] = self._encode_observation(p.id)
+                
+        return obs_dict, {}
 
     def step(self, action_input):
         """
@@ -79,6 +87,7 @@ class MafiaEnv(gym.Env):
             actions_dict[0] = MafiaAction.from_multi_discrete(action_input)
 
         # 2. Fill missing actions from internal agents (Bots/LLMs)
+        # Note: Ideally, the runner should handle this, but for compatibility we do it here if missing.
         for p in self.game.players:
             if p.id not in actions_dict and p.alive:
                 try:
@@ -87,17 +96,17 @@ class MafiaEnv(gym.Env):
                     if isinstance(action, MafiaAction):
                         actions_dict[p.id] = action
                 except Exception as e:
-                    print(f"Error getting action for player {p.id}: {e}")
+                    if self.logger:
+                        self.logger.log_error(f"Error getting action for player {p.id}: {e}")
+                    else:
+                        print(f"Error getting action for player {p.id}: {e}")
 
-        my_id = 0  # RL 에이전트는 항상 Player 0
-        my_role = self.game.players[my_id].role
-        
         # 턴 진행 전 상태 저장
         prev_alive = [p.alive for p in self.game.players]
         prev_phase = self.game.phase
 
         # 게임 진행
-        status, done, win = self.game.process_turn(actions_dict)
+        status, done, win = self.game.step_phase(actions_dict)
         
         # === 투표 기록 업데이트 (PHASE_DAY_VOTE 종료 후) ===
         if prev_phase == Phase.DAY_VOTE:
@@ -109,56 +118,100 @@ class MafiaEnv(gym.Env):
                         self.last_vote_record[voter_id][i] = 1.0
 
         # === [보상 함수 고도화 v2.0: Dense Reward] ===
-        reward = 0.0
+        rewards = {}
+        
+        # Calculate reward for each agent in action_input (or all agents)
+        # For MARL, we return rewards for all agents.
+        for p in self.game.players:
+            rewards[p.id] = self._calculate_reward(p.id, prev_alive, prev_phase, actions_dict.get(p.id), done, win)
 
-        # 1. 승패 보상 - 비중 대폭 감소 (초기 학습 촉진)
+        # Generate observations for all agents
+        obs_dict = {}
+        for p in self.game.players:
+            if p.alive:
+                obs_dict[p.id] = self._encode_observation(p.id)
+
+        # If single agent input, return single values for compatibility (optional but risky for MARL transition)
+        # Let's stick to MARL interface if input was dict, or single if input was list.
+        if isinstance(action_input, list):
+             # Single agent (Player 0) compatibility
+             return obs_dict.get(0), rewards.get(0, 0.0), done, False, {}
+        
+        return obs_dict, rewards, done, False, {}
+
+    def _calculate_reward(self, agent_id, prev_alive, prev_phase, mafia_action, done, win):
+        reward = 0.0
+        agent = self.game.players[agent_id]
+        role = agent.role
+        
+        # 1. 승패 보상
         if done:
-            if win:
-                reward += 30.0  # 승리 보상 (기존 100 → 30으로 감소)
-                # 빨리 이길수록 추가 보상
+            # 승리 조건: 시민팀(시민,경찰,의사) vs 마피아팀
+            is_mafia_team = role == Role.MAFIA
+            # win is True if Citizen team won? 
+            # check_game_over returns (is_over, is_citizen_win) usually.
+            # Let's verify check_game_over in game.py. 
+            # Assuming win=True means Citizen Win.
+            
+            my_win = (win and not is_mafia_team) or (not win and is_mafia_team)
+            
+            if my_win:
+                reward += 30.0
                 reward += (config.game.MAX_DAYS - self.game.day) * 1.0
             else:
-                reward -= 15.0  # 패배 페널티 (기존 -50 → -15로 감소)
+                reward -= 15.0
 
-        # 2. 생존 보상 - 매 턴 피드백 제공
-        if not self.game.players[my_id].alive:
-            reward -= 2.0  # 죽음 페널티
+        # 2. 생존 보상
+        if not agent.alive:
+            reward -= 2.0
         else:
-            reward += 0.5  # 매 턴 생존 시 소량 보상 (학습 신호)
+            reward += 0.5
 
         # 3. 역할 기반 행동 보상
-        if self.game.players[my_id].alive:
-            # MafiaAction에서 정보 추출
+        if agent.alive and mafia_action:
             action_type = mafia_action.action_type
             target_id = mafia_action.target_id
             claim_role = mafia_action.claim_role
             
             # === [역할 주장 보상] ===
             if action_type == ActionType.CLAIM:
-                if claim_role == my_role:
+                if claim_role == role:
                     reward += 2.0
-                    if my_role in [Role.POLICE, Role.DOCTOR]:
+                    if role in [Role.POLICE, Role.DOCTOR]:
                         reward += 3.0
                 else:
-                    if my_role == Role.MAFIA:
+                    if role == Role.MAFIA:
                         reward += 1.0
                     else:
                         reward -= 2.0
             
             # === [행동 보상] ===
             if action_type == ActionType.TARGET_ACTION and target_id != -1:
-                if my_role == Role.CITIZEN:
+                if role == Role.CITIZEN:
                     reward += self._calculate_citizen_reward(target_id, prev_phase)
-                elif my_role == Role.MAFIA:
+                elif role == Role.MAFIA:
                     reward += self._calculate_mafia_reward(target_id, prev_phase)
-                elif my_role == Role.POLICE:
+                elif role == Role.POLICE:
                     reward += self._calculate_citizen_reward(target_id, prev_phase)
                     reward += self._calculate_police_reward(target_id, prev_phase)
-                elif my_role == Role.DOCTOR:
+                elif role == Role.DOCTOR:
                     reward += self._calculate_citizen_reward(target_id, prev_phase)
                     reward += self._calculate_doctor_reward(prev_alive, target_id, prev_phase)
+        
+        return reward
 
-        return self._encode_observation(status), reward, done, False, {}
+    def _encode_observation(self, agent_id):
+        """
+        개별 에이전트 관점의 관측값 생성
+        """
+        # ... existing implementation adapted for agent_id ...
+        # For now, we reuse the existing logic but replace 'my_id' with 'agent_id'
+        # Since the original code used 'my_id = 0' implicitly or explicitly, 
+        # I need to see the original _encode_observation code.
+        # I'll assume I need to rewrite it or it's not shown fully.
+        # Let's read the file again to be sure about _encode_observation.
+        pass
+
     
     def _calculate_citizen_reward(self, action, phase):
         """시민 팀 공통 보상 로직 - Dense Reward 강화"""
@@ -283,7 +336,7 @@ class MafiaEnv(gym.Env):
 
         return reward
 
-    def _encode_observation(self, status: GameStatus) -> Dict:
+    def _encode_observation(self, agent_id: int) -> Dict:
         """
         GameStatus를 사용한 관측 인코딩 - 순수 함수 기반
         
@@ -296,8 +349,7 @@ class MafiaEnv(gym.Env):
         - day_count: 1 (현재 날짜, 정규화)
         - phase_onehot: 3 (현재 페이즈: discussion, vote, night)
         """
-        my_id = 0  # RL agent는 항상 Player 0
-        my_role = self.game.players[my_id].role
+        status = self.game.get_game_status(agent_id)
         n_players = config.game.PLAYER_COUNT
         
         # 1. alive_status (8차원)

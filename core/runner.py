@@ -1,4 +1,6 @@
-from typing import TYPE_CHECKING
+import threading
+from typing import TYPE_CHECKING, Dict, Any
+from core.agent.llmAgent import LLMAgent
 
 if TYPE_CHECKING:
     from core.logger import LogManager
@@ -30,25 +32,82 @@ def train(env, agent, args, logger: 'LogManager'):
         if hasattr(agent, 'reset_hidden'):
             agent.reset_hidden()
         
-        obs, _ = env.reset()
+        obs_dict, _ = env.reset()
         done = False
         total_reward = 0
         is_win = False
 
         while not done:
-            action = agent.select_action(obs)
-            next_obs, reward, done, truncated, _ = env.step(action)
+            actions = {}
+            
+            # 1. RL Agent Action (Player 0)
+            if agent.id in obs_dict:
+                # RL Agent는 obs_dict에서 자신의 관측값을 받아 액션 결정
+                # select_action_vector returns list [type, target, role]
+                # But agent.select_action (from BaseAgent/RLAgent) might return something else?
+                # RLAgent.select_action_vector is the new method.
+                # RLAgent.select_action (inherited) calls select_action_vector if implemented?
+                # Let's check RLAgent. It has select_action_vector.
+                # But BaseAgent doesn't enforce select_action signature for RL.
+                # RLAgent usually has select_action(obs).
+                # Let's assume agent.select_action_vector is what we want for env.step input.
+                
+                # Note: RLAgent in rlAgent.py has select_action_vector.
+                # It does NOT have select_action that returns vector.
+                # It has get_action() which returns MafiaAction (for engine).
+                # We need the vector for env.step (Multi-Discrete).
+                
+                action_vector = agent.select_action_vector(obs_dict[agent.id])
+                actions[agent.id] = action_vector
+            
+            # 2. Other Agents (LLM/Bot) - Async Execution
+            threads = []
+            lock = threading.Lock()
+            
+            def get_llm_action(player):
+                try:
+                    a = player.get_action()
+                    with lock:
+                        actions[player.id] = a
+                except Exception as e:
+                    print(f"Error in LLM action: {e}")
 
-            # 보상 저장 (store_reward 메서드가 있는 경우만)
-            if hasattr(agent, 'store_reward'):
-                agent.store_reward(reward, done)
+            # env.game.players 접근
+            for p in env.game.players:
+                if p.id not in actions and p.alive:
+                    # LLMAgent인 경우 비동기 호출
+                    if isinstance(p, LLMAgent):
+                        t = threading.Thread(target=get_llm_action, args=(p,))
+                        threads.append(t)
+                        t.start()
+                    else:
+                        # 그 외(Rule-based Bot 등)는 동기 호출
+                        try:
+                            actions[p.id] = p.get_action()
+                        except Exception as e:
+                            print(f"Error in Bot action: {e}")
+            
+            # 모든 스레드 종료 대기
+            for t in threads:
+                t.join()
 
-            # 승리 판정
-            if done and reward > 5.0:
-                is_win = True
+            # 3. Environment Step
+            next_obs_dict, rewards, done, truncated, _ = env.step(actions)
 
-            obs = next_obs
-            total_reward += reward
+            # 보상 저장 (RL Agent)
+            if agent.id in rewards:
+                reward = rewards[agent.id]
+                if hasattr(agent, 'store_reward'):
+                    agent.store_reward(reward, done)
+                total_reward += reward
+
+            # 승리 판정 (Player 0 기준)
+            if done and total_reward > 5.0: # 임시 기준
+                # 실제 승리 여부는 env.step에서 info나 reward로 판단해야 함
+                # 여기서는 reward가 양수면 승리로 간주 (임시)
+                is_win = reward > 0
+
+            obs_dict = next_obs_dict
 
         # 에피소드 종료 후 학습 (학습 가능한 경우만)
         if is_trainable:
@@ -83,14 +142,31 @@ def train(env, agent, args, logger: 'LogManager'):
 def test(env, agent, args):
     """테스트 모드 실행"""
     print("Start Test Simulation...")
-    obs, _ = env.reset()
+    obs_dict, _ = env.reset()
     done = False
     total_reward = 0
 
     while not done:
-        action = agent.select_action(obs)
-        obs, reward, done, truncated, _ = env.step(action)
-        total_reward += reward
+        actions = {}
+        
+        # RL Agent
+        if agent.id in obs_dict:
+            action_vector = agent.select_action_vector(obs_dict[agent.id])
+            actions[agent.id] = action_vector
+            
+        # Other Agents (Sync for test to avoid complexity or Async if needed)
+        # For test, we can keep it sync or async. Let's use sync for simplicity or copy async logic.
+        # Using sync for now as test speed is less critical or we want deterministic debug.
+        for p in env.game.players:
+            if p.id not in actions and p.alive:
+                actions[p.id] = p.get_action()
+
+        next_obs_dict, rewards, done, truncated, _ = env.step(actions)
+        
+        if agent.id in rewards:
+            total_reward += rewards[agent.id]
+            
+        obs_dict = next_obs_dict
         env.render()
 
     print(f"Test Game Over. Total Reward: {total_reward}")

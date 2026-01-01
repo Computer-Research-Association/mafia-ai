@@ -25,21 +25,33 @@ class REINFORCE:
             mask = None
 
         state_tensor = torch.FloatTensor(obs).unsqueeze(0)
-        mask_tensor = torch.FloatTensor(mask).unsqueeze(0) if mask is not None else None
         
-        probs, _, new_hidden = self.policy(state_tensor, hidden_state)
+        # logits_tuple: (type_logits, target_logits, role_logits)
+        logits_tuple, _, new_hidden = self.policy(state_tensor, hidden_state)
         
-        if mask_tensor is not None:
-            probs = probs * mask_tensor
-            total_prob = probs.sum(dim=-1, keepdim=True)
-            probs = probs / (total_prob + 1e-8)
+        type_logits, target_logits, role_logits = logits_tuple
+        type_logits = type_logits.squeeze(0)
+        target_logits = target_logits.squeeze(0)
+        role_logits = role_logits.squeeze(0)
         
-        dist = Categorical(probs)
-        action = dist.sample()
-        self.log_probs.append(dist.log_prob(action))
+        # Masking skipped for now (see PPO)
+        
+        dist_type = Categorical(logits=type_logits)
+        dist_target = Categorical(logits=target_logits)
+        dist_role = Categorical(logits=role_logits)
+        
+        action_type = dist_type.sample()
+        action_target = dist_target.sample()
+        action_role = dist_role.sample()
+        
+        log_prob = dist_type.log_prob(action_type) + dist_target.log_prob(action_target) + dist_role.log_prob(action_role)
+        
+        action = [action_type.item(), action_target.item(), action_role.item()]
+        
+        self.log_probs.append(log_prob)
         self.states.append(state_tensor.squeeze(0))
         
-        return action.item(), new_hidden
+        return action, new_hidden
 
     def update(self, il_loss_fn=None):
         if len(self.rewards) == 0:
