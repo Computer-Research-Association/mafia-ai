@@ -18,6 +18,7 @@ class MafiaGame:
         self.players: List[BaseAgent] = agents if agents is not None else []
         self.day = 1
         self.phase = Phase.DAY_DISCUSSION
+        self.discussion_round = 0
         self.history: List[GameEvent] = []
         self.log_file = log_file
         self.logger = logger
@@ -29,6 +30,7 @@ class MafiaGame:
         """
         self.day = 1
         self.phase = Phase.DAY_DISCUSSION
+        self.discussion_round = 0
         self.history = []
         self._last_votes = []  # \ud22c\ud45c \uacb0\uacfc \ucd08\uae30\ud654
         
@@ -60,119 +62,87 @@ class MafiaGame:
 
         return self.get_game_status()
 
-    def process_turn(self) -> Tuple[GameStatus, bool, bool]:
+    def process_turn(self, actions: Dict[int, MafiaAction]) -> Tuple[GameStatus, bool, bool]:
         """
-        게임 턴 진행 - 외부에서 액션을 주입받지 않고 에이전트에게 직접 의사를 물음
+        게임 턴 진행 - 외부에서 주입된 액션 처리
         """
         is_over, is_win = self.check_game_over()
         if is_over:
             return self.get_game_status(), is_over, is_win
 
         if self.phase == Phase.DAY_DISCUSSION:
-            self._process_discussion()
-            self.phase = Phase.DAY_VOTE
+            phase_end = self._process_discussion(actions)
+            if phase_end:
+                self.phase = Phase.DAY_VOTE
         elif self.phase == Phase.DAY_VOTE:
-            self._process_vote()
+            self._process_vote(actions)
             self.phase = Phase.DAY_EXECUTE
         elif self.phase == Phase.DAY_EXECUTE:
-            self._process_execute()
+            self._process_execute(actions)
             self.phase = Phase.NIGHT
         elif self.phase == Phase.NIGHT:
-            self._process_night()
+            self._process_night(actions)
             self.phase = Phase.DAY_DISCUSSION
             self.day += 1
 
         is_over, is_win = self.check_game_over()
         return self.get_game_status(), is_over, is_win
 
-    def _process_discussion(self):
+    def _process_discussion(self, actions: Dict[int, MafiaAction]) -> bool:
         """
-        토론 단계 처리 - 동시성 구조
-        모든 플레이어가 동시에 발언을 결정하고, 한 번에 공개
+        토론 단계 처리 - 외부에서 주입된 액션 처리
+        Returns:
+            bool: 페이즈 종료 여부 (True면 다음 페이즈로)
         """
-        for round_num in range(2):  # 최대 2라운드
-            alive_count = sum(1 for p in self.players if p.alive)
+        alive_count = sum(1 for p in self.players if p.alive)
+        
+        # Phase 2: 모든 행동을 한 번에 처리 (이벤트 생성)
+        pass_count = 0
+        for player_id, action in actions.items():
+            print(f"[Engine] Player {player_id} action: {action}")
             
-            # Phase 1: 모든 플레이어가 동시에 행동 결정
-            actions = []
-            for p in self.players:
-                if not p.alive:
-                    continue
+            # PASS 카운트
+            if action.action_type == ActionType.PASS:
+                pass_count += 1
+            
+            # CLAIM 이벤트만 기록
+            if action.action_type == ActionType.CLAIM:
+                event = GameEvent(
+                    day=self.day,
+                    phase=self.phase,
+                    event_type=EventType.CLAIM,
+                    actor_id=player_id,
+                    target_id=action.target_id if action.target_id != -1 else None,
+                    value=action.claim_role,
+                )
                 
-                try:
-                    # 현재 상태만 보고 행동 결정 (다른 플레이어의 이번 행동은 모름)
-                    action = p.get_action()
-                    
-                    if not isinstance(action, MafiaAction):
-                        print(f"[Engine] Warning: Player {p.id} returned non-MafiaAction: {type(action)}")
-                        continue
-                    
-                    actions.append((p.id, action))
-                    
-                except Exception as e:
-                    print(f"[Engine] Error processing action for Player {p.id}: {e}")
-                    import traceback
-                    traceback.print_exc()
-                    continue
+                self.history.append(event)
+                if self.logger:
+                    self.logger.log_event(event)
+        
+        # Phase 3: 결과를 모두에게 공개
+        for p in self.players:
+            if p.alive:
+                p.observe(self.get_game_status(p.id))
+        
+        self.discussion_round += 1
+        
+        # 전원 침묵 시 또는 최대 라운드 도달 시 종료
+        if pass_count >= alive_count or self.discussion_round >= 2:
+            print(f"[Engine] Discussion ended: pass_count={pass_count}, round={self.discussion_round}")
+            self.discussion_round = 0
+            return True
             
-            # Phase 2: 모든 행동을 한 번에 처리 (이벤트 생성)
-            pass_count = 0
-            for player_id, action in actions:
-                print(f"[Engine] Player {player_id} action: {action}")
-                
-                # PASS 카운트
-                if action.action_type == ActionType.PASS:
-                    pass_count += 1
-                
-                # CLAIM 이벤트만 기록
-                if action.action_type == ActionType.CLAIM:
-                    event = GameEvent(
-                        day=self.day,
-                        phase=self.phase,
-                        event_type=EventType.CLAIM,
-                        actor_id=player_id,
-                        target_id=action.target_id if action.target_id != -1 else None,
-                        value=action.claim_role,
-                    )
-                    
-                    self.history.append(event)
-                    if self.logger:
-                        self.logger.log_event(event)
-            
-            # Phase 3: 결과를 모두에게 공개
-            for p in self.players:
-                if p.alive:
-                    p.observe(self.get_game_status(p.id))
-            
-            # 전원 침묵 시에만 토론 종료
-            if pass_count >= alive_count:
-                print(f"[Engine] Discussion ended: all {alive_count} players passed in round {round_num + 1}")
-                break
+        return False
 
-    def _process_vote(self):
+    def _process_vote(self, actions: Dict[int, MafiaAction]):
         """
-        투표 단계 처리 - 동시성 구조
-        모든 플레이어가 동시에 투표하고, 한 번에 집계
+        투표 단계 처리 - 외부에서 주입된 액션 처리
         """
         votes = [0] * len(self.players)
         
-        # Phase 1: 모든 플레이어가 동시에 투표 결정
-        vote_actions = []
-        for p in self.players:
-            if not p.alive:
-                continue
-            
-            # 에이전트로부터 MafiaAction 받기
-            action = p.get_action()
-            
-            if not isinstance(action, MafiaAction):
-                print(f"[Engine] Warning: Player {p.id} returned non-MafiaAction in vote")
-                continue
-            
-            vote_actions.append((p.id, action))
-        
         # Phase 2: 모든 투표를 한 번에 처리
-        for player_id, action in vote_actions:
+        for player_id, action in actions.items():
             target_id = action.target_id
             
             # 유효한 투표인지 확인
@@ -198,10 +168,9 @@ class MafiaGame:
             if p.alive:
                 p.observe(self.get_game_status(p.id))
 
-    def _process_execute(self):
+    def _process_execute(self, actions: Dict[int, MafiaAction]):
         """
-        처형 단계 처리 - 동시성 구조
-        최다 득표자에 대한 처형 동의를 동시에 받고 처리
+        처형 단계 처리 - 외부에서 주입된 액션 처리
         """
         if not self._last_votes:
             return
@@ -212,20 +181,9 @@ class MafiaGame:
             if len(targets) == 1:
                 target_id = targets[0]
                 
-                # Phase 1: 모든 플레이어가 동시에 처형 동의 여부 결정
-                execution_votes = []
-                for p in self.players:
-                    if not p.alive:
-                        continue
-                    
-                    # 에이전트로부터 MafiaAction 받기
-                    action = p.get_action()
-                    
-                    execution_votes.append((p.id, action))
-                
                 # Phase 2: 모든 동의를 한 번에 처리
                 final_score = 0
-                for player_id, action in execution_votes:
+                for player_id, action in actions.items():
                     # 처형 동의 여부 확인 (임시: dict 호환성 유지)
                     if isinstance(action, dict):
                         agree = action.get("agree_execution", 0)
@@ -271,10 +229,9 @@ class MafiaGame:
             if p.alive:
                 p.observe(self.get_game_status(p.id))
 
-    def _process_night(self):
+    def _process_night(self, actions: Dict[int, MafiaAction]):
         """
-        밤 단계 처리 - 동시성 구조
-        모든 역할이 동시에 행동을 결정하고, 한 번에 처리
+        밤 단계 처리 - 외부에서 주입된 액션 처리
         """
         # 1. 역할별 행동 설정 매핑
         role_config = {
@@ -283,35 +240,24 @@ class MafiaGame:
             Role.POLICE: {"event_type": EventType.POLICE_RESULT, "value": "role_of_target"},
         }
         
-        # Phase 1: 모든 플레이어가 동시에 밤 행동 결정
-        night_actions = []
-        for p in self.players:
+        # Phase 2: 모든 밤 행동을 한 번에 처리
+        night_targets = {}
+        for player_id, action in actions.items():
+            p = self.players[player_id]
             if not p.alive or p.role == Role.CITIZEN:
                 continue
             
-            # 에이전트로부터 MafiaAction 받기
-            action = p.get_action()
-            
-            if not isinstance(action, MafiaAction):
-                print(f"[Engine] Warning: Player {p.id} returned non-MafiaAction in night")
-                continue
-            
-            night_actions.append((p.id, p.role, action))
-        
-        # Phase 2: 모든 밤 행동을 한 번에 처리
-        night_targets = {}
-        for player_id, role, action in night_actions:
             target_id = action.target_id
             
             # 유효한 타겟인지 확인
             if target_id != -1 and 0 <= target_id < len(self.players) and self.players[target_id].alive:
                 # 역할별 설정 가져오기
-                config = role_config.get(role)
+                config = role_config.get(p.role)
                 if not config:
                     continue
                 
                 # 타겟 저장 (살해/보호 판정용)
-                night_targets[role] = target_id
+                night_targets[p.role] = target_id
                 
                 # 이벤트 생성
                 event_value = None

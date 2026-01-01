@@ -55,16 +55,40 @@ class MafiaEnv(gym.Env):
         self.last_vote_record = np.zeros((config.game.PLAYER_COUNT, config.game.PLAYER_COUNT), dtype=np.float32)
         return self._encode_observation(status), {}
 
-    def step(self, action_vector: List[int]):
+    def step(self, action_input):
         """
         환경 스텝 실행 - Multi-Discrete 방식
         
         Args:
-            action_vector: [Type, Target, Role] 형태의 Multi-Discrete 벡터
+            action_input: 
+                - List[int] (Single Agent): Player 0's action vector
+                - Dict[int, List[int]] (Multi Agent): {player_id: action_vector}
         
         Returns:
             observation, reward, done, truncated, info
         """
+        # 1. Parse actions
+        actions_dict = {}
+        
+        if isinstance(action_input, dict):
+            # Multi-Agent case
+            for pid, vec in action_input.items():
+                actions_dict[pid] = MafiaAction.from_multi_discrete(vec)
+        else:
+            # Single Agent case (Player 0)
+            actions_dict[0] = MafiaAction.from_multi_discrete(action_input)
+
+        # 2. Fill missing actions from internal agents (Bots/LLMs)
+        for p in self.game.players:
+            if p.id not in actions_dict and p.alive:
+                try:
+                    # Non-RL agents or RL agents not controlled externally
+                    action = p.get_action()
+                    if isinstance(action, MafiaAction):
+                        actions_dict[p.id] = action
+                except Exception as e:
+                    print(f"Error getting action for player {p.id}: {e}")
+
         my_id = 0  # RL 에이전트는 항상 Player 0
         my_role = self.game.players[my_id].role
         
@@ -72,16 +96,8 @@ class MafiaEnv(gym.Env):
         prev_alive = [p.alive for p in self.game.players]
         prev_phase = self.game.phase
 
-        # Multi-Discrete 벡터를 MafiaAction으로 변환
-        mafia_action = MafiaAction.from_multi_discrete(action_vector)
-        
-        # RL 에이전트에게 액션 전달
-        rl_agent = self.game.players[my_id]
-        if hasattr(rl_agent, 'set_action'):
-            rl_agent.set_action(mafia_action)
-        
         # 게임 진행
-        status, done, win = self.game.process_turn()
+        status, done, win = self.game.process_turn(actions_dict)
         
         # === 투표 기록 업데이트 (PHASE_DAY_VOTE 종료 후) ===
         if prev_phase == Phase.DAY_VOTE:
