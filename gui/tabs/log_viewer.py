@@ -141,6 +141,7 @@ class LogViewerTab(QWidget):
                 experiment_name="viewer",
                 log_dir=str(self.current_log_dir.parent),
                 use_tensorboard=False,
+                write_mode=False,
             )
         except Exception as e:
             print(f"LogManager 초기화 실패: {e}")
@@ -248,7 +249,7 @@ class LogViewerTab(QWidget):
             EventType.EXECUTE: "#cc0000",
             EventType.KILL: "#990000",
             EventType.PROTECT: "#009900",
-            EventType.POLICE_RESULT: "#f6f6f8",
+            EventType.POLICE_RESULT: "#6ee2ff",
         }
         return color_map.get(event_type, "#f6f6f8")
 
