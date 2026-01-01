@@ -34,12 +34,12 @@ def run_simulation(args):
         print("Error: Player configurations not found. Please use the GUI.")
         return
 
-    # Player 0의 설정으로 실험 이름 생성
-    player0_config = player_configs[0]
-    if player0_config['type'] == 'rl':
-        experiment_name = f"{player0_config['algo']}_{player0_config['backbone']}_{args.mode}"
-    else:
-        experiment_name = f"llm_{args.mode}"
+    # Player 0의 설정으로 실험 이름 생성 -> 첫 번째 RL 에이전트 기준
+    experiment_name = f"llm_{args.mode}" # 기본값
+    for config in player_configs:
+        if config['type'] == 'rl':
+            experiment_name = f"{config['algo']}_{config['backbone']}_{args.mode}"
+            break
     
     # LogManager 초기화
     log_dir = str(getattr(args, 'paths', {}).get('log_dir', 'logs'))

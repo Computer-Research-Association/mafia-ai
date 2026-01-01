@@ -135,12 +135,19 @@ def train(env, rl_agents: Dict[int, Any], all_agents: Dict[int, Any], args, logg
                 agent.update()
 
         # 승률 및 로깅 (대표 에이전트 또는 전체)
+        metrics = {}
         for pid in rl_agents.keys():
             recent_wins[pid].append(1 if is_wins[pid] else 0)
             if len(recent_wins[pid]) > window_size:
                 recent_wins[pid].pop(0)
+            
+            win_rate = sum(recent_wins[pid]) / len(recent_wins[pid]) if recent_wins[pid] else 0.0
+            
+            # 개별 에이전트 메트릭 추가
+            metrics[f"Agent_{pid}/Reward"] = episode_rewards[pid]
+            metrics[f"Agent_{pid}/WinRate"] = win_rate
         
-        # 대표 에이전트 (첫 번째)
+        # 대표 에이전트 (첫 번째) - 호환성 유지
         rep_pid = list(rl_agents.keys())[0]
         rep_win_rate = sum(recent_wins[rep_pid]) / len(recent_wins[rep_pid]) if recent_wins[rep_pid] else 0.0
         
@@ -148,13 +155,17 @@ def train(env, rl_agents: Dict[int, Any], all_agents: Dict[int, Any], args, logg
             episode=episode,
             total_reward=episode_rewards[rep_pid],
             is_win=is_wins[rep_pid],
-            win_rate=rep_win_rate
+            win_rate=rep_win_rate,
+            **metrics
         )
 
         if episode % 100 == 0:
-            print(
-                f"[Training] Ep {episode:5d} | Agent {rep_pid} Score: {episode_rewards[rep_pid]:6.2f} | Win Rate: {rep_win_rate*100:3.0f}%"
-            )
+            # 모든 에이전트 상태 출력
+            log_str = f"[Training] Ep {episode:5d}"
+            for pid in rl_agents.keys():
+                wr = sum(recent_wins[pid]) / len(recent_wins[pid]) if recent_wins[pid] else 0.0
+                log_str += f" | Ag {pid} R:{episode_rewards[pid]:6.2f} W:{wr*100:3.0f}%"
+            print(log_str)
 
     print(f"\n학습 완료. TensorBoard로 결과 확인: tensorboard --logdir={logger.session_dir / 'tensorboard'}")
 

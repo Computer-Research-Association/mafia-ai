@@ -33,7 +33,16 @@ class REINFORCE:
         target_logits = target_logits.squeeze(0)
         role_logits = role_logits.squeeze(0)
         
-        # Masking skipped for now (see PPO)
+        # Masking
+        if mask is not None:
+            mask_tensor = torch.FloatTensor(mask)
+            mask_target = mask_tensor[:9]
+            mask_role = mask_tensor[9:]
+            
+            if mask_target.sum() > 0:
+                target_logits = target_logits.masked_fill(mask_target == 0, -1e9)
+            if mask_role.sum() > 0:
+                role_logits = role_logits.masked_fill(mask_role == 0, -1e9)
         
         dist_target = Categorical(logits=target_logits)
         dist_role = Categorical(logits=role_logits)
