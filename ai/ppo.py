@@ -35,7 +35,6 @@ class PPO:
             self.policy_old = policy_old
             
         self.MseLoss = nn.MSELoss()
-        self.is_rnn = self.policy.backbone_type in ["lstm", "gru"]
 
     def select_action(self, state, hidden_state=None):
         if isinstance(state, dict):
@@ -47,10 +46,7 @@ class PPO:
             
         with torch.no_grad():
             # obs: (78,) -> (1, 1, 78) for RNN (batch, seq, feature)
-            # or (1, 78) for MLP
-            state_tensor = torch.FloatTensor(obs).unsqueeze(0)
-            if self.is_rnn:
-                state_tensor = state_tensor.unsqueeze(0)
+            state_tensor = torch.FloatTensor(obs).unsqueeze(0).unsqueeze(0)
             
             # logits_tuple: (target_logits, role_logits)
             logits_tuple, _, new_hidden = self.policy_old(state_tensor, hidden_state)
@@ -127,88 +123,49 @@ class PPO:
             if self.is_rnn:
                 # RNN: 에피소드 경계를 고려한 시퀀스 처리
                 ep_states_list = self._split_episodes(self.buffer.states, self.buffer.is_terminals)
-                ep_actions_list = self._split_episodes(self.buffer.actions, self.buffer.is_terminals)
-                ep_logprobs_list = self._split_episodes(self.buffer.logprobs, self.buffer.is_terminals)
-                ep_rewards_list = self._split_episodes(rewards, self.buffer.is_terminals)
+            # RNN: 에피소드 경계를 고려한 시퀀스 처리
+            ep_states_list = self._split_episodes(self.buffer.states, self.buffer.is_terminals)
+            ep_actions_list = self._split_episodes(self.buffer.actions, self.buffer.is_terminals)
+            ep_logprobs_list = self._split_episodes(self.buffer.logprobs, self.buffer.is_terminals)
+            ep_rewards_list = self._split_episodes(rewards, self.buffer.is_terminals)
+            
+            total_loss = 0
+            for i in range(len(ep_states_list)):
+                # (seq_len, dim) -> (1, seq_len, dim)
+                ep_states = ep_states_list[i].unsqueeze(0)
+                ep_actions = ep_actions_list[i]
+                ep_old_logprobs = ep_logprobs_list[i]
+                ep_rewards = ep_rewards_list[i]
                 
-                total_loss = 0
-                for i in range(len(ep_states_list)):
-                    # (seq_len, dim) -> (1, seq_len, dim)
-                    ep_states = ep_states_list[i].unsqueeze(0)
-                    ep_actions = ep_actions_list[i]
-                    ep_old_logprobs = ep_logprobs_list[i]
-                    ep_rewards = ep_rewards_list[i]
-                    
-                    # Forward pass (hidden state is reset for each episode)
-                    logits_tuple, state_values, _ = self.policy(ep_states)
-                    target_logits, role_logits = logits_tuple
-                    
-                    # Remove batch dim: (1, seq, dim) -> (seq, dim)
-                    target_logits = target_logits.squeeze(0)
-                    role_logits = role_logits.squeeze(0)
-                    state_values = state_values.squeeze(0).squeeze(-1)
-                    
-                    dist_target = Categorical(logits=target_logits)
-                    dist_role = Categorical(logits=role_logits)
-                    
-                    logprobs_target = dist_target.log_prob(ep_actions[:, 0])
-                    logprobs_role = dist_role.log_prob(ep_actions[:, 1])
-                    logprobs = logprobs_target + logprobs_role
-                    
-                    dist_entropy = dist_target.entropy() + dist_role.entropy()
-                    
-                    ratios = torch.exp(logprobs - ep_old_logprobs)
-                    
-                    advantages = ep_rewards - state_values.detach()
-                    surr1 = ratios * advantages
-                    surr2 = torch.clamp(ratios, 1 - self.eps_clip, 1 + self.eps_clip) * advantages
-                    
-                    loss = -torch.min(surr1, surr2) + 0.5 * self.MseLoss(state_values, ep_rewards) - self.entropy_coef * dist_entropy
-                    total_loss += loss.mean()
+                # Forward pass (hidden state is reset for each episode)
+                logits_tuple, state_values, _ = self.policy(ep_states)
+                target_logits, role_logits = logits_tuple
                 
-                loss = total_loss / len(ep_states_list)
+                # Remove batch dim: (1, seq, dim) -> (seq, dim)
+                target_logits = target_logits.squeeze(0)
+                role_logits = role_logits.squeeze(0)
+                state_values = state_values.squeeze(0).squeeze(-1)
                 
-                self.optimizer.zero_grad()
-                loss.backward()
-                self.optimizer.step()
-                continue
-
-            # Forward pass
-            logits_tuple, state_values, _ = self.policy(old_states)
-            target_logits, role_logits = logits_tuple
-            
-            # Create distributions
-            dist_target = Categorical(logits=target_logits)
-            dist_role = Categorical(logits=role_logits)
-            
-            # Get log probs for old actions
-            # old_actions: (N, 2) -> target, role
-            logprobs_target = dist_target.log_prob(old_actions[:, 0])
-            logprobs_role = dist_role.log_prob(old_actions[:, 1])
-            
-            logprobs = logprobs_target + logprobs_role
-            dist_entropy = dist_target.entropy() + dist_role.entropy()
-            state_values = state_values.squeeze()
-            
-            # Ratios
-            ratios = torch.exp(logprobs - old_logprobs)
-            
-            # Surrogate Loss
-            advantages = rewards - state_values.detach()
-            surr1 = ratios * advantages
-            surr2 = torch.clamp(ratios, 1 - self.eps_clip, 1 + self.eps_clip) * advantages
-            
-            loss = -torch.min(surr1, surr2) + 0.5 * self.MseLoss(state_values, rewards) - self.entropy_coef * dist_entropy
-            
-            # IL Loss
-            if il_loss_fn is not None:
-                loss = loss.mean() + config.train.IL_COEF * il_loss_fn(old_states)
-            else:
-                loss = loss.mean()
+                dist_target = Categorical(logits=target_logits)
+                dist_role = Categorical(logits=role_logits)
                 
-            self.optimizer.zero_grad()
-            loss.backward()
-            self.optimizer.step()
+                logprobs_target = dist_target.log_prob(ep_actions[:, 0])
+                logprobs_role = dist_role.log_prob(ep_actions[:, 1])
+                logprobs = logprobs_target + logprobs_role
+                
+                dist_entropy = dist_target.entropy() + dist_role.entropy()
+                
+                ratios = torch.exp(logprobs - ep_old_logprobs)
+                
+                advantages = ep_rewards - state_values.detach()
+                surr1 = ratios * advantages
+                surr2 = torch.clamp(ratios, 1 - self.eps_clip, 1 + self.eps_clip) * advantages
+                
+                loss = -torch.min(surr1, surr2) + 0.5 * self.MseLoss(state_values, ep_rewards) - self.entropy_coef * dist_entropy
+                total_loss += loss.mean()
+            
+            loss = total_loss / len(ep_states_list)
+        self.optimizer.step()
             
         self.policy_old.load_state_dict(self.policy.state_dict())
         self.buffer.clear()

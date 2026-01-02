@@ -14,7 +14,6 @@ class REINFORCE:
         self.log_probs = []
         self.rewards = []
         self.states = []
-        self.is_rnn = self.policy.backbone_type in ["lstm", "gru"]
 
     def select_action(self, state, hidden_state=None):
         if isinstance(state, dict):
@@ -24,7 +23,7 @@ class REINFORCE:
             obs = state
             mask = None
 
-        state_tensor = torch.FloatTensor(obs).unsqueeze(0)
+        state_tensor = torch.FloatTensor(obs).unsqueeze(0).unsqueeze(0)
         
         # logits_tuple: (type_logits, target_logits, role_logits)
         logits_tuple, _, new_hidden = self.policy(state_tensor, hidden_state)

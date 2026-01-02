@@ -26,7 +26,7 @@ class RLAgent(BaseAgent):
         state_dim: 상태 벡터 차원
         action_dims: Multi-Discrete 액션 차원 리스트 [9, 5]
         algorithm: "ppo" 또는 "reinforce"
-        backbone: "mlp", "lstm", "gru"
+        backbone: "lstm", "gru"
         use_il: Imitation Learning 사용 여부
         hidden_dim: 은닉층 차원
         num_layers: RNN 레이어 수

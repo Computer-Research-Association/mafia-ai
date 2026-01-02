@@ -25,7 +25,7 @@ def train(env, rl_agents: Dict[int, Any], all_agents: Dict[int, Any], args, logg
 
     first_agent = next(iter(rl_agents.values()))
     algorithm_name = getattr(first_agent, 'algorithm', 'RL').upper()
-    backbone_name = getattr(first_agent, 'backbone', 'mlp').upper()
+    backbone_name = getattr(first_agent, 'backbone', 'lstm').upper()
     
     print(f"Start Training ({algorithm_name}+{backbone_name}) for {args.episodes} episodes...")
     print(f"Active RL Agents: {list(rl_agents.keys())}")

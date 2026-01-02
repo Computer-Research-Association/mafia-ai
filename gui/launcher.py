@@ -50,7 +50,7 @@ class AgentConfigWidget(QGroupBox):
         # 백본 선택
         rl_layout.addWidget(QLabel("Backbone:"))
         self.backbone_combo = QComboBox()
-        self.backbone_combo.addItems(["MLP", "LSTM", "GRU"])
+        self.backbone_combo.addItems(["LSTM", "GRU"])
         rl_layout.addWidget(self.backbone_combo)
         
         # 은닉층 차원
@@ -91,7 +91,7 @@ class AgentConfigWidget(QGroupBox):
             config["num_layers"] = self.num_layers_spin.value()
         return config
     
-    def set_config(self, agent_type="LLM", algo="PPO", backbone="MLP", hidden_dim=128, num_layers=2):
+    def set_config(self, agent_type="LLM", algo="PPO", backbone="LSTM", hidden_dim=128, num_layers=2):
         """외부에서 설정을 일괄 적용할 때 사용"""
         self.type_combo.setCurrentText(agent_type.upper())
         if agent_type.upper() == "RL":
