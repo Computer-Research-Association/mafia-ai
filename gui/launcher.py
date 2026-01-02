@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QLineEdit,
     QFileDialog,
+    QScrollArea,
 )
 from PyQt6.QtCore import pyqtSignal, Qt
 from argparse import Namespace
@@ -28,28 +29,31 @@ class AgentConfigWidget(QGroupBox):
         self.layout = QVBoxLayout()
         self.setLayout(self.layout)
 
+        top_layout = QHBoxLayout()
+        top_layout.addWidget(QLabel("Type:"))
+
         # 1. 에이전트 메인 타입 (LLM vs RL)
         self.type_combo = QComboBox()
         self.type_combo.addItems(["LLM", "RL"])
-        self.layout.addWidget(QLabel("Type:"))
-        self.layout.addWidget(self.type_combo)
+        self.type_combo.setSizePolicy(
+            self.type_combo.sizePolicy().horizontalPolicy(),
+            self.type_combo.sizePolicy().verticalPolicy(),
+        )
+        top_layout.addWidget(self.type_combo, stretch=1)
+
+        self.layout.addLayout(top_layout)
 
         # 2. RL 전용 설정 영역 (RL 선택 시만 노출/활성화)
         self.rl_config_area = QWidget()
         rl_layout = QVBoxLayout()
         self.rl_config_area.setLayout(rl_layout)
+        rl_layout.setContentsMargins(0, 0, 0, 0)  # 내부 여백 제거
 
         # 알고리즘 선택
         rl_layout.addWidget(QLabel("Algorithm:"))
         self.algo_combo = QComboBox()
         self.algo_combo.addItems(["PPO", "REINFORCE"])
         rl_layout.addWidget(self.algo_combo)
-
-        # 백본 선택
-        rl_layout.addWidget(QLabel("Backbone:"))
-        self.backbone_combo = QComboBox()
-        self.backbone_combo.addItems(["MLP", "LSTM", "GRU"])
-        rl_layout.addWidget(self.backbone_combo)
 
         # 은닉층 차원
         rl_layout.addWidget(QLabel("Hidden Dim:"))
@@ -71,6 +75,8 @@ class AgentConfigWidget(QGroupBox):
         self.type_combo.currentTextChanged.connect(self._toggle_rl_area)
         self._toggle_rl_area(self.type_combo.currentText())
 
+        self.layout.addStretch()
+
     def _toggle_rl_area(self, agent_type):
         """에이전트 타입에 따라 RL 설정 영역 표시/숨김"""
         self.rl_config_area.setVisible(agent_type == "RL")
@@ -80,30 +86,27 @@ class AgentConfigWidget(QGroupBox):
         config = {"type": self.type_combo.currentText().lower()}
         if config["type"] == "rl":
             config["algo"] = self.algo_combo.currentText().lower()
-            config["backbone"] = self.backbone_combo.currentText().lower()
             config["hidden_dim"] = self.hidden_dim_spin.value()
             config["num_layers"] = self.num_layers_spin.value()
         return config
 
-    def set_config(
-        self, agent_type="LLM", algo="PPO", backbone="MLP", hidden_dim=128, num_layers=2
-    ):
+    def set_config(self, agent_type="LLM", algo="PPO", hidden_dim=128, num_layers=2):
         """외부에서 설정을 일괄 적용할 때 사용"""
         self.type_combo.setCurrentText(agent_type.upper())
         if agent_type.upper() == "RL":
             self.algo_combo.setCurrentText(algo.upper())
-            self.backbone_combo.setCurrentText(backbone.upper())
             self.hidden_dim_spin.setValue(hidden_dim)
             self.num_layers_spin.setValue(num_layers)
 
 
 class Launcher(QWidget):
     start_simulation_signal = pyqtSignal(object)
+    stop_simulation_signal = pyqtSignal()
 
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Mafia AI Simulation")
-        self.resize(400, 450)
+        self.resize(450, 600)
 
         # 8개의 개별 에이전트 설정 위젯을 저장
         self.agent_config_widgets = []
@@ -111,20 +114,24 @@ class Launcher(QWidget):
         self._init_ui()
 
     def _init_ui(self):
-        # === [메인 레이아웃] ===
+        self._load_stylesheet()
+
         self.main_layout = QHBoxLayout()
+        self.main_layout.setContentsMargins(20, 20, 20, 20)
+        self.main_layout.setSpacing(20)
         self.setLayout(self.main_layout)
 
-        # =================================================
-        # [왼쪽 패널]
-        # =================================================
         self.left_widget = QWidget()
+        self.left_widget.setStyleSheet("background-color: transparent;")
         layout = QVBoxLayout()
+        layout.setSpacing(15)
         self.left_widget.setLayout(layout)
 
-        title = QLabel("마피아 AI 시물레이터")
+        title = QLabel("마피아 AI 시뮬레이터")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        title.setStyleSheet("font-size: 20px; font-weight: bold;")
+        title.setStyleSheet(
+            "font-size: 22px; font-weight: bold; color: #4CAF50; margin-bottom: 10px;"
+        )
         layout.addWidget(title)
 
         # 1. 실행 모드
@@ -158,7 +165,7 @@ class Launcher(QWidget):
         quick_layout = QVBoxLayout()
 
         quick_desc = QLabel("모든 플레이어에게 동일한 설정 일괄 적용")
-        quick_desc.setStyleSheet("color: gray; font-size: 11px;")
+        quick_desc.setStyleSheet("color: #aaa; font-size: 11px;")
         quick_layout.addWidget(quick_desc)
 
         quick_controls = QHBoxLayout()
@@ -211,18 +218,6 @@ class Launcher(QWidget):
 
         # 로그 뷰어 버튼
         self.btn_log_viewer = QPushButton("📊 게임 로그 뷰어 열기")
-        self.btn_log_viewer.setStyleSheet(
-            """
-            QPushButton {
-                background-color: #2196F3; 
-                color: white; 
-                font-size: 14px; 
-                padding: 10px;
-                border-radius: 6px;
-            }
-            QPushButton:hover { background-color: #0b7dda; }
-            """
-        )
         self.btn_log_viewer.clicked.connect(self.open_log_viewer)
         layout.addWidget(self.btn_log_viewer)
 
@@ -235,38 +230,45 @@ class Launcher(QWidget):
 
         # 시작 버튼
         self.btn_start = QPushButton("시뮬레이션 시작")
-        self.btn_start.setStyleSheet(
-            """
-            QPushButton {
-                background-color: #4CAF50; 
-                color: white; 
-                font-size: 16px; 
-                padding: 12px;
-                border-radius: 8px;
-            }
-            QPushButton:hover { background-color: #45a049; }
-        """
-        )
         self.btn_start.clicked.connect(self.on_click_start)
         layout.addWidget(self.btn_start)
 
-        # =================================================
-        # [오른쪽 패널] - 8개의 독립적인 에이전트 설정
-        # =================================================
+        # 중지 버튼
+        self.btn_stop = QPushButton("중지")
+        self.btn_stop.clicked.connect(self.on_click_stop)
+        self.btn_stop.setObjectName("StopBtn")
+        self.btn_stop.setEnabled(False)
+        layout.addWidget(self.btn_stop)
+
         self.right_panel = QGroupBox("개별 에이전트 설정 (8명)")
         self.right_panel.setVisible(False)
 
-        right_layout = QGridLayout()
-        self.right_panel.setLayout(right_layout)
+        # 그룹박스 메인 레이아웃
+        panel_layout = QVBoxLayout()
+        self.right_panel.setLayout(panel_layout)
 
-        # 8개의 AgentConfigWidget 생성
+        # 스크롤 영역 생성
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+
+        # 스크롤 내부 컨텐츠 위젯
+        scroll_content = QWidget()
+        scroll_content.setStyleSheet("background-color: transparent;")
+        scroll_layout = QGridLayout(scroll_content)
+        scroll_layout.setSpacing(15)
+
+        # 8개의 AgentConfigWidget 생성 및 스크롤 영역에 추가
         for i in range(8):
             agent_widget = AgentConfigWidget(i)
+
             self.agent_config_widgets.append(agent_widget)
 
             row = i // 2
             col = i % 2
-            right_layout.addWidget(agent_widget, row, col)
+            scroll_layout.addWidget(agent_widget, row, col)
+
+        scroll.setWidget(scroll_content)
+        panel_layout.addWidget(scroll)
 
         self.main_layout.addWidget(self.left_widget)
         self.main_layout.addWidget(self.right_panel)
@@ -275,10 +277,10 @@ class Launcher(QWidget):
         """설정 버튼 클릭 시 패널 열기/닫기"""
         if self.btn_expand.isChecked():
             self.right_panel.setVisible(True)
-            self.resize(1100, 700)
+            self.resize(1150, 750)  # 패널 열릴 때 크기
         else:
             self.right_panel.setVisible(False)
-            self.resize(400, 550)
+            self.resize(450, 600)  # 패널 닫힐 때 크기
             self.adjustSize()
 
     def apply_to_all_agents(self):
@@ -309,10 +311,17 @@ class Launcher(QWidget):
             self.log_path_input.setText(path)
 
     def open_log_viewer(self):
-        from gui.gui_viewer import MafiaLogViewerWindow
+        """로그 뷰어 창 열기 (PyQt6 윈도우)"""
+        # 이전에 만든 gui_viewer.py의 클래스를 import
+        try:
+            from gui.gui_viewer import MafiaLogViewerWindow
 
-        self.log_window = MafiaLogViewerWindow()
-        self.log_window.show()
+            self.log_window = MafiaLogViewerWindow()
+            self.log_window.show()
+        except ImportError:
+            QMessageBox.warning(
+                self, "오류", "gui/gui_viewer.py 파일을 찾을 수 없습니다."
+            )
 
     def on_click_start(self):
         """시뮬레이션 시작 버튼 클릭 - 개별 에이전트 설정 수집"""
@@ -329,11 +338,34 @@ class Launcher(QWidget):
         }
 
         args = Namespace(
-            player_configs=player_configs,  # 새로운 구조!
+            player_configs=player_configs,
             mode=mode,
             episodes=self.ep_spin.value(),
             gui=True,
             paths=paths,
         )
-
+        self.set_btn(False)
         self.start_simulation_signal.emit(args)
+
+    def on_click_stop(self):
+        self.set_btn(True)
+        self.stop_simulation_signal.emit()
+
+    # 추후에 시뮬레이션 종료시 버튼 복구 기능 추가 구현
+    def set_btn(self, run):
+        self.btn_start.setEnabled(run)
+        self.btn_stop.setEnabled(not run)
+
+    def _load_stylesheet(self):
+        """styles.qss 파일을 읽어서 적용"""
+        try:
+            # 현재 파일(launcher.py)과 같은 폴더에 있는 styles.qss 경로 찾기
+            qss_path = Path(__file__).parent / "styles.qss"
+
+            if qss_path.exists():
+                with open(qss_path, "r", encoding="utf-8") as f:
+                    self.setStyleSheet(f.read())
+            else:
+                print(f"Warning: Stylesheet file not found at {qss_path}")
+        except Exception as e:
+            print(f"Error loading stylesheet: {e}")
