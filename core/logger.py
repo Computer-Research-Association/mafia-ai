@@ -28,6 +28,7 @@ class LogManager:
         experiment_name: str,
         log_dir: str = "./logs",
         use_tensorboard: bool = True,
+        write_mode: bool = True,
     ):
         """
         Args:
@@ -38,29 +39,30 @@ class LogManager:
         self.experiment_name = experiment_name
         self.log_dir = Path(log_dir)
         self.log_dir.mkdir(parents=True, exist_ok=True)
-        self.use_tensorboard = use_tensorboard
+        self.use_tensorboard = use_tensorboard and write_mode
 
-        # 타임스탬프 기반 고유 디렉토리 생성
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.session_dir = self.log_dir / f"{experiment_name}_{timestamp}"
-        self.session_dir.mkdir(parents=True, exist_ok=True)
-
-        # JSONL 로그 파일 경로
-        self.jsonl_path = self.session_dir / "events.jsonl"
-        self.jsonl_file = open(self.jsonl_path, "w", encoding="utf-8")
-
-        # TensorBoard writer (조건부 생성)
-        self.writer = None
-        if use_tensorboard:
-            tensorboard_dir = self.session_dir / "tensorboard"
-            self.writer = SummaryWriter(log_dir=str(tensorboard_dir))
-            print(f"  - TensorBoard: {tensorboard_dir}")
-
-        # 내러티브 템플릿 로드
         self.narrative_templates = self._load_narrative_templates()
 
-        print(f"[LogManager] Initialized: {self.session_dir}")
-        print(f"  - JSONL: {self.jsonl_path}")
+        if write_mode:
+            self.log_dir.mkdir(parents=True, exist_ok=True)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            self.session_dir = self.log_dir / f"{experiment_name}_{timestamp}"
+            self.session_dir.mkdir(parents=True, exist_ok=True)
+
+            self.jsonl_path = self.session_dir / "events.jsonl"
+            self.jsonl_file = open(self.jsonl_path, "w", encoding="utf-8")
+
+            self.writer = None
+            if self.use_tensorboard:
+                tensorboard_dir = self.session_dir / "tensorboard"
+                self.writer = SummaryWriter(log_dir=str(tensorboard_dir))
+                print(f"  - TensorBoard: {tensorboard_dir}")
+
+            print(f"[LogManager] Initialized: {self.session_dir}")
+        else:
+            self.session_dir = None
+            self.jsonl_file = None
+            self.writer = None
 
     def _load_narrative_templates(self) -> Dict[str, str]:
         """YAML에서 내러티브 템플릿 로드"""
