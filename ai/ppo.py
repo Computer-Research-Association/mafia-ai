@@ -19,6 +19,7 @@ class PPO:
         self.buffer = RolloutBuffer()
         self.policy = policy
         self.optimizer = torch.optim.Adam(self.policy.parameters(), lr=self.lr)
+        self.is_rnn = policy.backbone_type in ["lstm", "gru"]
         
         if policy_old is None:
             # DynamicActorCritic ignores action_dim for heads (hardcoded 9, 5)
@@ -119,16 +120,20 @@ class PPO:
         old_actions = torch.stack(self.buffer.actions, dim=0).detach() # Shape: (N, 2)
         old_logprobs = torch.stack(self.buffer.logprobs, dim=0).detach()
         
-        for _ in range(self.k_epochs):
-            if self.is_rnn:
-                # RNN: 에피소드 경계를 고려한 시퀀스 처리
-                ep_states_list = self._split_episodes(self.buffer.states, self.buffer.is_terminals)
+        if self.is_rnn:
             # RNN: 에피소드 경계를 고려한 시퀀스 처리
             ep_states_list = self._split_episodes(self.buffer.states, self.buffer.is_terminals)
             ep_actions_list = self._split_episodes(self.buffer.actions, self.buffer.is_terminals)
             ep_logprobs_list = self._split_episodes(self.buffer.logprobs, self.buffer.is_terminals)
             ep_rewards_list = self._split_episodes(rewards, self.buffer.is_terminals)
-            
+        else:
+            # Non-RNN case: treat as single episode or batch
+            ep_states_list = self._split_episodes(self.buffer.states, self.buffer.is_terminals)
+            ep_actions_list = self._split_episodes(self.buffer.actions, self.buffer.is_terminals)
+            ep_logprobs_list = self._split_episodes(self.buffer.logprobs, self.buffer.is_terminals)
+            ep_rewards_list = self._split_episodes(rewards, self.buffer.is_terminals)
+        
+        for _ in range(self.k_epochs):
             total_loss = 0
             for i in range(len(ep_states_list)):
                 # (seq_len, dim) -> (1, seq_len, dim)
@@ -165,7 +170,10 @@ class PPO:
                 total_loss += loss.mean()
             
             loss = total_loss / len(ep_states_list)
-        self.optimizer.step()
+            
+            self.optimizer.zero_grad()
+            loss.backward()
+            self.optimizer.step()
             
         self.policy_old.load_state_dict(self.policy.state_dict())
         self.buffer.clear()

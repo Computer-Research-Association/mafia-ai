@@ -169,9 +169,19 @@ class MafiaEnv(ParallelEnv):
         else:
             reward += 0.05
 
-        # 3. 역할 기반 행동 보상 (단순화)
-        # 초기 학습 안정화를 위해 복잡한 조건부 보상 제거
-        # 필요 시 나중에 추가
+        # 3. 역할 기반 행동 보상
+        action_target = -1
+        if mafia_action:
+            action_target = mafia_action.target_id
+            
+        if role == Role.CITIZEN:
+            reward += self._calculate_citizen_reward(action_target, prev_phase)
+        elif role == Role.MAFIA:
+            reward += self._calculate_mafia_reward(action_target, prev_phase)
+        elif role == Role.POLICE:
+            reward += self._calculate_police_reward(action_target, prev_phase)
+        elif role == Role.DOCTOR:
+            reward += self._calculate_doctor_reward(prev_alive, action_target, prev_phase)
         
         return reward
 

@@ -51,6 +51,7 @@ class RLAgent(BaseAgent):
         self.use_il = use_il
         self.state_dim = state_dim
         self.action_dims = action_dims
+        self.action_dim = sum(action_dims)
         
         self.policy = DynamicActorCritic(
             state_dim=state_dim,

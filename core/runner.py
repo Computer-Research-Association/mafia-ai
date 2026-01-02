@@ -90,7 +90,7 @@ def train(env, rl_agents: Dict[int, Any], all_agents: Dict[int, Any], args, logg
                 # 살아있는 에이전트만 처리 (env.agents는 살아있는 에이전트 ID 리스트)
                 if p_key in env.agents:
                     if isinstance(agent, LLMAgent):
-                        t = threading.Thread(target=get_llm_action, args=(agent, p_key))
+                        t = threading.Thread(target=get_llm_action, args=(agent, p_key), name=f"Thread-{p_key}")
                         threads.append(t)
                         t.start()
                     else:
@@ -108,7 +108,9 @@ def train(env, rl_agents: Dict[int, Any], all_agents: Dict[int, Any], args, logg
             
             # 모든 스레드 종료 대기
             for t in threads:
-                t.join()
+                t.join(timeout=10.0)
+                if t.is_alive():
+                    print(f"Warning: LLM Agent thread {t.name} timed out.")
 
             # 3. Environment Step
             next_obs_dict, rewards, terminations, truncations, infos = env.step(actions)
