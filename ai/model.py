@@ -14,18 +14,19 @@ class DynamicActorCritic(nn.Module):
     
     Args:
         state_dim: 입력 상태 차원 (78)
-        action_dim: 출력 행동 차원 (14 = Target 9 + Role 5)
+        action_dims: 출력 행동 차원 리스트 (예: [9, 5])
         backbone: 백본 타입 ("lstm", "gru")
         hidden_dim: 은닉층 차원 (기본값: 128)
         num_layers: RNN 레이어 수 (기본값: 2)
     """
-    def __init__(self, state_dim, action_dim, backbone="lstm", hidden_dim=128, num_layers=2):
+    def __init__(self, state_dim, action_dims=[9, 5], backbone="lstm", hidden_dim=128, num_layers=2):
         super(DynamicActorCritic, self).__init__()
         
         self.backbone_type = backbone.lower()
         self.hidden_dim = hidden_dim
         self.num_layers = num_layers
         self.state_dim = state_dim
+        self.action_dims = action_dims
         
         if self.backbone_type == "lstm":
             self.backbone = nn.LSTM(
@@ -50,8 +51,8 @@ class DynamicActorCritic(nn.Module):
         
         # Multi-Discrete Action Heads
         # Action Space: [Target(9), Role(5)]
-        self.actor_target = nn.Linear(feature_dim, 9)
-        self.actor_role = nn.Linear(feature_dim, 5)
+        self.actor_target = nn.Linear(feature_dim, action_dims[0])
+        self.actor_role = nn.Linear(feature_dim, action_dims[1])
         
         self.critic = nn.Linear(feature_dim, 1)
         

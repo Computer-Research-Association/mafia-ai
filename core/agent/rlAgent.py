@@ -52,12 +52,9 @@ class RLAgent(BaseAgent):
         self.state_dim = state_dim
         self.action_dims = action_dims
         
-        # Multi-Discrete 지원을 위한 총 액션 수 계산
-        total_action_dim = sum(action_dims)  # 9 + 5 = 14
-        
         self.policy = DynamicActorCritic(
             state_dim=state_dim,
-            action_dim=total_action_dim,
+            action_dims=action_dims,
             backbone=backbone,
             hidden_dim=hidden_dim,
             num_layers=num_layers

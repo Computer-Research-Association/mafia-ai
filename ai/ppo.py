@@ -25,7 +25,7 @@ class PPO:
             # So we can pass any value or the sum
             self.policy_old = DynamicActorCritic(
                 state_dim=policy.state_dim,
-                action_dim=14, 
+                action_dims=policy.action_dims, 
                 backbone=policy.backbone_type,
                 hidden_dim=policy.hidden_dim,
                 num_layers=policy.num_layers
