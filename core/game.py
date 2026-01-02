@@ -132,8 +132,9 @@ class MafiaGame:
             if not player.alive:
                 continue
                 
-            # 1. PASS 처리 (215727ed의 로직을 가져와서 CLAIM(None)으로 기록)
-            if action.action_type == ActionType.PASS:
+            # 1. PASS 처리
+            is_pass = (action.target_id == -1 and action.claim_role is None)
+            if is_pass:
                 pass_count += 1
                 event = GameEvent(
                     day=self.day,
@@ -144,7 +145,7 @@ class MafiaGame:
                 )
             
             # 2. CLAIM 처리
-            elif action.action_type == ActionType.CLAIM:
+            elif action.claim_role is not None:
                 event = GameEvent(
                     day=self.day,
                     phase=self.phase,
@@ -155,7 +156,7 @@ class MafiaGame:
                 )
             
             # 3. TARGET_ACTION (토론 중 지목) 처리
-            elif action.action_type == ActionType.TARGET_ACTION:
+            elif action.target_id != -1:
                 event = GameEvent(
                     day=self.day,
                     phase=self.phase,
