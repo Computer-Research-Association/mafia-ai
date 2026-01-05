@@ -18,7 +18,7 @@ from PyQt6.QtCore import Qt, QTimer
 
 from core.engine.state import GameEvent
 from config import Role, Phase, EventType
-from core.logger import LogManager
+from core.managers.logger import LogManager
 
 
 class LogViewerTab(QWidget):
