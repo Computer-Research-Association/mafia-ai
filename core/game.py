@@ -41,6 +41,7 @@ class MafiaGame:
         random.shuffle(roles)
         for p, r in zip(self.players, roles):
             p.role = r
+            p.alive = True
             # 역할 할당 이벤트 로깅
             if self.logger:
                 # GameEvent로 기록 (JSONL 저장용)
@@ -85,7 +86,7 @@ class MafiaGame:
 
         if self.phase == Phase.GAME_START:
             self.phase = Phase.DAY_DISCUSSION
-        if self.phase == Phase.DAY_DISCUSSION:
+        elif self.phase == Phase.DAY_DISCUSSION:
             phase_end = self._process_discussion(actions)
             if phase_end:
                 self.phase = Phase.DAY_VOTE
