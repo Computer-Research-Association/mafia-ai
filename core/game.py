@@ -32,6 +32,7 @@ class MafiaGame:
         self.discussion_round = 0
         self.history = []
         self._last_votes = []  # 투표 결과 초기화
+        self.police_research = [0 for _ in range(7)]  # 경찰 조사 결과 초기화
 
         # 에이전트 상태 초기화 (필요 시)
         # 외부에서 주입된 에이전트를 그대로 사용
@@ -185,10 +186,16 @@ class MafiaGame:
         """
         투표 단계 처리 - 외부에서 주입된 액션 처리
         """
+
+        filtered_actions = {
+            player_id: action
+            for player_id, action in actions.items()
+            if self.players[player_id].alive
+        }
         votes = [0] * len(self.players)
 
         # Phase 2: 모든 투표를 한 번에 처리
-        for player_id, action in actions.items():
+        for player_id, action in filtered_actions.items():
             target_id = action.target_id
 
             # 투표 이벤트는 기권(-1)을 포함하여 모두 기록
@@ -234,10 +241,15 @@ class MafiaGame:
             targets = [i for i, v in enumerate(self._last_votes) if v == max_v]
             if len(targets) == 1:
                 target_id = targets[0]
+                filtered_actions = {
+                    player_id: action
+                    for player_id, action in actions.items()
+                    if self.players[player_id].alive
+                }
 
                 # Phase 2: 모든 동의를 한 번에 처리
                 final_score = 0
-                for player_id, action in actions.items():
+                for player_id, action in filtered_actions.items():
                     # 처형 동의 여부 확인 (임시: dict 호환성 유지)
                     if isinstance(action, dict):
                         agree = action.get("agree_execution", 0)
