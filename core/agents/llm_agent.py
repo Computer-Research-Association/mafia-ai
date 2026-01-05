@@ -6,12 +6,12 @@ from typing import List, Dict, Optional, TYPE_CHECKING, Any
 from openai import OpenAI
 from dotenv import load_dotenv
 import random
-from core.agent.baseAgent import BaseAgent
+from core.agents.base_agent import BaseAgent
 from config import config, Role, Phase, EventType, ActionType
-from state import GameStatus, GameEvent, GameAction
+from core.engine.state import GameStatus, GameEvent, GameAction
 
 if TYPE_CHECKING:
-    from core.logger import LogManager
+    from core.managers.logger import LogManager
 
 load_dotenv()
 

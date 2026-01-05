@@ -5,12 +5,12 @@ import numpy as np
 from typing import List, Optional, Tuple, Dict, Any
 from torch.distributions import Categorical
 
-from core.agent.baseAgent import BaseAgent
+from core.agents.base_agent import BaseAgent
 from ai.model import DynamicActorCritic
 from ai.ppo import PPO
 from ai.reinforce import REINFORCE
 from config import config, Role
-from state import GameStatus, GameEvent, GameAction
+from core.engine.state import GameStatus, GameEvent, GameAction
 
 
 class RLAgent(BaseAgent):

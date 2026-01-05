@@ -7,10 +7,10 @@ from typing import Dict, Any, List, Optional
 from pettingzoo import ParallelEnv
 from pettingzoo.utils import parallel_to_aec, wrappers
 
-from core.game import MafiaGame
-from core.agent.baseAgent import BaseAgent
+from core.engine.game import MafiaGame
+from core.agents.base_agent import BaseAgent
 from config import config, Role, Phase, EventType, ActionType
-from state import GameStatus, GameAction, PlayerStatus, GameEvent
+from core.engine.state import GameStatus, GameAction, PlayerStatus, GameEvent
 
 class EnvAgent(BaseAgent):
     """

@@ -2,10 +2,10 @@ from typing import List, Dict, Tuple, Optional
 import random
 import json
 from config import config, Role, Phase, EventType, ActionType
-from state import GameStatus, GameEvent, PlayerStatus, GameAction
-from core.agent.llmAgent import LLMAgent
-from core.agent.baseAgent import BaseAgent
-from core.logger import LogManager
+from core.engine.state import GameStatus, GameEvent, PlayerStatus, GameAction
+from core.agents.llm_agent import LLMAgent
+from core.agents.base_agent import BaseAgent
+from core.managers.logger import LogManager
 from collections import Counter
 
 

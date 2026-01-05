@@ -1,11 +1,12 @@
 import threading
 from typing import TYPE_CHECKING, Dict, Any, List, Optional
-from core.agent.llmAgent import LLMAgent
+from core.agents.llm_agent import LLMAgent
 from config import Role, EventType, Phase
+from core.managers.stats import StatsManager
 
 if TYPE_CHECKING:
-    from core.logger import LogManager
-    from core.agent.rlAgent import RLAgent
+    from core.managers.logger import LogManager
+    from core.agents.rl_agent import RLAgent
 
 
 def train(
@@ -40,11 +41,8 @@ def train(
     )
     print(f"Active RL Agents: {list(rl_agents.keys())}")
 
-    # 승률 계산을 위한 최근 승리 기록 (에이전트별)
-    recent_wins = {pid: [] for pid in rl_agents.keys()}
-    recent_mafia_wins = []
-    recent_citizen_wins = []
-    window_size = 100
+    # 통계 매니저 초기화
+    stats_manager = StatsManager()
 
     # Helper to convert int ID to string ID
     def id_to_agent(i):
@@ -180,144 +178,20 @@ def train(
                     if "entropy" in res:
                         train_metrics[role_key]["entropy"].append(res["entropy"])
 
-        # 승률 및 로깅 (대표 에이전트 또는 전체)
-        metrics = {}
-        
-        # 1. Agent Tab (학습 현황)
-        for pid in rl_agents.keys():
-            recent_wins[pid].append(1 if is_wins[pid] else 0)
-            if len(recent_wins[pid]) > window_size:
-                recent_wins[pid].pop(0)
-
-            win_rate = (
-                sum(recent_wins[pid]) / len(recent_wins[pid])
-                if recent_wins[pid]
-                else 0.0
-            )
-
-            # 개별 에이전트 메트릭 추가
-            metrics[f"Agent_{pid}/Reward_Total"] = episode_rewards[pid]
-            metrics[f"Agent_{pid}/Win_Rate"] = win_rate
-
-        # 팀/역할별 학습 지표
-        for role_key in ["Mafia", "Citizen"]:
-            if train_metrics[role_key]["loss"]:
-                metrics[f"Train/{role_key}_Loss"] = sum(train_metrics[role_key]["loss"]) / len(train_metrics[role_key]["loss"])
-            if train_metrics[role_key]["entropy"]:
-                metrics[f"Train/{role_key}_Entropy"] = sum(train_metrics[role_key]["entropy"]) / len(train_metrics[role_key]["entropy"])
-
-        # 2. Game Tab (게임 통계)
-        if hasattr(env, "game"):
-            game = env.game
-            metrics["Game/Duration"] = game.day
-            
-            # 승률 밸런스
-            # 이번 게임의 승리 팀 확인
-            winner_team = "None"
-            # RL 에이전트 중 하나라도 승리했으면 그 팀이 승리한 것으로 간주 (모든 플레이어가 RL이 아닐 수도 있으므로)
-            # 하지만 여기서는 RL 에이전트들의 승패만 기록되어 있음.
-            # env.game.check_game_over()를 사용하여 정확한 승리 팀을 파악하는 것이 좋음.
-            # 하지만 이미 게임이 끝났으므로, is_wins 정보를 활용.
-            
-            # 마피아 팀 승리 여부 확인
-            mafia_won = False
-            citizen_won = False
-            
-            # 전체 에이전트(all_agents)를 순회하며 확인
-            for pid, agent in all_agents.items():
-                # RL 에이전트인 경우 is_wins에서 확인
-                if pid in is_wins:
-                    if is_wins[pid]:
-                        if agent.role == Role.MAFIA:
-                            mafia_won = True
-                        else:
-                            citizen_won = True
-                # RL 에이전트가 아닌 경우 (LLM 등) - infos나 game state에서 확인해야 함
-                # 여기서는 RL 에이전트가 적어도 한 명씩은 각 팀에 있다고 가정하거나,
-                # 단순히 RL 에이전트들의 승패로 팀 승패를 결정.
-                # 만약 RL 에이전트가 없는 팀이 있다면? -> 보통 학습 시에는 양 팀에 RL 에이전트를 배치함.
-            
-            # 만약 RL 에이전트만으로 판단이 어렵다면, game history의 마지막 이벤트를 확인
-            last_event = game.history[-1] if game.history else None
-            if last_event and last_event.phase == Phase.GAME_END:
-                # value가 True면 시민 승리, False면 마피아 승리 (game.py check_game_over 참조)
-                citizen_won_game = last_event.value
-                if citizen_won_game:
-                    citizen_won = True
-                    mafia_won = False
-                else:
-                    mafia_won = True
-                    citizen_won = False
-            
-            recent_mafia_wins.append(1 if mafia_won else 0)
-            recent_citizen_wins.append(1 if citizen_won else 0)
-            
-            if len(recent_mafia_wins) > window_size: recent_mafia_wins.pop(0)
-            if len(recent_citizen_wins) > window_size: recent_citizen_wins.pop(0)
-            
-            metrics["Game/Mafia_WinRate"] = sum(recent_mafia_wins) / len(recent_mafia_wins) if recent_mafia_wins else 0.0
-            metrics["Game/Citizen_WinRate"] = sum(recent_citizen_wins) / len(recent_citizen_wins) if recent_citizen_wins else 0.0
-
-            # 상세 행동 지표
-            mafia_kill_attempts = 0
-            doctor_saves = 0
-            police_investigations = 0
-            police_finds = 0
-            lynch_executions = 0
-            mafia_lynched = 0
-            citizen_lynched = 0 # Wrong lynch
-            
-            night_events = [e for e in game.history if e.phase == Phase.NIGHT]
-            # 날짜별로 그룹화하여 처리
-            for d in range(1, game.day + 1):
-                day_events = [e for e in night_events if e.day == d]
-                kill_event = next((e for e in day_events if e.event_type == EventType.KILL), None)
-                protect_event = next((e for e in day_events if e.event_type == EventType.PROTECT), None)
-                
-                if kill_event:
-                    mafia_kill_attempts += 1
-                    if protect_event and kill_event.target_id == protect_event.target_id:
-                        doctor_saves += 1
-                
-                police_events = [e for e in day_events if e.event_type == EventType.POLICE_RESULT]
-                for pe in police_events:
-                    police_investigations += 1
-                    if pe.value == Role.MAFIA:
-                        police_finds += 1
-            
-            execute_events = [e for e in game.history if e.event_type == EventType.EXECUTE and e.target_id != -1]
-            for ee in execute_events:
-                lynch_executions += 1
-                target = game.players[ee.target_id]
-                if target.role == Role.MAFIA:
-                    mafia_lynched += 1
-                else:
-                    citizen_lynched += 1
-            
-            if mafia_kill_attempts > 0:
-                metrics["Action/Doctor_Save_Rate"] = doctor_saves / mafia_kill_attempts
-            else:
-                metrics["Action/Doctor_Save_Rate"] = 0.0
-                
-            if police_investigations > 0:
-                metrics["Action/Police_Find_Rate"] = police_finds / police_investigations
-            else:
-                metrics["Action/Police_Find_Rate"] = 0.0
-                
-            if lynch_executions > 0:
-                metrics["Vote/Mafia_Lynch_Rate"] = mafia_lynched / lynch_executions
-                metrics["Vote/Wrong_Lynch_Rate"] = citizen_lynched / lynch_executions
-            else:
-                metrics["Vote/Mafia_Lynch_Rate"] = 0.0
-                metrics["Vote/Wrong_Lynch_Rate"] = 0.0
+        # StatsManager를 통해 통계 계산
+        metrics = stats_manager.calculate_stats(
+            env=env,
+            rl_agents=rl_agents,
+            all_agents=all_agents,
+            episode_rewards=episode_rewards,
+            is_wins=is_wins,
+            train_metrics=train_metrics
+        )
 
         # 대표 에이전트 (첫 번째) - 호환성 유지
         rep_pid = list(rl_agents.keys())[0]
-        rep_win_rate = (
-            sum(recent_wins[rep_pid]) / len(recent_wins[rep_pid])
-            if recent_wins[rep_pid]
-            else 0.0
-        )
+        # StatsManager에서 계산된 값 사용
+        rep_win_rate = metrics.get(f"Agent_{rep_pid}/Win_Rate", 0.0)
 
         logger.log_metrics(
             episode=episode,
@@ -331,11 +205,7 @@ def train(
             # 모든 에이전트 상태 출력
             log_str = f"[Training] Ep {episode:5d}"
             for pid in rl_agents.keys():
-                wr = (
-                    sum(recent_wins[pid]) / len(recent_wins[pid])
-                    if recent_wins[pid]
-                    else 0.0
-                )
+                wr = metrics.get(f"Agent_{pid}/Win_Rate", 0.0)
                 log_str += f" | Ag {pid} R:{episode_rewards[pid]:6.2f} W:{wr*100:3.0f}%"
             print(log_str)
 
