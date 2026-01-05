@@ -111,7 +111,7 @@ class MafiaEnv(ParallelEnv):
             rewards[agent] = self._calculate_reward(pid, prev_alive, prev_phase, engine_actions.get(pid), is_over, is_win)
             terminations[agent] = is_over
             truncations[agent] = False
-            infos[agent] = {"day": status.day, "phase": status.phase, "win": is_win}
+            infos[agent] = {"day": status.day, "phase": status.phase, "win": my_win}
 
         if is_over:
             self.agents = []
