@@ -15,6 +15,7 @@ from PyQt6.QtWidgets import (
     QFileDialog,
     QScrollArea,
 )
+from PyQt6.QtGui import QIcon
 from PyQt6.QtCore import pyqtSignal, Qt
 from argparse import Namespace
 from pathlib import Path
@@ -126,6 +127,10 @@ class Launcher(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Mafia AI Simulation")
+        icon_path = Path(__file__).parent / "icon.jpg"
+        if icon_path.exists():
+            self.setWindowIcon(QIcon(str(icon_path)))
+
         self.resize(450, 600)
 
         # 8개의 개별 에이전트 설정 위젯을 저장
