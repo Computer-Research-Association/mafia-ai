@@ -29,6 +29,7 @@ class LogManager:
         log_dir: str = "./logs",
         use_tensorboard: bool = True,
         write_mode: bool = True,
+        overwrite: bool = False,
     ):
         """
         Args:
@@ -40,6 +41,7 @@ class LogManager:
         self.log_dir = Path(log_dir)
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self.use_tensorboard = use_tensorboard and write_mode
+        self.current_episode = 1
 
         self.narrative_templates = self._load_narrative_templates()
 
@@ -76,7 +78,7 @@ class LogManager:
             "VOTE": "Day {day} | Player {actor_id}가 Player {target_id}에게 투표했습니다.",
             "ABSTAIN": "Day {day} | Player {actor_id}는 기권하였습니다.",
             "EXECUTE": "Day {day} | Player {target_id}가 처형되었습니다. (역할: {role_name})",
-            "CANCEL": "Day {day} | 처형이 부결되었습니다.",
+            "CANCEL": "Day {day} | 투표가 무산되어 아무도 처형되지 않았습니다.",
             "KILL": "Night {day} | Player {target_id}가 마피아에게 살해당했습니다.",
             "PROTECT": "Night {day} | 의사가 Player {target_id}를 보호했습니다.",
             "POLICE_RESULT": "Night {day} | 경찰이 Player {target_id}를 조사: {role_name}",
@@ -95,11 +97,22 @@ class LogManager:
 
         return default_templates
 
+    def set_episode(self, episode: int):
+        self.current_episode = episode
+
     def log_event(self, event: GameEvent):
         """GameEvent를 JSONL 형식으로 기록"""
-        event_json = event.model_dump_json(exclude_none=False)
-        self.jsonl_file.write(event_json + "\n")
-        self.jsonl_file.flush()
+        if self.jsonl_file:
+            # 1. 이벤트를 딕셔너리로 변환
+            # (Pydantic v2는 model_dump(), v1은 dict() 사용. 안전하게 dict() 권장)
+            data = event.dict() if hasattr(event, "dict") else event.model_dump()
+
+            # 2. [핵심] 딕셔너리에 episode 필드 강제 주입
+            data["episode"] = self.current_episode
+
+            # 3. 파일 쓰기
+            self.jsonl_file.write(json.dumps(data, ensure_ascii=False) + "\n")
+            self.jsonl_file.flush()
 
     def log_metrics(
         self,
@@ -165,7 +178,7 @@ class LogManager:
             else:
                 template_key = "VOTE"
         if event.event_type == EventType.EXECUTE:
-            if event.target_id == -1:
+            if event.target_id == -1 or event.value is None:
                 template_key = "CANCEL"
             else:
                 template_key = "EXECUTE"

@@ -22,8 +22,8 @@ def run_simulation(args):
     LogManager를 통한 통합 로깅 시스템 사용
     GUI에서 전달된 player_configs 구조 사용
     """
-    player_configs = getattr(args, 'player_configs', None)
-    
+    player_configs = getattr(args, "player_configs", None)
+
     if player_configs is None:
         print("Error: Player configurations not found. Please use the GUI.")
         return
@@ -34,7 +34,7 @@ def run_simulation(args):
         if p_config['type'] == 'rl':
             experiment_name = f"{p_config['algo']}_{p_config['backbone']}_{args.mode}"
             break
-    
+
     # LogManager 초기화
     log_dir = str(getattr(args, "paths", {}).get("log_dir", "logs"))
     logger = LogManager(experiment_name=experiment_name, log_dir=log_dir)
@@ -46,10 +46,12 @@ def run_simulation(args):
 
     try:
         if player_configs is None:
-            raise ValueError("Player configurations must be provided. CLI mode is deprecated.")
-        
+            raise ValueError(
+                "Player configurations must be provided. CLI mode is deprecated."
+            )
+
         print(f"[{args.mode.upper()}] mode with player_configs.")
-        
+
         # 환경 초기화 (PettingZoo)
         env = MafiaEnv(logger=logger)
         agent_id = env.possible_agents[0]
@@ -63,7 +65,7 @@ def run_simulation(args):
             if p_config['type'] == 'rl':
                 agent = RLAgent(
                     player_id=i,
-                    role=Role.CITIZEN, # 역할은 게임 내에서 동적으로 할당됨
+                    role=Role.CITIZEN,  # 역할은 게임 내에서 동적으로 할당됨
                     state_dim=state_dim,
                     action_dims=[9, 5],
                     algorithm=p_config['algo'],
@@ -87,23 +89,23 @@ def run_simulation(args):
             # runner.train 내부에서 isinstance 체크 또는 별도 분리 가능
             # 여기서는 RL 에이전트만 추출하여 전달하고, 나머지는 runner가 env에서 찾지 않고
             # agents 딕셔너리에서 찾도록 runner를 수정해야 함.
-            
+
             # 현재 runner.train은 agents 딕셔너리를 받아서 RL 에이전트로 취급하고 있음.
             # 따라서 RL 에이전트만 담긴 딕셔너리와, 전체 에이전트 리스트를 분리해서 넘기거나
             # runner가 타입을 체크하도록 해야 함.
-            
+
             # runner.train의 시그니처를 변경하여 (env, rl_agents, all_agents, ...) 형태로 하거나
             # agents 딕셔너리에 모두 넣고 runner 내부에서 구분.
-            
+
             # 여기서는 RL 에이전트만 추출해서 넘기고, LLM 에이전트는 runner가 env.game.players 대신
             # 별도로 전달받은 all_agents 딕셔너리를 사용하도록 runner를 수정하는 것이 좋음.
-            
+
             rl_agents = {i: a for i, a in agents.items() if isinstance(a, RLAgent)}
-            train(env, rl_agents, agents, args, logger)
-            
+            train(env, rl_agents, agents, args, logger, stop_event=STOP)
+
         elif args.mode == "test":
-            test(env, agents, args)
-    
+            test(env, agents, args, stop_event=STOP)
+
     finally:
         # LogManager 리소스 정리
         logger.close()
