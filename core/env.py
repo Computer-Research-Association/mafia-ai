@@ -98,12 +98,15 @@ class MafiaEnv(ParallelEnv):
         for agent in self.agents:
             pid = self._agent_to_id(agent)
             
-            # 단일 관측 반환 (시퀀스 생성 로직 제거)
-            # 에이전트 내부 버퍼에서 시퀀스를 쌓아서 학습에 사용해야 함
             observations[agent] = {
                 "observation": self._encode_observation(pid),
                 "action_mask": self._get_action_mask(pid)
             }
+
+            if is_over:
+                _, my_win = self.game.check_game_over(player_id=pid)
+            else:
+                my_win = False
             
             rewards[agent] = self._calculate_reward(pid, prev_alive, prev_phase, engine_actions.get(pid), is_over, is_win)
             terminations[agent] = is_over

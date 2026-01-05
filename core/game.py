@@ -439,13 +439,27 @@ class MafiaGame:
             action_history=filtered,
         )
 
-    def check_game_over(self) -> Tuple[bool, bool]:
+    def check_game_over(self, player_id: Optional[int] = None) -> Tuple[bool, bool]:
+        """
+        게임 종료 여부 및 승패 확인
+        """
         m_count = sum(1 for p in self.players if p.role == Role.MAFIA and p.alive)
         c_count = sum(1 for p in self.players if p.role != Role.MAFIA and p.alive)
-        if self.day > config.game.MAX_DAYS:
-            return True, False
-        if m_count == 0:
-            return True, True
-        if m_count >= c_count:
-            return True, False
+        
+        termination_rules = [
+            (self.day > config.game.MAX_DAYS, False), # 1. 턴 초과 (마피아 승)
+            (m_count == 0,                   True),   # 2. 마피아 전멸 (시민 승)
+            (m_count >= c_count,             False)   # 3. 마피아 과반 (마피아 승)
+        ]
+        
+        for condition, citizen_win in termination_rules:
+            if condition:
+                if player_id is None:
+                    return True, citizen_win
+                
+                is_mafia_team = (self.players[player_id].role == Role.MAFIA)
+                my_win = (citizen_win != is_mafia_team)
+                
+                return True, my_win
+
         return False, False
