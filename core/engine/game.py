@@ -409,8 +409,8 @@ class MafiaGame:
         final_mafia_target = night_targets.get(Role.MAFIA)
         doctor_target = night_targets.get(Role.DOCTOR)
 
-        if mafia_target is not None and mafia_target != doctor_target:
-            self.players[mafia_target].alive = False
+        if final_mafia_target is not None and final_mafia_target != doctor_target:
+            self.players[final_mafia_target].alive = False
         
         return True
 
