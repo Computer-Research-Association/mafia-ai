@@ -41,6 +41,7 @@ class MafiaGame:
         random.shuffle(roles)
         for p, r in zip(self.players, roles):
             p.role = r
+            p.alive = True
             # 역할 할당 이벤트 로깅
             if self.logger:
                 # GameEvent로 기록 (JSONL 저장용)
