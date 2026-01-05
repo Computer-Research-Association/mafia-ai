@@ -185,7 +185,9 @@ class MafiaEnv(ParallelEnv):
 
         # 3. 역할 기반 행동 보상
         action_target = -1
-        if hasattr(mafia_action, "target_id"):
+        if isinstance(mafia_action, dict):
+            action_target = mafia_action.get("target_id", -1)
+        elif hasattr(mafia_action, "target_id"):
             action_target = mafia_action.target_id
 
         if role == Role.CITIZEN:
@@ -250,10 +252,14 @@ class MafiaEnv(ParallelEnv):
             
         reward = 0.0
         
-        if not my_action or my_action.target_id == -1:
-            return 0.0
+        target_id = -1
+        if isinstance(my_action, dict):
+            target_id = my_action.get("target_id", -1)
+        elif hasattr(my_action, "target_id"):
+            target_id = my_action.target_id
             
-        target_id = my_action.target_id
+        if target_id == -1:
+            return 0.0
         
         if phase == Phase.DAY_VOTE:
             # 타겟의 득표수 확인 (나 제외)

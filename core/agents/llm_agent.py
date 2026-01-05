@@ -190,13 +190,13 @@ class LLMAgent(BaseAgent):
         action_dict = self._execute_ai_logic(prompt_key, status)
 
         # 처형 단계에서는 GameAction으로 변환하지 않고, dict를 그대로 반환
-        if self.current_status.phase == Phase.DAY_EXECUTE:
+        if status.phase == Phase.DAY_EXECUTE:
             return action_dict
 
         # --- [수정된 부분] 액션 유효성 검증 및 보정 ---
-        if self.current_status.phase in [Phase.NIGHT, Phase.DAY_VOTE]:
+        if status.phase in [Phase.NIGHT, Phase.DAY_VOTE]:
             target_id = action_dict.get("target_id")
-            alive_players = [p.id for p in self.current_status.players if p.alive]
+            alive_players = [p.id for p in status.players if p.alive]
 
             is_valid = True
             # 1. 살아있는 플레이어를 타겟했는가?
@@ -205,12 +205,12 @@ class LLMAgent(BaseAgent):
                 print(f"[Player {self.id}] WARNING: LLM targeted non-survivor {target_id}. Overriding.")
 
             # 2. (투표 시) 자기 자신에게 투표했는가?
-            if self.current_status.phase == Phase.DAY_VOTE and target_id == self.id:
+            if status.phase == Phase.DAY_VOTE and target_id == self.id:
                 is_valid = False
                 print(f"[Player {self.id}] WARNING: LLM tried to vote for self. Overriding.")
 
             # 3. (경찰) 자기 자신을 조사했는가?
-            if self.role == Role.POLICE and self.current_status.phase == Phase.NIGHT and target_id == self.id:
+            if self.role == Role.POLICE and status.phase == Phase.NIGHT and target_id == self.id:
                 is_valid = False
                 print(f"[Player {self.id}] WARNING: Police LLM tried to investigate self. Overriding.")
 
@@ -218,7 +218,7 @@ class LLMAgent(BaseAgent):
             if self.role == Role.MAFIA:
                 # action_history에서 동료 마피아 정보를 올바르게 파싱
                 mafia_team = {self.id}
-                for event in self.current_status.action_history:
+                for event in status.action_history:
                     if event.event_type == EventType.POLICE_RESULT and event.value == Role.MAFIA:
                         mafia_team.add(event.target_id)
                 
