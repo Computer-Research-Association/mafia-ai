@@ -92,6 +92,8 @@ class MafiaEnv(ParallelEnv):
                 engine_actions[pid] = GameAction.from_multi_discrete(action)
             elif isinstance(action, GameAction):
                 engine_actions[pid] = action
+            elif isinstance(action, dict):
+                engine_actions[pid] = action
             else:
                 # Fallback or error
                 pass
@@ -186,7 +188,7 @@ class MafiaEnv(ParallelEnv):
 
         # 3. 역할 기반 행동 보상
         action_target = -1
-        if mafia_action:
+        if hasattr(mafia_action, "target_id"):
             action_target = mafia_action.target_id
 
         if role == Role.CITIZEN:
