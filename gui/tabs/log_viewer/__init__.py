@@ -1,3 +1,3 @@
-from .logMain import LogViewerTab
+from .logViewer import LogViewer
 
-__all__ = ["LogViewerTab"]
+__all__ = ["LogViewer"]

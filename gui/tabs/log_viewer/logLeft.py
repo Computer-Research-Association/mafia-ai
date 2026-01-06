@@ -17,6 +17,7 @@ from PyQt6.QtGui import QFileSystemModel
 
 class LogLeft(QWidget):
     log_selected = pyqtSignal(Path)
+    tensorboard_requested = pyqtSignal(Path)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -70,6 +71,8 @@ class LogLeft(QWidget):
         """
         )
         self.tree.clicked.connect(self._on_tree_clicked)
+        self.tree.doubleClicked.connect(self._on_tree_double_clicked)
+
         layout.addWidget(self.tree)
 
         # 5. 초기 경로 설정 (자동으로 logs 폴더 잡기)
@@ -116,3 +119,14 @@ class LogLeft(QWidget):
 
         if target_dir:
             self.log_selected.emit(target_dir)
+
+    def _on_tree_double_clicked(self, index):
+        file_path = Path(self.model.filePath(index))
+
+        tb_dir = file_path
+
+        if file_path.is_dir() and tb_dir.exists():
+            self.tensorboard_requested.emit(tb_dir)
+            print(f"[GUI] TensorBoard requested for: {tb_dir}")
+        else:
+            print(f"no tensorboard in folder (경로: {tb_dir})")

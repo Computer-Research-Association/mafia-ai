@@ -1,12 +1,11 @@
 import json
+import subprocess  # [추가] 프로세스 실행용
+import webbrowser  # [추가] 브라우저 오픈용
+import sys
 from pathlib import Path
 from typing import Optional
 
-from PyQt6.QtWidgets import (
-    QWidget,
-    QHBoxLayout,
-    QSplitter,
-)
+from PyQt6.QtWidgets import QWidget, QHBoxLayout, QSplitter, QMessageBox
 from PyQt6.QtCore import Qt
 
 from core.engine.state import GameEvent
@@ -16,10 +15,11 @@ from .logRight import LogRight
 from .logEvent import LogEvent
 
 
-class LogViewerTab(QWidget):
+class LogViewer(QWidget):
     def __init__(self, parent):
         super().__init__(parent)
         self.current_log_dir: Optional[Path] = None
+        self.tb_process = None  # 텐서보드 변수
         self._setup_ui()
 
     def _setup_ui(self):
@@ -30,6 +30,7 @@ class LogViewerTab(QWidget):
         # 1. 좌측 탐색기
         self.explorer = LogLeft()
         self.explorer.log_selected.connect(self._on_log_selected)
+        self.explorer.tensorboard_requested.connect(self._launch_tensorboard)
 
         # 2. 우측 뷰어
         self.content_viewer = LogRight()
@@ -52,6 +53,38 @@ class LogViewerTab(QWidget):
         """좌측에서 로그 선택 시 호출"""
         self.current_log_dir = path
         self._load_logs(path)
+
+    def _launch_tensorboard(self, tb_path: Path):
+        # 초기화
+        if self.tb_process:
+            try:
+                self.tb_process.terminate()
+                self.tb_process = None
+                print("[GUI] Stopped previous TensorBoard process.")
+            except Exception as e:
+                print(f"[GUI] Error killing TensorBoard: {e}")
+
+        # 텐서보드 실행
+        cmd = ["tensorboard", "--logdir", str(tb_path), "--port", "6006"]
+
+        try:
+            # 윈도우에서 콘솔 창 없이 실행하려면 creationflags 사용 가능 (선택사항)
+            # 여기서는 기본 실행
+            self.tb_process = subprocess.Popen(cmd, shell=False)
+
+            print(f"[GUI] Started TensorBoard on port 6006 for {tb_path.name}")
+
+            # 3. 브라우저 열기
+            webbrowser.open("http://localhost:6006")
+
+        except FileNotFoundError:
+            QMessageBox.warning(
+                self,
+                "오류",
+                "tensorboard 명령을 찾을 수 없습니다.\n환경 변수에 등록되어 있는지 확인하세요.",
+            )
+        except Exception as e:
+            QMessageBox.critical(self, "오류", f"텐서보드 실행 실패:\n{e}")
 
     def _load_logs(self, log_dir: Path):
         """파일 로드 및 파싱 -> ContentWidget으로 전달"""
@@ -87,3 +120,8 @@ class LogViewerTab(QWidget):
 
         # 우측 뷰어에 데이터 주입
         self.content_viewer.set_data(events, log_manager)
+
+    def closeEvent(self, event):
+        if self.tb_process:
+            self.tb_process.terminate()
+        super().closeEvent(event)
