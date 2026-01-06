@@ -68,7 +68,6 @@ class LogLeft(QWidget):
         """
         )
         self.tree.clicked.connect(self._on_tree_clicked)
-        self.tree.doubleClicked.connect(self._on_tree_double_clicked)
         self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._open_context_menu)
         self.tree.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
@@ -116,7 +115,7 @@ class LogLeft(QWidget):
         if target_dir:
             self.log_selected.emit(target_dir)
 
-    def _on_tree_double_clicked(self, index):
+    def _show_tensorboard(self, index):
         file_path = Path(self.model.filePath(index))
 
         tb_dir = file_path
@@ -133,6 +132,13 @@ class LogLeft(QWidget):
             return
 
         menu = QMenu()
+
+        tb_action = QAction("(TensorBoard)", self)
+        # 기존 더블 클릭 핸들러 로직을 재사용합니다.
+        tb_action.triggered.connect(lambda: self._show_tensorboard(index))
+        menu.addAction(tb_action)
+
+        menu.addSeparator()
 
         selection = self.tree.selectionModel().selectedRows(0)
 
