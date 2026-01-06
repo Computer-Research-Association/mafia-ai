@@ -34,6 +34,7 @@ class LogViewer(QWidget):
 
         # 2. 우측 뷰어
         self.content_viewer = LogRight()
+        self.content_viewer.refresh_requested.connect(self._reload)
 
         # 3. 스플리터로 결합
         splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -42,12 +43,6 @@ class LogViewer(QWidget):
         splitter.setStretchFactor(1, 1)  # 우측을 더 넓게
 
         layout.addWidget(splitter)
-
-    def select_live(self, base_path_str):
-        """라이브 모드 진입 (Launcher에서 호출)"""
-        path = Path(base_path_str)
-        if path.exists():
-            self.explorer.set_root_directory(path)
 
     def _on_log_selected(self, path: Path):
         """좌측에서 로그 선택 시 호출"""
@@ -65,16 +60,20 @@ class LogViewer(QWidget):
                 print(f"[GUI] Error killing TensorBoard: {e}")
 
         # 텐서보드 실행
-        cmd = ["tensorboard", "--logdir", str(tb_path), "--port", "6006"]
+        cmd = [
+            "tensorboard",
+            "--logdir",
+            str(tb_path),
+            "--port",
+            "6006",
+        ]
 
         try:
-            # 윈도우에서 콘솔 창 없이 실행하려면 creationflags 사용 가능 (선택사항)
-            # 여기서는 기본 실행
             self.tb_process = subprocess.Popen(cmd, shell=False)
 
             print(f"[GUI] Started TensorBoard on port 6006 for {tb_path.name}")
 
-            # 3. 브라우저 열기
+            # 브라우저 열기
             webbrowser.open("http://localhost:6006")
 
         except FileNotFoundError:
@@ -120,6 +119,12 @@ class LogViewer(QWidget):
 
         # 우측 뷰어에 데이터 주입
         self.content_viewer.set_data(events, log_manager)
+
+    def _reload(self):
+        if self.current_log_dir:
+            self._load_logs(self.current_log_dir)
+        else:
+            print("[GUI] No log selected to refresh.")
 
     def closeEvent(self, event):
         if self.tb_process:
