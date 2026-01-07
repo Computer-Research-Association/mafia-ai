@@ -17,7 +17,7 @@ from pathlib import Path
 from torch.utils.tensorboard import SummaryWriter
 
 from core.engine.state import GameEvent
-from config import Role, Phase, EventType
+from config import Role, Phase, EventType, config
 
 
 class LogManager:
@@ -58,6 +58,7 @@ class LogManager:
             if self.use_tensorboard:
                 tensorboard_dir = self.session_dir / "tensorboard"
                 self.writer = SummaryWriter(log_dir=str(tensorboard_dir))
+                self._setup_tensorboard_layout()
                 print(f"  - TensorBoard: {tensorboard_dir}")
 
             print(f"[LogManager] Initialized: {self.session_dir}")
@@ -65,6 +66,33 @@ class LogManager:
             self.session_dir = None
             self.jsonl_file = None
             self.writer = None
+
+    def _setup_tensorboard_layout(self):
+        """TensorBoard Custom Scalars 레이아웃 설정"""
+        if not self.writer:
+            return
+
+        # Agent Total Rewards list generating
+        agent_reward_charts = [
+            f"Agent_{i}/Reward_Total" for i in range(config.game.PLAYER_COUNT)
+        ]
+
+        layout = {
+            "Training Dashboard": {
+                "Team Loss": ["Multiline", ["Train/Mafia_Loss", "Train/Citizen_Loss"]],
+                "Team Entropy": ["Multiline", ["Train/Mafia_Entropy", "Train/Citizen_Entropy"]],
+                "Total Reward (All Agents)": ["Multiline", agent_reward_charts],
+                "Representative Metrics": ["Multiline", ["Reward/Total", "Win/Rate"]],
+            },
+            "Game Stats Dashboard": {
+                "Win Rates (Team)": ["Multiline", ["Game/Mafia_WinRate", "Game/Citizen_WinRate"]],
+                "Game Duration": ["Multiline", ["Game/Duration"]],
+                "Role Actions Success Rate": ["Multiline", ["Action/Doctor_Save_Rate", "Action/Police_Find_Rate"]],
+                "Voting Outcomes": ["Multiline", ["Vote/Mafia_Lynch_Rate", "Vote/Wrong_Lynch_Rate"]],
+            },
+        }
+
+        self.writer.add_custom_scalars(layout)
 
     def _load_narrative_templates(self) -> Dict[str, str]:
         """YAML에서 내러티브 템플릿 로드"""
@@ -134,7 +162,7 @@ class LogManager:
 
         # 추가 메트릭
         for key, value in kwargs.items():
-            self.writer.add_scalar(f"Metrics/{key}", value, episode)
+            self.writer.add_scalar(key, value, episode)
 
     def interpret_event(self, event: GameEvent) -> str:
         """
