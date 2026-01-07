@@ -124,7 +124,7 @@ class LogLeft(QWidget):
 
         menu = QMenu()
 
-        tb_action = QAction("(TensorBoard)", self)
+        tb_action = QAction("열기 (TensorBoard)", self)
         tb_action.triggered.connect(lambda: self._show_tensorboard(index))
         menu.addAction(tb_action)
 

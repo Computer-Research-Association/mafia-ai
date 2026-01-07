@@ -50,6 +50,27 @@ class LogViewer(QWidget):
         self._load_logs(path)
 
     def _launch_tensorboard(self, tb_path: Path):
+        if sys.platform == "win32":
+            try:
+                subprocess.run(
+                    ["taskkill", "/F", "/IM", "tensorboard.exe"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            except Exception:
+                pass
+
+        # 맥(Mac) / 리눅스(Linux)인 경우
+        else:
+            try:
+                subprocess.run(
+                    ["pkill", "-f", "tensorboard"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            except Exception:
+                pass
+
         # 초기화
         if self.tb_process:
             try:
