@@ -17,7 +17,7 @@ from pathlib import Path
 from torch.utils.tensorboard import SummaryWriter
 
 from core.engine.state import GameEvent
-from config import Role, Phase, EventType
+from config import Role, Phase, EventType, config
 
 
 class LogManager:
@@ -64,6 +64,7 @@ class LogManager:
             if self.use_tensorboard:
                 tensorboard_dir = self.session_dir / "tensorboard"
                 self.writer = SummaryWriter(log_dir=str(tensorboard_dir))
+                self._setup_tensorboard_layout()
                 print(f"  - TensorBoard: {tensorboard_dir}")
 
             print(f"[LogManager] Initialized: {self.session_dir}")
@@ -164,7 +165,7 @@ class LogManager:
 
         # 추가 메트릭
         for key, value in kwargs.items():
-            self.writer.add_scalar(f"Metrics/{key}", value, episode)
+            self.writer.add_scalar(key, value, episode)
 
         # [추가] 에피소드가 끝날 때마다 파일 버퍼를 비워 안전하게 저장
         if self.jsonl_file:

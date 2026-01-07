@@ -198,6 +198,8 @@ class PPO:
 
         avg_loss_all_epochs = 0
         avg_entropy_all_epochs = 0
+        avg_kl_all_epochs = 0
+        avg_clip_frac_all_epochs = 0
 
         for _ in range(self.k_epochs):
             # Shuffle indices
