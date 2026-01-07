@@ -108,8 +108,9 @@ class LogViewer(QWidget):
 
     def _load_logs(self, log_dir: Path):
         """파일 로드 및 파싱 -> ContentWidget으로 전달"""
-        jsonl_path = log_dir / "events.jsonl"
-        if not jsonl_path.exists():
+        log_files = sorted(list(log_dir.glob("events*.jsonl")))
+
+        if not log_files:
             self.content_viewer.log_text.setPlainText("로그 파일이 존재하지 않습니다.")
             return
 
@@ -126,20 +127,24 @@ class LogViewer(QWidget):
             print(f"LogManager Init Fail: {e}")
 
         # 파싱
-        events = []
+        all_events = []
         try:
-            with open(jsonl_path, "r", encoding="utf-8") as f:
-                for line in f:
-                    if line.strip():
-                        data = json.loads(line)
-                        event = LogEvent(**data)
-                        events.append(event)
+            for jsonl_path in log_files:
+                with open(jsonl_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        if line.strip():
+                            try:
+                                data = json.loads(line)
+                                event = LogEvent(**data)
+                                all_events.append(event)
+                            except json.JSONDecodeError:
+                                continue
         except Exception as e:
             self.content_viewer.log_text.setPlainText(f"로그 로드 실패: {e}")
             return
 
         # 우측 뷰어에 데이터 주입
-        self.content_viewer.set_data(events, log_manager)
+        self.content_viewer.set_data(all_events, log_manager)
 
     def _reload(self):
         if self.current_log_dir:
