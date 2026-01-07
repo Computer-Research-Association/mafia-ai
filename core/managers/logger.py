@@ -78,17 +78,25 @@ class LogManager:
         ]
 
         layout = {
-            "Training Dashboard": {
+            "Summary Dashboard": {
+                "Win Rates": ["Multiline", ["Game/Mafia_WinRate", "Game/Citizen_WinRate"]],
+                "Total Reward": ["Multiline", ["Reward/Total"]],
+                "Game Duration": ["Multiline", ["Game/Duration", "Game/Avg_Day_When_Mafia_Wins", "Game/Avg_Day_When_Citizen_Wins"]],
+            },
+            "Training Details": {
                 "Team Loss": ["Multiline", ["Train/Mafia_Loss", "Train/Citizen_Loss"]],
                 "Team Entropy": ["Multiline", ["Train/Mafia_Entropy", "Train/Citizen_Entropy"]],
-                "Total Reward (All Agents)": ["Multiline", agent_reward_charts],
-                "Representative Metrics": ["Multiline", ["Reward/Total", "Win/Rate"]],
+                "Individual Rewards": ["Multiline", agent_reward_charts],
             },
-            "Game Stats Dashboard": {
-                "Win Rates (Team)": ["Multiline", ["Game/Mafia_WinRate", "Game/Citizen_WinRate"]],
-                "Game Duration": ["Multiline", ["Game/Duration"]],
-                "Role Actions Success Rate": ["Multiline", ["Action/Doctor_Save_Rate", "Action/Police_Find_Rate"]],
-                "Voting Outcomes": ["Multiline", ["Vote/Mafia_Lynch_Rate", "Vote/Wrong_Lynch_Rate"]],
+            "Role Performance": {
+                "Doctor Stats": ["Multiline", ["Action/Doctor_Save_Rate", "Action/Doctor_Self_Heal_Rate"]],
+                "Police Stats": ["Multiline", ["Action/Police_Find_Rate"]],
+                "Mafia Stats": ["Multiline", ["Action/Mafia_Kill_Success_Rate"]],
+            },
+            "Behavior Analysis": {
+                "Voting Behavior": ["Multiline", ["Vote/Abstain_Rate", "Game/Execution_Frequency"]],
+                "Voting Accuracy": ["Multiline", ["Vote/Citizen_Accuracy_Rate", "Vote/Mafia_Betrayal_Rate"]],
+                "Execution Outcomes": ["Multiline", ["Vote/Mafia_Lynch_Rate", "Vote/Citizen_Sacrifice_Rate"]],
             },
         }
 
