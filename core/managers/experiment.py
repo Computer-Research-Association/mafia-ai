@@ -117,7 +117,6 @@ class ExperimentManager:
                         )
 
                 agents[i] = agent
-            elif p_config["type"] == "llm":
 
             elif p_config["type"] == "llm":
                 # ... (LLM 에이전트 생성 코드는 그대로 둠)
