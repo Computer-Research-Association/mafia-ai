@@ -34,15 +34,15 @@ def train(
     # 0번 플레이어 기준으로 몇 개의 게임이 생성되는지 확인
     sample_indices = list(range(0, env.num_envs, PLAYERS_PER_GAME))
     actual_num_games = len(sample_indices)
-
+    
     print(f"=== Start SuperSuit Parallel Training ===")
-    print(f"  - Total Slots (num_envs): {env.num_envs}")
-    print(f"  - Players per Game: {PLAYERS_PER_GAME}")
     print(f"  - Actual Parallel Games: {actual_num_games}")
-    print(f"  - Target Episodes: {args.episodes}")
 
     stats_manager = StatsManager()
     total_episodes = args.episodes
+
+    slot_episode_ids = [i + 1 for i in range(actual_num_games)]
+    next_global_episode_id = actual_num_games + 1
 
     # --- 초기화 ---
     obs, info = env.reset()
@@ -53,7 +53,6 @@ def train(
             agent.reset_hidden(batch_size=actual_num_games)
 
     completed_episodes = 0
-
     current_rewards = {}  # 빈 딕셔너리 생성
 
     # 에이전트마다 자기 할당량을 직접 계산 (len)
@@ -130,11 +129,11 @@ def train(
         else:
             iterator = []
 
-        for game_idx, info_item in iterator:
+        for flat_idx, info_item in iterator:
             if isinstance(info_item, dict) and "log_events" in info_item:
                 
-                # 에피소드 ID 계산: (이미 완료된 수) + (현재 게임 번호)
-                custom_id = int(completed_episodes) + (game_idx + 1)
+                game_slot_idx = flat_idx // PLAYERS_PER_GAME
+                custom_id = slot_episode_ids[game_slot_idx]
                 
                 for ev_dict in info_item["log_events"]:
                     try:
@@ -171,6 +170,11 @@ def train(
         num_finished_now = np.sum(dones)
 
         if num_finished_now > 0:
+            finished_slot_indices = np.where(dones)[0]
+            for slot_idx in finished_slot_indices:
+                slot_episode_ids[slot_idx] = next_global_episode_id
+                next_global_episode_id += 1
+            
             completed_episodes += num_finished_now
             finished_indices = np.where(dones)[0]
 
