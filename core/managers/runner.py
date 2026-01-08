@@ -135,6 +135,9 @@ def train(
                 game_slot_idx = flat_idx // PLAYERS_PER_GAME
                 custom_id = slot_episode_ids[game_slot_idx]
                 
+                if custom_id > total_episodes:
+                    continue
+                
                 for ev_dict in info_item["log_events"]:
                     try:
                         from core.engine.state import GameEvent
