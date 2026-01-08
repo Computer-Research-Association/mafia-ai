@@ -178,6 +178,11 @@ class LLMAgent(BaseAgent):
         """
         LLM의 JSON 응답을 MafiaAction으로 변환하여 반환
         """
+        alive_status = next((p for p in status.players if p.id == self.id), None)
+        if alive_status and not alive_status.alive:
+            return GameAction(
+                action_type=ActionType.PASS, target_id=-1, claim_role=None
+            )
         self.role = status.my_role
 
         phase_name = status.phase.name
