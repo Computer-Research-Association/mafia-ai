@@ -201,6 +201,10 @@ class LLMAgent(BaseAgent):
         if status.phase == Phase.DAY_EXECUTE:
             return action_dict
 
+        raw_target = action_dict.get("target_id")
+        if isinstance(raw_target, str) and raw_target.isdigit():
+            action_dict["target_id"] = int(raw_target)
+
         # --- [수정된 부분] 액션 유효성 검증 및 보정 ---
         if status.phase in [Phase.NIGHT, Phase.DAY_VOTE]:
             target_id = action_dict.get("target_id")
