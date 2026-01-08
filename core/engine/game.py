@@ -43,18 +43,18 @@ class MafiaGame:
             p.role = r
             p.vote_count = 0  # 투표 수 초기화
             p.alive = True
-            # 역할 할당 이벤트 로깅
-            if self.logger:
-                # GameEvent로 기록 (JSONL 저장용)
+            # GameEvent로 기록 (JSONL 저장용)
 
-                event = GameEvent(
-                    day=0,
-                    phase=Phase.GAME_START,
-                    event_type=EventType.SYSTEM_MESSAGE,  # 역할 공개 이벤트로 활용
-                    actor_id=-1,
-                    target_id=p.id,
-                    value=p.role,
-                )
+            event = GameEvent(
+                day=0,
+                phase=Phase.GAME_START,
+                event_type=EventType.SYSTEM_MESSAGE,  # 역할 공개 이벤트로 활용
+                actor_id=-1,
+                target_id=p.id,
+                value=p.role,
+            )
+            self.history.append(event)
+            if self.logger:
                 self.logger.log_event(event)
 
         return self.get_game_status()
@@ -441,6 +441,10 @@ class MafiaGame:
                     )
 
         for e in self.history:
+            if e.phase == Phase.GAME_START and e.event_type == EventType.SYSTEM_MESSAGE:
+                if e.target_id == viewer_id:
+                    filtered.append(e)
+                continue
             if e.phase == Phase.NIGHT:
                 if (
                     e.actor_id == viewer_id
