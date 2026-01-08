@@ -123,33 +123,26 @@ def train(
         # --- [2. 환경 진행 (Step)] ---
         next_obs, rewards, terminations, truncations, infos = env.step(all_actions)
 
-        # infos가 딕셔너리인 경우 ({'player_0': {...}, 'player_1': {...}})
         if isinstance(infos, dict):
-            for info_item in infos.values():
-                # 각 에이전트의 info 딕셔너리 안에 'log_events'가 있는지 확인
-                if isinstance(info_item, dict) and "log_events" in info_item:
-                    event_dicts = info_item["log_events"]
-                    for ev_dict in event_dicts:
-                        try:
-                            # GameEvent 객체로 복원 (import 필요: from core.engine.state import GameEvent)
-                            from core.engine.state import GameEvent
-                            event_obj = GameEvent(**ev_dict)
-                            logger.log_event(event_obj)
-                        except Exception as e:
-                            print(f"[Log Error] {e}")
-                            
-        # (혹시 모를 리스트 반환 대응 - VectorEnv 설정에 따라 다를 수 있음)
+            iterator = [(0, item) for item in infos.values()]
         elif isinstance(infos, list):
-            for info_item in infos:
-                if isinstance(info_item, dict) and "log_events" in info_item:
-                    event_dicts = info_item["log_events"]
-                    for ev_dict in event_dicts:
-                        try:
-                            from core.engine.state import GameEvent
-                            event_obj = GameEvent(**ev_dict)
-                            logger.log_event(event_obj)
-                        except Exception as e:
-                            print(f"[Log Error] {e}")
+            iterator = enumerate(infos)
+        else:
+            iterator = []
+
+        for game_idx, info_item in iterator:
+            if isinstance(info_item, dict) and "log_events" in info_item:
+                
+                # 에피소드 ID 계산: (이미 완료된 수) + (현재 게임 번호)
+                custom_id = int(completed_episodes) + (game_idx + 1)
+                
+                for ev_dict in info_item["log_events"]:
+                    try:
+                        from core.engine.state import GameEvent
+                        event_obj = GameEvent(**ev_dict)
+                        logger.log_event(event_obj, custom_episode=custom_id)
+                    except Exception as e:
+                        print(f"[Log Error] {e}")
 
         # --- [3. 보상 저장 및 버퍼 관리] ---
         for pid, agent in rl_agents.items():
