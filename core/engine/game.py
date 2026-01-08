@@ -417,10 +417,10 @@ class MafiaGame:
         ann_event = GameEvent(
             day=self.day + 1,
             phase=Phase.DAY_DISCUSSION,
-            event_type=EventType.KILL,
+            event_type=EventType.SYSTEM_MESSAGE,
             actor_id=-1,
             target_id=victim_id,
-            value="NIGHT_RESULT",
+            value=None,
         )
         self.history.append(ann_event)
         if self.logger:

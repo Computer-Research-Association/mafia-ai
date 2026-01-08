@@ -408,7 +408,7 @@ class LLMAgent(BaseAgent):
                     f"{event.day}일차 밤: Player {event.target_id} 살해당함"
                 )
             elif (
-                event.event_type == EventType.KILL
+                event.event_type == EventType.SYSTEM_MESSAGE
                 and event.phase == Phase.DAY_DISCUSSION
             ):
                 if event.target_id != -1:
