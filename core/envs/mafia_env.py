@@ -385,12 +385,61 @@ class MafiaEnv(ParallelEnv):
         self, agent_id: int, target_event: Optional[GameEvent] = None
     ) -> np.ndarray:
         """
-        46차원 관측 벡터 생성 (Belief Matrix 제거)
-        target_event가 주어지면 해당 이벤트를 '직전 사건'으로 인코딩.
-        없으면 가장 최근 이벤트를 사용.
+        286차원 관측 벡터 생성 (Maps 포함)
+        - Base (46): Self, Game, LastEvent
+        - Maps (240): Vote(8x8), Attack(8x8), Vouch(8x8) -> 누적 & 정규화
+          * 실제로는 8x8=64 * 3 = 192.
+          * 부족한 차원은 Padding 또는 추가 정보로 채움 (Alive, Claims 등)
+          * 여기서는 User 요청에 따라 Maps 추가 + 누적 로직 구현
         """
         status = self.game.get_game_status(agent_id)
         agent = self.game.players[agent_id]
+
+        # === [Maps Generation] ===
+        # 1. Vote Map (누가 누구에게 투표했나)
+        vote_map = np.zeros((8, 8), dtype=np.float32)
+        # 2. Attack Map (누가 누구를 공격/조사했나 - Kill, Police)
+        attack_map = np.zeros((8, 8), dtype=np.float32)
+        # 3. Vouch Map (누가 누구를 보호/변호했나 - Protect, Claim, Heal)
+        vouch_map = np.zeros((8, 8), dtype=np.float32)
+
+        # 4. Role Claim Map (누가 무슨 직업을 주장했나) - 8x5=40 (보너스 정보)
+        claim_map = np.zeros((8, 5), dtype=np.float32)
+        
+        # 5. Alive Map (생존 여부) - 8 (보너스 정보)
+        alive_vec = np.array([1.0 if p.alive else 0.0 for p in self.game.players], dtype=np.float32)
+
+        # History Traversal (Cumulative)
+        for event in status.action_history:
+            actor = event.actor_id
+            target = event.target_id
+            
+            # Skip invalid actor/target indices (0~7 only)
+            if actor < 0 or actor >= 8:
+                continue
+
+            # Role Claim Update (Last claim overwrites usually, but history is good)
+            if event.event_type == EventType.CLAIM and isinstance(event.value, Role):
+                claim_map[actor][int(event.value)] = 1.0
+            
+            if target is None or target < 0 or target >= 8:
+                continue
+
+            # Cumulative Updates
+            if event.event_type == EventType.VOTE:
+                vote_map[actor][target] += 1.0
+            elif event.event_type in [EventType.KILL, EventType.POLICE_RESULT]:
+                attack_map[actor][target] += 1.0
+            elif event.event_type in [EventType.PROTECT]:
+                vouch_map[actor][target] += 1.0
+            
+            # Claim target (e.g. Cop checks X is Mafia?) - Simplify to Vouch for now or ignore
+            # if event.event_type == EventType.CLAIM: ...
+
+        # Normalization (Max Scaling)
+        if np.max(vote_map) > 0: vote_map /= np.max(vote_map)
+        if np.max(attack_map) > 0: attack_map /= np.max(attack_map)
+        if np.max(vouch_map) > 0: vouch_map /= np.max(vouch_map)
 
         # 1. 자기 정보 (12)
         # ID One-hot (8)
@@ -466,16 +515,23 @@ class MafiaEnv(ParallelEnv):
         # Concatenate all
         obs = np.concatenate(
             [
-                id_vec,  # 8
-                role_vec,  # 4
-                day_vec,  # 1
-                phase_vec,  # 3
-                actor_vec,  # 9
-                target_vec,  # 9
-                value_vec,  # 5
-                type_vec,  # 7
+                id_vec,       # 8
+                role_vec,     # 4
+                day_vec,      # 1
+                phase_vec,    # 3
+                actor_vec,    # 9
+                target_vec,   # 9
+                value_vec,    # 5
+                type_vec,     # 7
+                # === Added Maps ===
+                vote_map.flatten(),    # 64
+                attack_map.flatten(),  # 64
+                vouch_map.flatten(),   # 64
+                claim_map.flatten(),   # 40 (Bonus)
+                alive_vec              # 8  (Bonus)
             ]
-        )  # Total 46
+        )  
+        # Total Sum: 46 + 192 + 40 + 8 = 286. Exactly matches!
 
         return obs
 
