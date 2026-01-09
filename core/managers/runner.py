@@ -343,17 +343,23 @@ def test(
             completed_episodes += 1
             
             # 결과 기록
-            if env.game.winner:
-                win_counts[env.game.winner] += 1
+            winner = env.game.winner
+            if winner:
+                win_counts[winner] += 1
             
             # 데이터 파일 쓰기 (Flush)
             if data_manager:
-                data_manager.flush_episode(completed_episodes)
+                # env.game.players를 넘겨주어 역할 확인 가능하게 함
+                data_manager.flush_episode(
+                    completed_episodes, 
+                    winner_role=winner, 
+                    players=env.game.players
+                )
             
             # 로그 매니저에게 에피소드 종료 알림 (통계 등)
             if logger:
                 # 간단히 승리 여부만 기록
-                is_win = (env.game.winner == Role.MAFIA) 
+                is_win = (winner == Role.MAFIA) 
                 logger.log_metrics(completed_episodes, total_reward=0, is_win=is_win)
                 logger.set_episode(completed_episodes + 1) # 다음 에피소드 번호 세팅
 

@@ -4,6 +4,8 @@ import numpy as np
 from typing import Any, Dict, List, Optional
 from pathlib import Path
 
+from config import Role
+
 class ExpertDataManager:
     def __init__(self, save_dir: Path):
         """
@@ -68,8 +70,14 @@ class ExpertDataManager:
              mask_list = action_mask.tolist() if isinstance(action_mask, np.ndarray) else list(action_mask)
              self.episode_buffers[episode_id][player_id]['masks'].append(mask_list)
 
-    def flush_episode(self, episode_id: int):
-        """에피소드 종료 시 파일에 저장 (Append)"""
+    def flush_episode(self, episode_id: int, winner_role: Optional['Role'] = None, players: List[Any] = None):
+        """
+        에피소드 종료 시 파일에 저장 (Append)
+        Args:
+            episode_id: 에피소드 ID
+            winner_role: 승리한 팀 (Role.MAFIA 또는 Role.CITIZEN)
+            players: 플레이어 객체 리스트 (역할 확인용)
+        """
         if episode_id not in self.episode_buffers:
             return
 
@@ -78,18 +86,38 @@ class ExpertDataManager:
         try:
             with open(self.save_path, 'a', encoding='utf-8') as f:
                 for p_id in range(8):
-                    if len(buffer[p_id]['obs']) > 0:
-                        entry = {
-                            "episode_id": episode_id,
-                            "player_id": p_id,
-                            "obs": buffer[p_id]['obs'],
-                            "acts": buffer[p_id]['acts']
-                        }
-                        # mask가 있으면 함께 저장
-                        if len(buffer[p_id]['masks']) > 0:
-                             entry["masks"] = buffer[p_id]['masks']
-                             
-                        f.write(json.dumps(entry) + "\n")
+                    # 데이터가 없으면 스킵
+                    if len(buffer[p_id]['obs']) == 0:
+                        continue
+                        
+                    # [필터링 로직 추가] 
+                    # players 정보가 넘어왔다면, 승리한 팀의 데이터인지 확인
+                    is_winner = False
+                    if players and winner_role is not None:
+                        player_role = players[p_id].role
+                        # 마피아 승리 시: 마피아 팀만 저장
+                        if winner_role == 3: # Role.MAFIA
+                            if player_role == 3: is_winner = True
+                        # 시민 승리 시: 시민 팀(시민, 경찰, 의사)만 저장
+                        else: 
+                            if player_role != 3: is_winner = True
+                    
+                    # 승리한 데이터만 저장하고 싶다면 아래 주석 해제
+                    # if not is_winner: continue
+
+                    entry = {
+                        "episode_id": episode_id,
+                        "player_id": p_id,
+                        "role": int(players[p_id].role) if players else -1, # 역할 정보 추가
+                        "is_winner": is_winner, # 나중에 데이터 로더에서 필터링 가능하도록 태깅
+                        "obs": buffer[p_id]['obs'],
+                        "acts": buffer[p_id]['acts']
+                    }
+                    # mask가 있으면 함께 저장
+                    if len(buffer[p_id]['masks']) > 0:
+                            entry["masks"] = buffer[p_id]['masks']
+                            
+                    f.write(json.dumps(entry) + "\n")
         except Exception as e:
             print(f"[DataManager Error] Flush failed: {e}")
         
