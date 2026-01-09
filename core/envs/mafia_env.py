@@ -77,9 +77,10 @@ class MafiaEnv(ParallelEnv):
         self.agents = self.possible_agents[:]
         self.game.reset()
 
-        # [NEW] Capture initial events (Game Start, Role Assignments)
-        # self.game.history contains events generated during game.reset()
-        initial_events = [e.model_dump() for e in self.game.history]
+        # Capture initial logs using persistent index
+        self.last_history_idx = 0
+        new_events = [e.model_dump() for e in self.game.history[self.last_history_idx:]]
+        self.last_history_idx = len(self.game.history)
 
         # 상태 초기화
         self.last_executed_player = None
@@ -98,9 +99,9 @@ class MafiaEnv(ParallelEnv):
 
         infos = {agent: {} for agent in self.agents}
         
-        # [NEW] Attach initial logs to the first agent's info so Runner can access them
-        if self.agents:
-            infos[self.agents[0]]["log_events"] = initial_events
+        # [CLEANER] Use a distinct key for logs
+        if new_events:
+            infos["common_log"] = {"log_events": new_events}
 
         return observations, infos
 
@@ -123,13 +124,12 @@ class MafiaEnv(ParallelEnv):
         prev_phase = self.game.phase
         prev_alive_count = sum(1 for p in self.game.players if p.alive)
 
-        history_start_idx = len(self.game.history)
-
         # 게임 진행
         status, is_over, is_win = self.game.step_phase(engine_actions)
 
-        new_events = self.game.history[history_start_idx:]
-        serialized_events = [e.model_dump() for e in new_events]
+        # Capture new logs
+        new_events = [e.model_dump() for e in self.game.history[self.last_history_idx:]]
+        self.last_history_idx = len(self.game.history)
 
         # 상태 변화 추적
         self._track_state_changes(prev_phase, prev_alive_count, engine_actions)
@@ -160,11 +160,11 @@ class MafiaEnv(ParallelEnv):
             truncations[agent] = False
             
             agent_info = {"day": status.day, "phase": status.phase, "win": my_win}
-            
-            if pid == 0:
-                agent_info["log_events"] = serialized_events
-                
             infos[agent] = agent_info
+        
+        # [CLEANER] Use a distinct key for logs
+        if new_events:
+            infos["common_log"] = {"log_events": new_events}
 
         if is_over:
             self.agents = []
