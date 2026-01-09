@@ -76,7 +76,7 @@ def train(
         current_rewards[pid] = np.zeros(my_batch_size)
 
     pbar = tqdm(total=total_episodes, desc="Training", unit="ep")
-
+    recorder_pid = None  # [NEW] 첫 번째로 발견된 프로세스 ID만 기록
 
     while True:
         is_target_still_running = any(eid <= total_episodes for eid in slot_episode_ids)
@@ -138,25 +138,31 @@ def train(
         if log_queue:
             while not log_queue.empty():
                 try:
-                    # 데이터 꺼내기
-                    worker_id, ev_list = log_queue.get_nowait()
+                    # 데이터 꺼내기 (pid, event_list)
+                    pid, ev_list = log_queue.get_nowait()
                     
-                    # worker_id (0~7) -> 현재 에피소드 ID 조회
-                    if worker_id < len(slot_episode_ids):
-                        custom_id = slot_episode_ids[worker_id]
-                        
-                        # 목표 에피소드 초과 시 로깅 생략
-                        if custom_id > total_episodes:
-                            continue
-                        
-                        # 이벤트 로깅
-                        from core.engine.state import GameEvent
-                        for ev_dict in ev_list:
-                            try:
-                                event_obj = GameEvent(**ev_dict)
-                                logger.log_event(event_obj, custom_episode=custom_id)
-                            except Exception as e:
-                                print(f"[Log Error] {e}")
+                    # [FILTER] 첫 번째로 마주친 PID를 녹화 대상으로 지정
+                    if recorder_pid is None:
+                        recorder_pid = pid
+                    
+                    # 녹화 대상이 아니면 스킵
+                    if pid != recorder_pid:
+                        continue
+
+                    # [LOGGING] 대표 프로세스의 이벤트만 기록
+                    # 0번 슬롯의 에피소드 ID를 사용 (대표성을 띔)
+                    custom_id = slot_episode_ids[0]
+                    
+                    if custom_id > total_episodes:
+                        continue
+                    
+                    from core.engine.state import GameEvent
+                    for ev_dict in ev_list:
+                        try:
+                            event_obj = GameEvent(**ev_dict)
+                            logger.log_event(event_obj, custom_episode=custom_id)
+                        except Exception as e:
+                            print(f"[Log Error] {e}")
 
                 except Exception:
                     # Queue Empty or Manager Error
