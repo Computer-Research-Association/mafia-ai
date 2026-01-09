@@ -508,3 +508,13 @@ class MafiaGame:
                 return True, my_win
 
         return False, False
+
+    @property
+    def winner(self) -> Optional[Role]:
+        """
+        게임 승리 팀을 반환합니다. 종료되지 않았으면 None 반환.
+        """
+        is_over, citizen_win = self.check_game_over()
+        if not is_over:
+            return None
+        return Role.CITIZEN if citizen_win else Role.MAFIA

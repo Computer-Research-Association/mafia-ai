@@ -183,6 +183,13 @@ class MafiaEnv(ParallelEnv):
     def action_space(self, agent):
         return self.action_spaces[agent]
 
+    def get_game_status(self, agent_id):
+        """
+        특정 에이전트 시점의 게임 상태를 반환합니다.
+        runner.py 등 외부에서 에이전트의 행동 결정을 위해 호출합니다.
+        """
+        return self.game.get_game_status(agent_id)
+
     def _agent_to_id(self, agent_str):
         return int(agent_str.split("_")[1])
 

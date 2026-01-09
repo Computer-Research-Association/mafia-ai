@@ -1,7 +1,7 @@
 import json
 import os
 import numpy as np
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 from pathlib import Path
 
 class ExpertDataManager:
@@ -20,37 +20,53 @@ class ExpertDataManager:
         if not self.save_path.parent.exists():
             self.save_path.parent.mkdir(parents=True, exist_ok=True)
 
-    def record_turn(self, episode_id: int, player_id: int, observation: np.ndarray, action: Any):
+    def record_turn(self, episode_id: int, player_id: int, observation: Any, action: Any, action_mask: Optional[List[int]] = None):
         """한 턴의 (Observation, Action) 쌍을 기록"""
         
         # 1. 버퍼 초기화
         if episode_id not in self.episode_buffers:
-            self.episode_buffers[episode_id] = {i: {'obs': [], 'acts': []} for i in range(8)}
+            # [수정] masks 필드 추가
+            self.episode_buffers[episode_id] = {i: {'obs': [], 'acts': [], 'masks': []} for i in range(8)}
 
-        # 2. Observation (Numpy -> List)
+        # 2. Observation 처리 강화
+        # runner에서 np.array를 넘겨주겠지만, 혹시 모를 안전장치
         if isinstance(observation, np.ndarray):
             obs_list = observation.tolist()
+        elif isinstance(observation, list):
+            obs_list = observation
         else:
-            obs_list = list(observation)
-        
-        # 3. Action (Object or Vector -> Int List)
-        target_idx = 8 # Default: No Action
+            # 딕셔너리가 넘어왔을 경우 처리 (fallback)
+            if isinstance(observation, dict) and 'observation' in observation:
+                obs = observation['observation']
+                obs_list = obs.tolist() if isinstance(obs, np.ndarray) else list(obs)
+            else:
+                # print(f"[Warning] Unknown observation type: {type(observation)}")
+                obs_list = []
+
+        # 3. Action 처리 (GameAction 클래스와 일관성 유지)
+        # state.py: Target -1 -> 0, 0~7 -> 1~8
+        target_idx = 0 
         role_idx = 0
         
         # 객체(GameAction)인 경우
-        if hasattr(action, 'target_id'):
-            target_idx = action.target_id if action.target_id != -1 else 8
-            if action.claim_role:
-                role_idx = action.claim_role.value
+        if hasattr(action, 'to_multi_discrete'):
+             vec = action.to_multi_discrete()
+             target_idx = vec[0]
+             role_idx = vec[1]
+             
         # 벡터([target, role])인 경우
         elif isinstance(action, (list, np.ndarray, tuple)):
             target_idx = int(action[0])
             role_idx = int(action[1])
-            if target_idx == -1: target_idx = 8
 
         # 4. 버퍼에 추가
         self.episode_buffers[episode_id][player_id]['obs'].append(obs_list)
         self.episode_buffers[episode_id][player_id]['acts'].append([target_idx, role_idx])
+        
+        if action_mask is not None:
+             # Mask 처리 (Numpy -> List)
+             mask_list = action_mask.tolist() if isinstance(action_mask, np.ndarray) else list(action_mask)
+             self.episode_buffers[episode_id][player_id]['masks'].append(mask_list)
 
     def flush_episode(self, episode_id: int):
         """에피소드 종료 시 파일에 저장 (Append)"""
@@ -69,6 +85,10 @@ class ExpertDataManager:
                             "obs": buffer[p_id]['obs'],
                             "acts": buffer[p_id]['acts']
                         }
+                        # mask가 있으면 함께 저장
+                        if len(buffer[p_id]['masks']) > 0:
+                             entry["masks"] = buffer[p_id]['masks']
+                             
                         f.write(json.dumps(entry) + "\n")
         except Exception as e:
             print(f"[DataManager Error] Flush failed: {e}")

@@ -230,7 +230,7 @@ def test(
     env, 
     all_agents: Dict[int, Any], 
     args, 
-    logger: "LogManager" = None, # [수정] Logger 받음
+    logger: "LogManager" = None,
     stop_event: Optional[threading.Event] = None
 ):
     """
@@ -263,18 +263,25 @@ def test(
         # --- [1. 행동 결정] ---
         actions = {}
         
-        # 살아있는 에이전트 순회
-        # (env.game.players 접근이 가능하다면 활용, 아니면 0~7 루프)
-        for p_id in range(8):
-            if not env.game.players[p_id].alive:
-                continue
+        # [수정] 살아있는 플레이어 확인 루프 개선
+        # env.agents는 현재 살아있는 에이전트의 ID 문자열 리스트(예: ["player_0", "player_2"])를 반환함
+        for agent_id_str in env.agents:
+            p_id = int(agent_id_str.split("_")[1]) # "player_0" -> 0
+            
+            # [수정] Observation Key 접근 수정 (문자열 키 사용)
+            # obs[agent_id_str]는 {'observation': ..., 'action_mask': ...} 형태임
+            full_obs = obs[agent_id_str]
+            
+            # [수정] 순수 Observation 벡터만 추출 (Data Collection용)
+            obs_vec = full_obs['observation']
 
             agent = all_agents[p_id]
-            p_obs = obs[p_id]
             
             # 행동 결정 (호환성 처리)
             action_obj = None
-            action_vector = [8, 0] # Default No-Op
+            # Default Action Vector: [Target=0(None), Role=0(None)]
+            # state.py의 GameAction.to_multi_discrete() 로직과 일치시킴
+            action_vector = [0, 0] 
 
             try:
                 # 1. LLM / Rule / Heuristic (GameStatus 필요)
@@ -283,50 +290,48 @@ def test(
                     game_status = env.get_game_status(p_id)
                     action_obj = agent.get_action(game_status)
                     
-                    # 기록용 벡터 변환
-                    tgt = action_obj.target_id if action_obj.target_id != -1 else 8
-                    role = action_obj.claim_role.value if action_obj.claim_role else 0
-                    action_vector = [tgt, role]
-                    
-                    # 환경에 전달할 객체 저장
-                    actions[p_id] = action_obj
+                    # GameAction 객체를 벡터로 변환 (state.py 로직 활용)
+                    action_vector = action_obj.to_multi_discrete()
+                    actions[p_id] = action_obj # Env에는 객체 전달
 
                 # 2. RL Agent (Vector Obs 필요)
                 elif hasattr(agent, "select_action_vector"):
-                    action_vector = agent.select_action_vector(p_obs)
-                    # RL은 action_vector를 그대로 뱉음.
-                    # 하지만 단일 env.step은 보통 dict{int: ActionObject}를 원하거나
-                    # env 내부에서 벡터를 해석해줘야 함.
-                    # 여기서는 'mafia_env.py'가 벡터를 받아서 처리한다고 가정하거나,
-                    # RL Agent가 Action 객체로 변환해주는 래퍼가 필요할 수 있음.
-                    # (일단 기존 구조상 RL도 vector를 actions에 넣으면 env가 처리한다고 가정)
-                    actions[p_id] = action_vector
+                    # RL Agent는 dict obs를 받을 수 있도록 설계됨
+                    action_vector = agent.select_action_vector(full_obs)
+                    actions[p_id] = action_vector 
 
                 # --- [핵심] 데이터 저장 ---
                 if data_manager:
                     # 현재 에피소드 ID (1부터 시작)
                     current_ep_id = completed_episodes + 1
-                    data_manager.record_turn(current_ep_id, p_id, p_obs, action_vector)
+                    # [수정] action_mask도 함께 전달
+                    action_mask = full_obs.get('action_mask')
+                    data_manager.record_turn(current_ep_id, p_id, obs_vec, action_vector, action_mask=action_mask)
 
             except Exception as e:
                 print(f"[Error] Agent {p_id}: {e}")
 
         # --- [2. 환경 진행] ---
-        next_obs, rewards, done, info = env.step(actions)
+        # Env step expects string keys matching agents
+        env_actions = {f"player_{pid}": act for pid, act in actions.items()}
+        next_obs, rewards, terminations, truncations, infos = env.step(env_actions)
+
+        # PettingZoo API update: done check
+        done = not env.agents
 
         # --- [3. 로그 저장] ---
-        # LogManager는 보통 info['log_events']나 env.game.events를 참조
         if logger:
-            # env.game.events에 쌓인 것을 가져와서 로깅 (가장 확실한 방법)
-            # LogManager 구현에 따라 다르지만, 보통 step 직후 발생한 이벤트를 처리
-            pass 
-            # (만약 env.step()에서 info에 log를 담아준다면 아래 코드 사용)
-            if isinstance(info, dict) and "log_events" in info:
-                 for ev_dict in info["log_events"]:
-                     try:
-                        from core.engine.state import GameEvent
-                        logger.log_event(GameEvent(**ev_dict))
-                     except: pass
+             # step의 infos에서 log_events 추출 시도
+             # infos는 dict {agent_id: info_dict}
+             # 보통 0번 에이전트 정보에 전체 로그가 포함됨
+             for agent_id_str, info_item in infos.items():
+                 if isinstance(info_item, dict) and "log_events" in info_item:
+                     for ev_dict in info_item["log_events"]:
+                         try:
+                            from core.engine.state import GameEvent
+                            logger.log_event(GameEvent(**ev_dict))
+                         except: pass
+                     break 
 
         obs = next_obs
 
@@ -343,7 +348,7 @@ def test(
             # 로그 매니저에게 에피소드 종료 알림 (통계 등)
             if logger:
                 # 간단히 승리 여부만 기록
-                is_win = (env.game.winner == Role.MAFIA) # 예시
+                is_win = (env.game.winner == Role.MAFIA) 
                 logger.log_metrics(completed_episodes + 1, total_reward=0, is_win=is_win)
                 logger.set_episode(completed_episodes + 2) # 다음 에피소드 번호 세팅
 
