@@ -18,6 +18,7 @@ def train(
     args,
     logger: "LogManager",
     stop_event: Optional[threading.Event] = None,
+    log_queue=None,
 ):
     """
     [수정됨] SuperSuit VectorEnv 전용 병렬 학습 루프
@@ -132,29 +133,34 @@ def train(
         # --- [2. 환경 진행 (Step)] ---
         next_obs, rewards, terminations, truncations, infos = env.step(all_actions)
 
-        if isinstance(infos, dict):
-            iterator = [(0, item) for item in infos.values()]
-        elif isinstance(infos, list):
-            iterator = enumerate(infos)
-        else:
-            iterator = []
-
-        for flat_idx, info_item in iterator:
-            if isinstance(info_item, dict) and "log_events" in info_item:
-                
-                game_slot_idx = flat_idx // PLAYERS_PER_GAME
-                custom_id = slot_episode_ids[game_slot_idx]
-                
-                if custom_id > total_episodes:
-                    continue
-                
-                for ev_dict in info_item["log_events"]:
-                    try:
+        # [MODIFIED] Queue 기반 로그 처리
+        # 기존 infos 순회 로직 제거
+        if log_queue:
+            while not log_queue.empty():
+                try:
+                    # 데이터 꺼내기
+                    worker_id, ev_list = log_queue.get_nowait()
+                    
+                    # worker_id (0~7) -> 현재 에피소드 ID 조회
+                    if worker_id < len(slot_episode_ids):
+                        custom_id = slot_episode_ids[worker_id]
+                        
+                        # 목표 에피소드 초과 시 로깅 생략
+                        if custom_id > total_episodes:
+                            continue
+                        
+                        # 이벤트 로깅
                         from core.engine.state import GameEvent
-                        event_obj = GameEvent(**ev_dict)
-                        logger.log_event(event_obj, custom_episode=custom_id)
-                    except Exception as e:
-                        print(f"[Log Error] {e}")
+                        for ev_dict in ev_list:
+                            try:
+                                event_obj = GameEvent(**ev_dict)
+                                logger.log_event(event_obj, custom_episode=custom_id)
+                            except Exception as e:
+                                print(f"[Log Error] {e}")
+
+                except Exception:
+                    # Queue Empty or Manager Error
+                    break
 
         # --- [3. 보상 저장 및 버퍼 관리] ---
         for pid, agent in rl_agents.items():

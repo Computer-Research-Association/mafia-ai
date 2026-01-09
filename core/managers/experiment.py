@@ -1,6 +1,7 @@
 import gymnasium as gym
 import supersuit as ss
 import os
+import multiprocessing
 
 from typing import Dict, Any, List
 from pathlib import Path
@@ -28,6 +29,7 @@ class ExperimentManager:
         self.args = args
         self.player_configs = getattr(args, "player_configs", [])
         self.mode = args.mode
+        self.log_queue = multiprocessing.Manager().Queue()
         self.logger = self._setup_logger()
 
     def _setup_logger(self) -> LogManager:
@@ -50,9 +52,9 @@ class ExperimentManager:
         """
         메인 프로세스용 환경
         [수정] Runner가 로그를 중앙 관리하므로, Env 내부에는 logger를 주지 않습니다.
+        대신 log_queue를 주입해 로그 이벤트를 수집합니다.
         """
-        # 기존: return MafiaEnv(logger=self.logger)
-        return MafiaEnv()
+        return MafiaEnv(worker_id=0, log_queue=self.log_queue)
 
     def build_vec_env(self, num_envs: int = 8, num_cpus: int = 4):
         """
@@ -60,24 +62,24 @@ class ExperimentManager:
         """
         print(f"[System] Building Parallel Env: {num_envs} games with {num_cpus} CPUs")
 
-        # 1. 아까 밖으로 빼둔 함수(make_env_for_worker)를 사용해 템플릿을 만듭니다.
-        # 이렇게 하면 'LogManager'가 묻지 않은 깨끗한 환경이 만들어집니다.
-        env = make_env_for_worker()
+        # 각 환경에 고유 worker_id와 log_queue를 주입하여 생성
+        env_list = []
+        for i in range(num_envs):
+            env = MafiaEnv(worker_id=i, log_queue=self.log_queue)
+            env = ss.pettingzoo_env_to_vec_env_v1(env)
+            env_list.append(env)
 
-        # 2. PettingZoo -> Gymnasium 변환
-        env = ss.pettingzoo_env_to_vec_env_v1(env)
-
-        # 3. 병렬 연결 (이제 에러가 안 날 겁니다)
+        # 3. 병렬 연결
         try:
             vec_env = ss.concat_vec_envs_v1(
-                env, num_vec_envs=num_envs, num_cpus=num_cpus, base_class="gymnasium"
+                env_list, num_vec_envs=num_envs, num_cpus=num_cpus, base_class="gymnasium"
             )
         except Exception as e:
             # 혹시라도 또 에러가 나면 안전하게 싱글 프로세스로 전환
             print(f"[Error] Parallel creation failed: {e}")
             print("[System] Switching to single process mode (Safe Mode)")
             vec_env = ss.concat_vec_envs_v1(
-                env, num_vec_envs=num_envs, num_cpus=0, base_class="gymnasium"
+                env_list, num_vec_envs=num_envs, num_cpus=0, base_class="gymnasium"
             )
 
         return vec_env
