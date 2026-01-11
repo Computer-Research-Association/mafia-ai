@@ -88,14 +88,19 @@ class MafiaEnv(ParallelEnv):
         self.attack_was_blocked = False
 
         observations = {}
+        infos = {}
+
+        self.last_history_idx = 0
+        new_events = [e.model_dump() for e in self.game.history[self.last_history_idx:]]
+        self.last_history_idx = len(self.game.history)
+
         for agent in self.agents:
             pid = self._agent_to_id(agent)
             observations[agent] = {
                 "observation": self._encode_observation(pid),
                 "action_mask": self._get_action_mask(pid),  # 액션 마스크 포함 필수
             }
-
-        infos = {agent: {} for agent in self.agents}
+            infos[agent] = {"log_events": new_events}
         
         return observations, infos
 
@@ -122,6 +127,7 @@ class MafiaEnv(ParallelEnv):
         status, is_over, is_win = self.game.step_phase(engine_actions)
 
         # [REMOVED] event dumping logic for speed optimization
+        new_events = [e.model_dump() for e in self.game.history[self.last_history_idx:]]
         self.last_history_idx = len(self.game.history)
 
         # 상태 변화 추적
@@ -152,7 +158,13 @@ class MafiaEnv(ParallelEnv):
             terminations[agent] = is_over
             truncations[agent] = False
             
-            agent_info = {"day": status.day, "phase": status.phase, "win": my_win}
+            agent_info = {
+                "day": status.day,
+                "phase": status.phase,
+                "win": my_win,
+                "log_events": new_events,    
+            }
+
             infos[agent] = agent_info
         
         if is_over:

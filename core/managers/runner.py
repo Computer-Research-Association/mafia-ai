@@ -31,9 +31,6 @@ def train(
     else:
         PLAYERS_PER_GAME = 8
 
-    # 2. [핵심 수정] 실제 병렬 게임 수 계산
-    # 나눗셈(//) 대신 실제 range로 생성되는 인덱스 개수를 세어야 함 (나머지 처리)
-    # 0번 플레이어 기준으로 몇 개의 게임이 생성되는지 확인
     sample_indices = list(range(0, env.num_envs, PLAYERS_PER_GAME))
     actual_num_games = len(sample_indices)
     
@@ -93,12 +90,6 @@ def train(
             # PID별 인덱스 추출
             indices = list(range(pid, env.num_envs, PLAYERS_PER_GAME))
 
-            # 혹시 모를 인덱스 길이 불일치 방지 (매우 드문 케이스)
-            if len(indices) != actual_num_games:
-                # 마지막 자투리 배치가 다를 경우를 대비해 0으로 패딩하거나 잘라야 함
-                # 하지만 보통 VectorEnv는 맞춰져 있으므로 여기서는 pass
-                pass
-
             if pid in rl_agents:
                 agent = rl_agents[pid]
 
@@ -144,8 +135,6 @@ def train(
             p_terms = terminations[indices]
             p_truncs = truncations[indices]
 
-            # [문제 해결 구간]
-            # current_rewards[pid] (길이 N) += p_rewards (길이 N) -> 차원 일치 보장됨
             current_rewards[pid] += p_rewards
 
             # 학습용 버퍼 저장
