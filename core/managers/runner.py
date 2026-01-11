@@ -53,6 +53,7 @@ def train(
 
     completed_episodes = 0
     current_rewards = {}  # 빈 딕셔너리 생성
+    train_metrics = {}    # [NEW] 학습 메트릭 저장용
 
     # 에이전트마다 자기 할당량을 직접 계산 (len)
     for pid in rl_agents.keys():
@@ -159,13 +160,74 @@ def train(
             completed_episodes += num_finished_now
             finished_indices = np.where(dones)[0]
 
+            # --- [Stats Tracking Logic] ---
+            # 1. Collect Completed Infos
+            finished_infos = []
+            if isinstance(infos, dict) and isinstance(list(infos.values())[0], (list, np.ndarray)):
+                 # SuperSuit Stacked Dict: {'player_0': [info0, info1...], ...}
+                 for j in finished_indices:
+                     # Check Key ("player_0") exists
+                     key_0 = "player_0"
+                     if key_0 in infos:
+                         finished_infos.append(infos[key_0][j])
+                     else:
+                         # Fallback
+                         first_key = list(infos.keys())[0]
+                         finished_infos.append(infos[first_key][j])
+            
+            elif isinstance(infos, (list, tuple)):
+                 # Standard Gym Vector Env: infos is list of dicts (length = total agents)
+                 for j in finished_indices:
+                     # Game j's Player 0 is at index j * PLAYERS_PER_GAME
+                     idx = j * PLAYERS_PER_GAME
+                     finished_infos.append(infos[idx])
+            
+            # 2. Collect Rewards & Wins for Legacy Stats
+            agent_rewards_stats = {}
+            agent_wins_stats = {}
+            
+            for pid in rl_agents.keys():
+                # Reward (Avg of finished games)
+                avg_r = np.mean(current_rewards[pid][finished_indices])
+                agent_rewards_stats[pid] = avg_r
+                
+                # Win (Check via infos)
+                batch_wins = []
+                for j in finished_indices:
+                    w = False
+                    if isinstance(infos, (list, tuple)):
+                        idx = j * PLAYERS_PER_GAME + pid
+                        if idx < len(infos):
+                            w = infos[idx].get('win', False)
+                    elif isinstance(infos, dict):
+                        agent_key = f"player_{pid}"
+                        if agent_key in infos and j < len(infos[agent_key]):
+                             w = infos[agent_key][j].get('win', False)
+                    
+                    batch_wins.append(w)
+                
+                agent_wins_stats[pid] = (np.mean(batch_wins) > 0.5) if batch_wins else False
+
+            # 3. Calculate Stats
+            metrics = stats_manager.calculate_stats(
+                infos=finished_infos,
+                rl_agents=rl_agents,
+                all_agents=all_agents,
+                episode_rewards=agent_rewards_stats,
+                is_wins=agent_wins_stats,
+                train_metrics=train_metrics
+            )
+
             # 대표 에이전트 평균 보상 로깅
             rep_pid = list(rl_agents.keys())[0]
-            avg_reward = np.mean(current_rewards[rep_pid][finished_indices])
+            avg_reward = agent_rewards_stats[rep_pid]
 
             logger.set_episode(int(completed_episodes))
             logger.log_metrics(
-                episode=int(completed_episodes), total_reward=avg_reward, is_win=False
+                episode=int(completed_episodes), 
+                total_reward=avg_reward, 
+                is_win=False,
+                **metrics
             )
 
             # 끝난 게임의 누적 보상 리셋
@@ -179,9 +241,13 @@ def train(
                 completed_episodes - num_finished_now
             ) // 100 != completed_episodes // 100:
                 pbar.write("[System] Updating Agents...")
-                for agent in rl_agents.values():
+                for pid, agent in rl_agents.items():
                     if hasattr(agent, "update"):
-                        agent.update()
+                        res = agent.update()
+                        if res:
+                             # Try to categorize metrics by Role
+                             role_key = "Mafia" if all_agents[pid].role == Role.MAFIA else "Citizen"
+                             train_metrics[role_key] = res
 
     # --- 학습 종료 및 저장 ---
     print("\n[System] Saving trained models...")

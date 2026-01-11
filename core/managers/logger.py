@@ -181,20 +181,6 @@ class LogManager:
 
         self.writer.add_custom_scalars(layout)
 
-    def log_histograms(self, episode: int, agent_id: int, tag: str, values: Any):
-        """
-        히스토그램 로깅
-        Args:
-            episode: 현재 에피소드
-            agent_id: 에이전트 ID
-            tag: 데이터 태그 (예: 'Action/Probs')
-            values: 데이터 값 (Tensor or Numpy array)
-        """
-        if self.writer:
-            self.writer.add_histogram(
-                f"Agent_{agent_id}/{tag}", values, global_step=episode
-            )
-
     def _load_narrative_templates(self) -> Dict[str, str]:
         """YAML에서 내러티브 템플릿 로드"""
         template_path = Path(__file__).parent / "narrative_templates.yaml"
