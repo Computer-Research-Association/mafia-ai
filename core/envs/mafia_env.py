@@ -165,6 +165,7 @@ class MafiaEnv(ParallelEnv):
             agent_info = {
                 "day": status.day,
                 "phase": status.phase,
+                "role": self.game.players[pid].role,
                 "win": my_win,
                 "log_events": new_events,    
             }

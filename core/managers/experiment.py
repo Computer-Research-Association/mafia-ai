@@ -91,9 +91,14 @@ class ExperimentManager:
 
         for i, p_config in enumerate(self.player_configs):
             if p_config["type"] == "rl":
+                role_str = p_config.get("role", "citizen").upper()
+                role = Role[role_str] if role_str in Role.__members__ else Role.CITIZEN
+
+                print(role)
+
                 agent = RLAgent(
                     player_id=i,
-                    role=Role.CITIZEN,
+                    role=role,
                     state_dim=state_dim,
                     action_dims=config.game.ACTION_DIMS,
                     algorithm=p_config["algo"],

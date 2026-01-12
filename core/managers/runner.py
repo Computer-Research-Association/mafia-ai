@@ -44,7 +44,12 @@ def train(
     next_global_episode_id = actual_num_games + 1
 
     # --- 초기화 ---
-    obs, info = env.reset()
+    obs, infos = env.reset()
+
+    for agent_id, info in infos.items():
+        pid = int(agent_id.split("_")[1])
+        if pid in all_agents:
+            all_agents[pid].role = info["role"]
 
     # [수정] RNN Hidden States 초기화 (계산된 actual_num_games 사용)
     for agent in rl_agents.values():
