@@ -242,6 +242,12 @@ class PPO:
 
                 ratios = torch.exp(logprobs - mb_old_logprobs)
 
+                # Calculate approx_kl http://joschu.net/blog/kl-approx.html
+                with torch.no_grad():
+                    log_ratio = logprobs - mb_old_logprobs
+                    approx_kl = ((ratios - 1) - log_ratio).mean()
+                    clip_fracs = ((ratios - 1.0).abs() > self.eps_clip).float().mean()
+
                 advantages = mb_rewards - state_values.detach()
                 surr1 = ratios * advantages
                 surr2 = (
@@ -264,6 +270,8 @@ class PPO:
 
                 avg_loss_all_epochs += loss.mean().item()
                 avg_entropy_all_epochs += dist_entropy.mean().item()
+                avg_kl_all_epochs += approx_kl.item()
+                avg_clip_frac_all_epochs += clip_fracs.item()
 
         self.policy_old.load_state_dict(self.policy.state_dict())
         self.buffer.clear()
@@ -275,6 +283,12 @@ class PPO:
             "loss": avg_loss_all_epochs / total_batches if total_batches > 0 else 0,
             "entropy": (
                 avg_entropy_all_epochs / total_batches if total_batches > 0 else 0
+            ),
+            "approx_kl": (
+                avg_kl_all_epochs / total_batches if total_batches > 0 else 0
+            ),
+            "clip_frac": (
+                avg_clip_frac_all_epochs / total_batches if total_batches > 0 else 0
             ),
         }
 

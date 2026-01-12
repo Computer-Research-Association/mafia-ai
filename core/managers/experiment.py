@@ -1,6 +1,7 @@
 import gymnasium as gym
 import supersuit as ss
 import os
+import multiprocessing
 
 from typing import Dict, Any, List
 from pathlib import Path
@@ -13,7 +14,7 @@ def make_env_for_worker():
     from core.envs.mafia_env import MafiaEnv
 
     # 워커는 로그를 파일에 안 씀 (logger=None)
-    return MafiaEnv(logger=None)
+    return MafiaEnv()
 
 
 from core.envs.mafia_env import MafiaEnv
@@ -47,8 +48,11 @@ class ExperimentManager:
         )
 
     def build_env(self) -> MafiaEnv:
-        """메인 프로세스용 환경 (여기엔 로거가 있음)"""
-        return MafiaEnv(logger=self.logger)
+        """
+        메인 프로세스용 환경
+        [수정] Runner가 로그를 중앙 관리하므로, Env 내부에는 logger를 주지 않습니다.
+        """
+        return MafiaEnv()
 
     def build_vec_env(self, num_envs: int = 8, num_cpus: int = 4):
         """
@@ -56,20 +60,19 @@ class ExperimentManager:
         """
         print(f"[System] Building Parallel Env: {num_envs} games with {num_cpus} CPUs")
 
-        # 1. 아까 밖으로 빼둔 함수(make_env_for_worker)를 사용해 템플릿을 만듭니다.
-        # 이렇게 하면 'LogManager'가 묻지 않은 깨끗한 환경이 만들어집니다.
-        env = make_env_for_worker()
+        # 1. 단일 환경 템플릿 생성
+        # [수정] 리스트 대신 단일 인스턴스를 사용해 에러 해결
+        env = MafiaEnv()
 
         # 2. PettingZoo -> Gymnasium 변환
         env = ss.pettingzoo_env_to_vec_env_v1(env)
 
-        # 3. 병렬 연결 (이제 에러가 안 날 겁니다)
+        # 3. 병렬 연결
         try:
             vec_env = ss.concat_vec_envs_v1(
                 env, num_vec_envs=num_envs, num_cpus=num_cpus, base_class="gymnasium"
             )
         except Exception as e:
-            # 혹시라도 또 에러가 나면 안전하게 싱글 프로세스로 전환
             print(f"[Error] Parallel creation failed: {e}")
             print("[System] Switching to single process mode (Safe Mode)")
             vec_env = ss.concat_vec_envs_v1(
@@ -88,9 +91,14 @@ class ExperimentManager:
 
         for i, p_config in enumerate(self.player_configs):
             if p_config["type"] == "rl":
+                role_str = p_config.get("role", "citizen").upper()
+                role = Role[role_str] if role_str in Role.__members__ else Role.CITIZEN
+
+                print(role)
+
                 agent = RLAgent(
                     player_id=i,
-                    role=Role.CITIZEN,
+                    role=role,
                     state_dim=state_dim,
                     action_dims=config.game.ACTION_DIMS,
                     algorithm=p_config["algo"],

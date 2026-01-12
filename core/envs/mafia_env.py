@@ -2,6 +2,7 @@ import functools
 import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
+import os
 from typing import Dict, Any, List, Optional
 
 from pettingzoo import ParallelEnv
@@ -26,16 +27,15 @@ class EnvAgent(BaseAgent):
 class MafiaEnv(ParallelEnv):
     metadata = {"render_modes": ["human"], "name": "mafia_v1"}
 
-    def __init__(self, render_mode=None, logger=None):
+    def __init__(self, render_mode=None):
         self.possible_agents = [f"player_{i}" for i in range(config.game.PLAYER_COUNT)]
         self.agents = self.possible_agents[:]
         self.render_mode = render_mode
-        self.logger = logger
 
         # Create dummy agents for the engine
         # MafiaGame expects a list of BaseAgent instances
         self.internal_agents = [EnvAgent(i) for i in range(config.game.PLAYER_COUNT)]
-        self.game = MafiaGame(agents=self.internal_agents, logger=logger)
+        self.game = MafiaGame(agents=self.internal_agents)
 
         # === [Multi-Discrete Action Space] ===
         # 형태: [Target, Role]
@@ -71,9 +71,14 @@ class MafiaEnv(ParallelEnv):
         self.attack_was_blocked = False
 
     def reset(self, seed=None, options=None):
-        # PettingZoo API: reset returns (observations, infos)
+        """
+        Resets the environment.
+        """
         self.agents = self.possible_agents[:]
         self.game.reset()
+
+        # [REMOVED] event dumping logic for speed optimization
+        self.last_history_idx = len(self.game.history)
 
         # 상태 초기화
         self.last_executed_player = None
@@ -83,15 +88,23 @@ class MafiaEnv(ParallelEnv):
         self.attack_was_blocked = False
 
         observations = {}
+        infos = {}
+
+        self.last_history_idx = 0
+        new_events = [e.model_dump() for e in self.game.history[self.last_history_idx:]]
+        self.last_history_idx = len(self.game.history)
+
         for agent in self.agents:
             pid = self._agent_to_id(agent)
             observations[agent] = {
                 "observation": self._encode_observation(pid),
                 "action_mask": self._get_action_mask(pid),  # 액션 마스크 포함 필수
             }
-
-        infos = {agent: {} for agent in self.agents}
-
+            infos[agent] = {
+                "log_events": new_events,
+                "role": self.game.players[pid].role,
+            }
+        
         return observations, infos
 
     def step(self, actions):
@@ -113,13 +126,12 @@ class MafiaEnv(ParallelEnv):
         prev_phase = self.game.phase
         prev_alive_count = sum(1 for p in self.game.players if p.alive)
 
-        history_start_idx = len(self.game.history)
-
         # 게임 진행
         status, is_over, is_win = self.game.step_phase(engine_actions)
 
-        new_events = self.game.history[history_start_idx:]
-        serialized_events = [e.model_dump() for e in new_events]
+        # [REMOVED] event dumping logic for speed optimization
+        new_events = [e.model_dump() for e in self.game.history[self.last_history_idx:]]
+        self.last_history_idx = len(self.game.history)
 
         # 상태 변화 추적
         self._track_state_changes(prev_phase, prev_alive_count, engine_actions)
@@ -129,6 +141,10 @@ class MafiaEnv(ParallelEnv):
         terminations = {}
         truncations = {}
         infos = {}
+
+        episode_metrics = {}
+        if is_over:
+            episode_metrics = self._calculate_episode_metrics()
 
         for agent in self.agents:
             pid = self._agent_to_id(agent)
@@ -149,17 +165,152 @@ class MafiaEnv(ParallelEnv):
             terminations[agent] = is_over
             truncations[agent] = False
             
-            agent_info = {"day": status.day, "phase": status.phase, "win": my_win}
+            agent_info = {
+                "day": status.day,
+                "phase": status.phase,
+                "role": self.game.players[pid].role,
+                "win": my_win,
+                "log_events": new_events,    
+            }
             
-            if pid == 0:
-                agent_info["log_events"] = serialized_events
-                
-            infos[agent] = agent_info
+            if is_over:
+                agent_info["episode_metrics"] = episode_metrics
 
+            infos[agent] = agent_info
+        
         if is_over:
             self.agents = []
 
         return observations, rewards, terminations, truncations, infos
+
+    def _calculate_episode_metrics(self) -> Dict[str, float]:
+        """게임 종료 시 통계 지표 계산"""
+        metrics = {}
+        game = self.game
+        
+        # 1. Game Duration & Winner
+        metrics["Game/Duration"] = game.day
+        
+        mafia_won = False
+        citizen_won = False
+        
+        last_event = game.history[-1] if game.history else None
+        if last_event and last_event.phase == Phase.GAME_END:
+            citizen_won_game = last_event.value
+            if citizen_won_game:
+                citizen_won = True
+            else:
+                mafia_won = True
+                
+        metrics["Game/Mafia_Win"] = 1.0 if mafia_won else 0.0
+        metrics["Game/Citizen_Win"] = 1.0 if citizen_won else 0.0
+
+        # Citizen Survival Rate
+        initial_citizens = sum(1 for p in game.players if p.role != Role.MAFIA)
+        current_citizens = sum(1 for p in game.players if p.role != Role.MAFIA and p.alive)
+        metrics["Game/Citizen_Survival_Rate"] = current_citizens / initial_citizens if initial_citizens > 0 else 0.0
+
+        # Action Stats
+        # Action Counter
+        mafia_kill_attempts = 0
+        mafia_kill_success = 0
+        doctor_save_success = 0
+        doctor_self_heal = 0
+        doctor_total_protects = 0
+        
+        police_investigations = 0
+        police_finds = 0
+        
+        # Vote Counter
+        vote_total = 0
+        vote_abstain = 0
+        mafia_betrayal = 0
+        citizen_correct_vote = 0
+        
+        mafia_votes = 0
+        citizen_votes = 0
+        
+        # Execution Counter
+        execution_total = 0
+        mafia_executed = 0
+        citizen_sacrificed = 0
+        
+        # Night Interactions
+        night_events = [e for e in game.history if e.phase == Phase.NIGHT]
+        
+        for d in range(1, game.day + 1):
+            day_night_events = [e for e in night_events if e.day == d]
+            kill_event = next((e for e in day_night_events if e.event_type == EventType.KILL), None)
+            protect_event = next((e for e in day_night_events if e.event_type == EventType.PROTECT), None)
+            
+            if protect_event:
+                doctor_total_protects += 1
+                if protect_event.actor_id == protect_event.target_id:
+                    doctor_self_heal += 1
+
+            if kill_event:
+                mafia_kill_attempts += 1
+                is_saved = False
+                
+                if protect_event and kill_event.target_id == protect_event.target_id:
+                    is_saved = True
+                    doctor_save_success += 1
+                
+                if not is_saved:
+                    mafia_kill_success += 1
+
+        # Event Loop
+        for event in game.history:
+            if event.event_type == EventType.POLICE_RESULT:
+                police_investigations += 1
+                if event.value == Role.MAFIA:
+                    police_finds += 1
+            
+            elif event.event_type == EventType.VOTE:
+                vote_total += 1
+                actor = game.players[event.actor_id]
+                
+                if actor.role == Role.MAFIA:
+                    mafia_votes += 1
+                else:
+                    citizen_votes += 1
+
+                if event.target_id == -1:
+                    vote_abstain += 1
+                else:
+                    target = game.players[event.target_id]
+                    if actor.role == Role.MAFIA and target.role == Role.MAFIA:
+                        mafia_betrayal += 1
+                    
+                    if actor.role != Role.MAFIA and target.role == Role.MAFIA:
+                        citizen_correct_vote += 1
+            
+            elif event.event_type == EventType.EXECUTE:
+                if event.target_id != -1:
+                    execution_total += 1
+                    target = game.players[event.target_id]
+                    if target.role == Role.MAFIA:
+                        mafia_executed += 1
+                    else:
+                        citizen_sacrificed += 1
+                        
+        metrics["Vote/Abstain_Rate"] = vote_abstain / vote_total if vote_total > 0 else 0.0
+        metrics["Vote/Mafia_Betrayal_Rate"] = mafia_betrayal / mafia_votes if mafia_votes > 0 else 0.0
+        metrics["Vote/Citizen_Accuracy_Rate"] = citizen_correct_vote / citizen_votes if citizen_votes > 0 else 0.0
+        
+        metrics["Action/Doctor_Save_Rate"] = doctor_save_success / mafia_kill_attempts if mafia_kill_attempts > 0 else 0.0
+        metrics["Action/Doctor_Self_Heal_Rate"] = doctor_self_heal / doctor_total_protects if doctor_total_protects > 0 else 0.0
+        
+        metrics["Action/Police_Find_Rate"] = police_finds / police_investigations if police_investigations > 0 else 0.0
+        metrics["Action/Mafia_Kill_Success_Rate"] = mafia_kill_success / mafia_kill_attempts if mafia_kill_attempts > 0 else 0.0
+        
+        metrics["Game/Execution_Frequency"] = execution_total / game.day if game.day > 0 else 0.0
+        
+        metrics["Vote/Mafia_Lynch_Rate"] = mafia_executed / execution_total if execution_total > 0 else 0.0
+        metrics["Vote/Citizen_Sacrifice_Rate"] = citizen_sacrificed / execution_total if execution_total > 0 else 0.0
+
+        return metrics
+
 
     def render(self):
         """게임 상태 렌더링"""
@@ -182,6 +333,13 @@ class MafiaEnv(ParallelEnv):
 
     def action_space(self, agent):
         return self.action_spaces[agent]
+
+    def get_game_status(self, agent_id):
+        """
+        특정 에이전트 시점의 게임 상태를 반환합니다.
+        runner.py 등 외부에서 에이전트의 행동 결정을 위해 호출합니다.
+        """
+        return self.game.get_game_status(agent_id)
 
     def _agent_to_id(self, agent_str):
         return int(agent_str.split("_")[1])
@@ -379,12 +537,61 @@ class MafiaEnv(ParallelEnv):
         self, agent_id: int, target_event: Optional[GameEvent] = None
     ) -> np.ndarray:
         """
-        46차원 관측 벡터 생성 (Belief Matrix 제거)
-        target_event가 주어지면 해당 이벤트를 '직전 사건'으로 인코딩.
-        없으면 가장 최근 이벤트를 사용.
+        286차원 관측 벡터 생성 (Maps 포함)
+        - Base (46): Self, Game, LastEvent
+        - Maps (240): Vote(8x8), Attack(8x8), Vouch(8x8) -> 누적 & 정규화
+          * 실제로는 8x8=64 * 3 = 192.
+          * 부족한 차원은 Padding 또는 추가 정보로 채움 (Alive, Claims 등)
+          * 여기서는 User 요청에 따라 Maps 추가 + 누적 로직 구현
         """
         status = self.game.get_game_status(agent_id)
         agent = self.game.players[agent_id]
+
+        # === [Maps Generation] ===
+        # 1. Vote Map (누가 누구에게 투표했나)
+        vote_map = np.zeros((8, 8), dtype=np.float32)
+        # 2. Attack Map (누가 누구를 공격/조사했나 - Kill, Police)
+        attack_map = np.zeros((8, 8), dtype=np.float32)
+        # 3. Vouch Map (누가 누구를 보호/변호했나 - Protect, Claim, Heal)
+        vouch_map = np.zeros((8, 8), dtype=np.float32)
+
+        # 4. Role Claim Map (누가 무슨 직업을 주장했나) - 8x5=40 (보너스 정보)
+        claim_map = np.zeros((8, 5), dtype=np.float32)
+        
+        # 5. Alive Map (생존 여부) - 8 (보너스 정보)
+        alive_vec = np.array([1.0 if p.alive else 0.0 for p in self.game.players], dtype=np.float32)
+
+        # History Traversal (Cumulative)
+        for event in status.action_history:
+            actor = event.actor_id
+            target = event.target_id
+            
+            # Skip invalid actor/target indices (0~7 only)
+            if actor < 0 or actor >= 8:
+                continue
+
+            # Role Claim Update (Last claim overwrites usually, but history is good)
+            if event.event_type == EventType.CLAIM and isinstance(event.value, Role):
+                claim_map[actor][int(event.value)] = 1.0
+            
+            if target is None or target < 0 or target >= 8:
+                continue
+
+            # Cumulative Updates
+            if event.event_type == EventType.VOTE:
+                vote_map[actor][target] += 1.0
+            elif event.event_type in [EventType.KILL, EventType.POLICE_RESULT]:
+                attack_map[actor][target] += 1.0
+            elif event.event_type in [EventType.PROTECT]:
+                vouch_map[actor][target] += 1.0
+            
+            # Claim target (e.g. Cop checks X is Mafia?) - Simplify to Vouch for now or ignore
+            # if event.event_type == EventType.CLAIM: ...
+
+        # Normalization (Max Scaling)
+        if np.max(vote_map) > 0: vote_map /= np.max(vote_map)
+        if np.max(attack_map) > 0: attack_map /= np.max(attack_map)
+        if np.max(vouch_map) > 0: vouch_map /= np.max(vouch_map)
 
         # 1. 자기 정보 (12)
         # ID One-hot (8)
@@ -460,16 +667,23 @@ class MafiaEnv(ParallelEnv):
         # Concatenate all
         obs = np.concatenate(
             [
-                id_vec,  # 8
-                role_vec,  # 4
-                day_vec,  # 1
-                phase_vec,  # 3
-                actor_vec,  # 9
-                target_vec,  # 9
-                value_vec,  # 5
-                type_vec,  # 7
+                id_vec,       # 8
+                role_vec,     # 4
+                day_vec,      # 1
+                phase_vec,    # 3
+                actor_vec,    # 9
+                target_vec,   # 9
+                value_vec,    # 5
+                type_vec,     # 7
+                # === Added Maps ===
+                vote_map.flatten(),    # 64
+                attack_map.flatten(),  # 64
+                vouch_map.flatten(),   # 64
+                claim_map.flatten(),   # 40 (Bonus)
+                alive_vec              # 8  (Bonus)
             ]
-        )  # Total 46
+        )  
+        # Total Sum: 46 + 192 + 40 + 8 = 286. Exactly matches!
 
         return obs
 

@@ -10,6 +10,8 @@ LogManager: 통합 로그 및 모니터링 시스템
 import os
 import json
 import yaml
+import logging
+import sys
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 from pathlib import Path
@@ -70,6 +72,24 @@ class LogManager:
         else:
             self.session_dir = None
             self.writer = None
+        
+        # [Logger Setup]
+        self.logger = logging.getLogger("MafiaLogger")
+        self.logger.setLevel(logging.DEBUG)
+        self.logger.propagate = False  # Prevent propagation to root logger
+
+        if not self.logger.handlers:
+            # File Handler
+            if self.session_dir:
+                log_file = self.session_dir / "system.log"
+                file_handler = logging.FileHandler(log_file, encoding='utf-8')
+                file_handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s'))
+                self.logger.addHandler(file_handler)
+
+            # Console Handler
+            stream_handler = logging.StreamHandler(sys.stdout)
+            stream_handler.setFormatter(logging.Formatter('%(message)s'))
+            self.logger.addHandler(stream_handler)
 
     def _open_log_file(self, start_episode: int):
         """[추가] 새로운 로그 파일을 엽니다."""
@@ -93,9 +113,23 @@ class LogManager:
         # Individual Agent Charts (Separate charts per agent)
         individual_charts = {}
         for i in range(config.game.PLAYER_COUNT):
-            individual_charts[f"Agent {i} Reward"] = [
+            # 1. Policy Metrics (학습 효율성)
+            individual_charts[f"Agent {i} - Policy"] = [
                 "Multiline",
-                [f"Agent_{i}/Reward_Total"],
+                [
+                    f"Agent_{i}/Loss",
+                    f"Agent_{i}/Entropy",
+                    f"Agent_{i}/KL_Divergence",
+                    f"Agent_{i}/Clip_Fraction"
+                ]
+            ]
+            # 2. Performance Metrics (성과)
+            individual_charts[f"Agent {i} - Performance"] = [
+                "Multiline",
+                [
+                    f"Agent_{i}/Reward",
+                    f"Agent_{i}/Win_Rate"
+                ]
             ]
 
         layout = {
@@ -116,21 +150,6 @@ class LogManager:
                         "Game/Avg_Day_When_Mafia_Wins",
                         "Game/Avg_Day_When_Citizen_Wins",
                     ],
-                ],
-            },
-            "Training Details": {
-                "Team Loss": ["Multiline", ["Train/Mafia_Loss", "Train/Citizen_Loss"]],
-                "Team Entropy": [
-                    "Multiline",
-                    ["Train/Mafia_Entropy", "Train/Citizen_Entropy"],
-                ],
-                "Policy Trust (KL)": [
-                    "Multiline",
-                    ["Train/Mafia_ApproxKL", "Train/Citizen_ApproxKL"],
-                ],
-                "Clip Fraction": [
-                    "Multiline",
-                    ["Train/Mafia_ClipFrac", "Train/Citizen_ClipFrac"],
                 ],
             },
             "Individual Agents": individual_charts,
@@ -160,20 +179,6 @@ class LogManager:
         }
 
         self.writer.add_custom_scalars(layout)
-
-    def log_histograms(self, episode: int, agent_id: int, tag: str, values: Any):
-        """
-        히스토그램 로깅
-        Args:
-            episode: 현재 에피소드
-            agent_id: 에이전트 ID
-            tag: 데이터 태그 (예: 'Action/Probs')
-            values: 데이터 값 (Tensor or Numpy array)
-        """
-        if self.writer:
-            self.writer.add_histogram(
-                f"Agent_{agent_id}/{tag}", values, global_step=episode
-            )
 
     def _load_narrative_templates(self) -> Dict[str, str]:
         """YAML에서 내러티브 템플릿 로드"""

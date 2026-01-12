@@ -34,10 +34,17 @@ def run_simulation(args):
         # 모드별 실행
         if args.mode == "train":
             env = experiment.build_vec_env(num_envs=8, num_cpus=4)
-            train(env, rl_agents, agents, args, experiment.logger, stop_event=STOP)
+            train(
+                env, 
+                rl_agents, 
+                agents, 
+                args, 
+                experiment.logger, 
+                stop_event=STOP, 
+            )
 
         elif args.mode == "test":
-            test(env, agents, args, stop_event=STOP)
+            test(env, agents, args, logger=experiment.logger, stop_event=STOP)
 
     finally:
         # 리소스 정리
