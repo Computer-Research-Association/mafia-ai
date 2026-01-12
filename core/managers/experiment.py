@@ -20,6 +20,7 @@ def make_env_for_worker():
 from core.envs.mafia_env import MafiaEnv
 from core.agents.rl_agent import RLAgent
 from core.agents.llm_agent import LLMAgent
+from core.agents.rule_base_agent import RuleBaseAgent
 from core.managers.logger import LogManager
 from config import Role, config
 
@@ -129,6 +130,13 @@ class ExperimentManager:
             elif p_config["type"] == "llm":
                 # ... (LLM 에이전트 생성 코드는 그대로 둠)
                 agent = LLMAgent(player_id=i, logger=self.logger)
+                agents[i] = agent
+
+            elif p_config["type"] == "rba":
+                role_str = p_config.get("role", "citizen").upper()
+                role = Role[role_str] if role_str in Role.__members__ else Role.CITIZEN
+
+                agent = RuleBaseAgent(player_id=i, role=role)
                 agents[i] = agent
             else:
                 pass
