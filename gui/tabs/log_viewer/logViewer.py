@@ -57,6 +57,16 @@ class LogViewer(QWidget):
             s.bind(("", 0))
             return s.getsockname()[1]
 
+    def _wait_for_service(self, port, timeout=10):
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            try:
+                with socket.create_connection(("localhost", port), timeout=0.5):
+                    return True
+            except OSError:
+                time.sleep(0.5)
+        return False
+
     def shutdown_tensorboard(self):
         """6006 포트를 쓰기 위해 기존 텐서보드를 무조건 사살"""
         # 1. 내가 띄운 프로세스 먼저 종료 시도
@@ -74,8 +84,6 @@ class LogViewer(QWidget):
     def _launch_tensorboard(self, tb_path: Path):
         self.shutdown_tensorboard()
 
-        time.sleep(1.0)
-
         # 포트 실행
         cmd = [
             "tensorboard",
@@ -90,7 +98,8 @@ class LogViewer(QWidget):
         self.tb_process = subprocess.Popen(
             cmd, shell=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
         )
-        webbrowser.open("http://localhost:6006")
+        if self._wait_for_service(6006, timeout=15):
+            webbrowser.open("http://localhost:6006")
 
     def _load_logs(self, log_dir: Path):
         """파일 로드 및 파싱 -> ContentWidget으로 전달"""
