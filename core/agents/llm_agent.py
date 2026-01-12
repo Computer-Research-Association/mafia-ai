@@ -176,7 +176,7 @@ class LLMAgent(BaseAgent):
 
     def get_action(self, status: GameStatus) -> GameAction:
         """
-        LLM의 JSON 응답을 MafiaAction으로 변환하여 반환
+        LLM의 JSON 응답을 GameAction으로 변환하여 반환
         """
         alive_status = next((p for p in status.players if p.id == self.id), None)
         if alive_status and not alive_status.alive:
@@ -197,22 +197,50 @@ class LLMAgent(BaseAgent):
         # LLM 실행 및 JSON 응답 파싱
         action_dict = self._execute_ai_logic(prompt_key, status)
 
-        # 처형 단계에서는 GameAction으로 변환하지 않고, dict를 그대로 반환
         if status.phase == Phase.DAY_EXECUTE:
-            return action_dict
+            # 1. 현재 처형 후보 찾기 (투표 기록 분석)
+            vote_counts = defaultdict(int)
+            for event in status.action_history:
+                if (
+                    event.day == status.day
+                    and event.event_type == EventType.VOTE
+                    and event.target_id != -1
+                ):
+                    vote_counts[event.target_id] += 1
 
+            candidate_id = -1
+            if vote_counts:
+                # 최다 득표자 찾기 (단순 Max)
+                candidate_id = max(vote_counts, key=vote_counts.get)
+
+            # 2. LLM의 의도(agree_execution)를 target_id로 변환
+            # 1(찬성) -> 후보 ID
+            # 그 외(-1 등) -> -1
+            agree = int(action_dict.get("agree_execution", -1))
+
+            if agree == 1 and candidate_id != -1:
+                action_dict["target_id"] = candidate_id
+            else:
+                action_dict["target_id"] = -1  # 반대로 처리됨
+
+        # 일반 타겟 파싱 (문자열 처리 등)
         raw_target = action_dict.get("target_id")
         if isinstance(raw_target, str) and raw_target.isdigit():
             action_dict["target_id"] = int(raw_target)
 
-        # --- [수정된 부분] 액션 유효성 검증 및 보정 ---
+        # 액션 유효성 검증 및 보정 (NIGHT, DAY_VOTE)
         if status.phase in [Phase.NIGHT, Phase.DAY_VOTE]:
             target_id = action_dict.get("target_id")
             alive_players = [p.id for p in status.players if p.alive]
 
             is_valid = True
-            # 1. 살아있는 플레이어를 타겟했는가?
-            if target_id not in alive_players:
+
+            # 0. None 처리
+            if target_id is None:
+                target_id = -1
+
+            # 1. 살아있는 플레이어를 타겟했는가? (Target이 -1이 아닐 때만)
+            if target_id != -1 and target_id not in alive_players:
                 is_valid = False
                 print(
                     f"[Player {self.id}] WARNING: LLM targeted non-survivor {target_id}. Overriding."
@@ -238,8 +266,8 @@ class LLMAgent(BaseAgent):
 
             # 4. (마피아) 동료 또는 자신을 공격/투표했는가?
             if self.role == Role.MAFIA:
-                # action_history에서 동료 마피아 정보를 올바르게 파싱
                 mafia_team = {self.id}
+                # 동료 파악
                 for event in status.action_history:
                     if (
                         event.event_type == EventType.POLICE_RESULT
@@ -255,14 +283,10 @@ class LLMAgent(BaseAgent):
 
             # 유효하지 않은 액션일 경우, 안전한 타겟으로 강제 변경
             if not is_valid:
-                # 재선택을 위한 후보 목록 준비 (기본: 자신 제외)
                 possible_targets = list(set(alive_players) - {self.id})
-
-                # 마피아일 경우, 동료도 후보에서 제외
                 if self.role == Role.MAFIA:
                     possible_targets = list(set(possible_targets) - mafia_team)
 
-                # 선택 가능한 타겟이 있으면 무작위 선택, 없으면 기권
                 if possible_targets:
                     action_dict["target_id"] = random.choice(possible_targets)
                 else:
@@ -391,6 +415,29 @@ class LLMAgent(BaseAgent):
                         f"Player {target_id} ({len(voters)}표) M-- [{voter_str}]"
                     )
                 summary_lines.append(f"  - {day}일차: " + " | ".join(day_summary))
+
+        if status.phase == Phase.DAY_EXECUTE:
+            current_votes = vote_details.get(status.day, {})
+            if current_votes:
+                # 득표수 계산
+                counts = {pid: len(voters) for pid, voters in current_votes.items()}
+                if counts:
+                    max_vote = max(counts.values())
+                    candidates = [pid for pid, c in counts.items() if c == max_vote]
+
+                    summary_lines.append("\n[현재 상황 알림]")
+                    if len(candidates) == 1:
+                        target = candidates[0]
+                        summary_lines.append(
+                            f"최다 득표자(처형 후보): Player {target} ({max_vote}표)"
+                        )
+                        summary_lines.append(
+                            f" -> Player {target}를 처형하시겠습니까? (팀 승리를 위해 판단하세요)"
+                        )
+                    else:
+                        summary_lines.append(
+                            f"동점자가 발생하여 처형이 진행되지 않을 예정입니다. (후보들: {candidates})"
+                        )
 
         death_summary = []
         for event in status.action_history:
