@@ -29,6 +29,7 @@ data/
 mafia_game_log.txt
 result.png
 analysis_detailed.png
+mafia_optuna.db
 
 # Jupyter Notebook
 .ipynb_checkpoints

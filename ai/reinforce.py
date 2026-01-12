@@ -58,7 +58,7 @@ class REINFORCE:
         
         return action, new_hidden
 
-    def update(self, il_loss_fn=None):
+    def update(self, expert_loader=None):
         if len(self.rewards) == 0:
             return
             

@@ -14,15 +14,8 @@ JSON_FORMAT_BLOCK: &json_format_block |
 PHASE_SCHEMAS:
   DAY_DISCUSSION: |
     {
-      "discussion_status": "string ('Continue' 또는 'End')",
-      "action_strategy": {
-      "biases": ["float"],
-      "silence_bias": "float",
-      "strategy_note": "string (전략 요약)"
-    },
     "target_id": "integer 또는 null (0 to 7, None if no target) 본인 주장시 본인의 ID 입력, 침묵 시 null",
     "role": "integer 또는 null (주장하는 직업 번호: 0:시민, 1:경찰, 2:의사, 3:마피아 , None if no claim)",
-    "reason": "string (왜 그렇게 주장했는지에 대한 논리적 근거)"
     }
   DAY_VOTE: |
     {
@@ -70,9 +63,17 @@ POLICE_DAY_DISCUSSION:
     {game_data}
 
     ### [POLICE STRATEGY]
-    - 당신이 조사한 `POLICE_RESULT`가 있다면 이를 언제 공개할지 신중히 판단하십시오.
-    - 마피아를 확실히 찾았다면 강하게 압박하고, 아직 모른다면 의심스러운 자를 유도 신문하십시오.
-    - 주어진 게임 데이터를 참조하십시오.
+
+    1. 결정적 단서를 찾았을 때 (마피아 발견):
+       - 이때가 가장 중요한 순간입니다. 즉시 발견한 마피아를 만천하에 고발하십시오.
+       - [고발 방법]
+         - `target_id`: 찾아낸 마피아의 ID 
+         - `role`: 3 (마피아) <-- 중요! "쟤는 마피아다"라고 주장해야 합니다.
+       - 이렇게 해야 다른 시민들이 "아, 경찰이 쟤를 마피아라고 찍었구나"라고 이해하고 투표에 동참합니다.
+
+    2. 아직 단서가 없을 때:
+       - 섣불리 정체를 드러내지 말고, 대화를 통해 의심스러운 자를 압박하십시오.
+       - 의심가는 사람을 떠보기 위해 `target_id`에 그 사람 ID, `role`에 3(마피아)을 넣어 반응을 살피는 것도 전략입니다.
 
 DOCTOR_DAY_DISCUSSION:
   system: "당신은 시민 팀의 생존을 책임지는 의사입니다. 마피아의 공격을 피하면서 시민들을 보호하십시오. JSON 형식으로 답변하십시오."
