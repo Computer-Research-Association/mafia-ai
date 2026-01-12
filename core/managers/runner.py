@@ -232,7 +232,7 @@ def train(
             agent.save(save_path)
             print(f"Saved: {save_path}")
 
-    return final_avg_reward
+    return last_avg_reward
 
 
 def test(
