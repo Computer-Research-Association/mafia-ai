@@ -127,8 +127,19 @@ class MafiaEnv(ParallelEnv):
         for pid in current_alive_ids:
             agent_name = self._id_to_agent(pid)
             
-            # 외부에서 액션이 주어지지 않은 경우 (RL 에이전트가 아님)
-            if agent_name not in actions and pid in self.internal_agents:
+            # 외부에서 액션이 주어지지 않았거나, 무의미한 액션([0,0])인 경우 내부 로직 실행
+            should_act = False
+            
+            if pid in self.internal_agents:
+                if agent_name not in actions:
+                    should_act = True
+                else:
+                    # runner.py가 제로 벡터([0,0])를 보내는 경우에도 내부 에이전트가 행동하도록 처리
+                    act = np.array(actions[agent_name])
+                    if np.sum(act) == 0:
+                        should_act = True
+            
+            if should_act:
                 status = self.game.get_game_status(pid)
                 internal_agent = self.internal_agents[pid]
                 
