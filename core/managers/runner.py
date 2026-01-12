@@ -20,7 +20,7 @@ def train(
     stop_event: Optional[threading.Event] = None,
 ):
     """
-    [수정됨] SuperSuit VectorEnv 전용 병렬 학습 루프
+    SuperSuit VectorEnv 전용 병렬 학습 루프
     - 배치 크기 불일치(Shape Mismatch) 원천 차단
     """
 
@@ -46,14 +46,14 @@ def train(
     # --- 초기화 ---
     obs, infos = env.reset()
 
-    # [수정] RNN Hidden States 초기화 (계산된 actual_num_games 사용)
+    # RNN Hidden States 초기화 (계산된 actual_num_games 사용)
     for agent in rl_agents.values():
         if hasattr(agent, "reset_hidden"):
             agent.reset_hidden(batch_size=actual_num_games)
 
     completed_episodes = 0
     current_rewards = {}  # 빈 딕셔너리 생성
-    train_metrics = {}    # [NEW] 학습 메트릭 저장용
+    train_metrics = {}    # 학습 메트릭 저장용
 
     # 에이전트마다 자기 할당량을 직접 계산 (len)
     for pid in rl_agents.keys():
@@ -73,7 +73,7 @@ def train(
         current_rewards[pid] = np.zeros(my_batch_size)
 
     pbar = tqdm(total=total_episodes, desc="Training", unit="ep")
-    recorder_pid = None  # [NEW] 첫 번째로 발견된 프로세스 ID만 기록
+    recorder_pid = None  # 첫 번째로 발견된 프로세스 ID만 기록
 
     while True:
         is_target_still_running = any(eid <= total_episodes for eid in slot_episode_ids)
@@ -124,7 +124,7 @@ def train(
         # --- [2. 환경 진행 (Step)] ---
         next_obs, rewards, terminations, truncations, infos = env.step(all_actions)
 
-        # [REMOVED] 학습 속도 향상을 위해 텍스트 로그 처리 로직 제거
+        # 학습 속도 향상을 위해 텍스트 로그 처리 로직 제거
         # 오직 통계와 텐서보드 메트릭만 남김
 
         # --- [3. 보상 저장 및 버퍼 관리] ---
@@ -282,7 +282,7 @@ def test(
     else:
         print("  - [Data Collection OFF] No logger provided.")
 
-    # [NEW] Helper function to process logs from infos
+    # Helper function to process logs from infos
     def process_logs(info_dict):
         if not logger or not info_dict: return
         for _, info_item in info_dict.items():
@@ -296,7 +296,7 @@ def test(
 
     completed_episodes = 0
     
-    # [NEW] Initial Reset & Log (Captures Day 0 / Role assignments)
+    # Initial Reset & Log (Captures Day 0 / Role assignments)
     obs, infos = env.reset()
     process_logs(infos)
     
@@ -349,7 +349,7 @@ def test(
         done = not env.agents
 
         # --- [3. 로그 저장 (Runner 중앙 관리)] ---
-        process_logs(infos) # [NEW] Log events occurring during step
+        process_logs(infos) # Log events occurring during step
 
         obs = next_obs
 
@@ -383,7 +383,7 @@ def test(
             # [중요] 목표를 아직 못 채웠을 때만 리셋 (불필요한 Day 0 로그 방지)
             if completed_episodes < num_episodes:
                 obs, infos = env.reset()
-                process_logs(infos) # <-- Capture new episode's start logs
+                process_logs(infos) # Capture new episode's start logs
 
     pbar.close()
     print(f"\n=== Test/Collection Finished ===")
