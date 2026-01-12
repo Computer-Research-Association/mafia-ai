@@ -219,7 +219,9 @@ class MafiaGame:
 
     def _process_execute(self, actions: Dict[int, GameAction]) -> bool:
         """
-        처형 단계 처리 - 외부에서 주입된 액션 처리
+        처형 단계 처리
+        - target_id가 처형 후보와 일치하면 '찬성'
+        - 그 외(다른 사람 지목, -1 등)는 무조건 '반대'
         """
         if not self._last_votes:
             return True
@@ -229,31 +231,32 @@ class MafiaGame:
 
         if max_v > 0:
             targets = [i for i, v in enumerate(self._last_votes) if v == max_v]
+
+            # 최다 득표자가 딱 1명일 때만 처형 투표 진행
             if len(targets) == 1:
-                target_id = targets[0]
+                target_id = targets[0]  # 처형 후보
+
                 filtered_actions = {
                     player_id: action
                     for player_id, action in actions.items()
                     if self.players[player_id].alive
                 }
 
-                # Phase 2: 모든 동의를 한 번에 처리
+                # [수정] 찬반 집계 로직 (기권 없음)
                 final_score = 0
                 for player_id, action in filtered_actions.items():
-                    # 처형 동의 여부 확인 (임시: dict 호환성 유지)
-                    if isinstance(action, dict):
-                        agree = action.get("agree_execution", 0)
-                        final_score += agree
-                    elif isinstance(action, GameAction):
-                        # GameAction의 경우 target_id가 처형 대상과 일치하면 동의로 간주
-                        if action.target_id == target_id:
-                            final_score += 1
+                    # 후보를 정확히 지목하면 찬성 (+1)
+                    if action.target_id == target_id:
+                        final_score += 1
+                    # 딴청 피우면 반대 (-1)
+                    else:
+                        final_score -= 1
 
-                success = final_score > 0
+                success = final_score > 0  # 찬성이 더 많으면 처형
                 if success:
                     self.players[target_id].alive = False
 
-                # 처형 시도 이벤트 생성
+                # (이하 이벤트 기록 로직 동일)
                 execute_event = GameEvent(
                     day=self.day,
                     phase=self.phase,
@@ -284,8 +287,6 @@ class MafiaGame:
         # 이벤트 기록
         if execute_event:
             self.history.append(execute_event)
-
-            # 처형 성공 시에만 역할 공개 이벤트 추가
             if (
                 execute_event.target_id != -1
                 and self.players[execute_event.target_id].alive is False
