@@ -41,9 +41,16 @@ class DynamicActorCritic(nn.Module):
                 batch_first=True,
                 dropout=0.2 if num_layers > 1 else 0,
             )
+        elif self.backbone_type == "mlp":
+            self.backbone = nn.Sequential(
+                nn.Linear(state_dim, hidden_dim),
+                nn.ReLU(),
+                nn.Linear(hidden_dim, hidden_dim),
+                nn.ReLU()
+            )
         else:
             raise ValueError(
-                f"Unsupported backbone: {backbone}. Choose 'lstm' or 'gru'"
+                f"Unsupported backbone: {backbone}. Choose 'lstm', 'gru', or 'mlp'"
             )
 
         feature_dim = hidden_dim
@@ -98,7 +105,11 @@ class DynamicActorCritic(nn.Module):
             hidden_state = self.init_hidden(current_batch_size)
 
         # RNN 통과
-        features, new_hidden_state = self.backbone(state, hidden_state)
+        if self.backbone_type == "mlp":
+            features = self.backbone(state)
+            new_hidden_state = None
+        else:
+            features, new_hidden_state = self.backbone(state, hidden_state)
 
         # Multi-Head Output
         target_logits = self.actor_target(features)
@@ -109,6 +120,9 @@ class DynamicActorCritic(nn.Module):
 
     def init_hidden(self, batch_size=1):
         """RNN 은닉 상태 초기화"""
+        if self.backbone_type == "mlp":
+            return None
+
         # 모델 파라미터가 있는 장치(CPU/GPU)를 자동으로 찾음
         device = next(self.parameters()).device
 

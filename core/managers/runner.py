@@ -8,7 +8,9 @@ from tqdm import tqdm
 from config import Role, config
 from core.managers.stats import StatsManager
 from core.managers.logger import LogManager
-from core.managers.expert import ExpertDataManager
+from core.managers.expert import ExpertDataManager, ExpertDataset
+from pathlib import Path
+from torch.utils.data import DataLoader
 
 
 def train(
@@ -36,6 +38,29 @@ def train(
 
     print(f"=== Start SuperSuit Parallel Training ===")
     print(f"  - Actual Parallel Games: {actual_num_games}")
+
+    # === IL Dataset Setup ===
+    expert_loader = None
+    log_dir_path = Path(config.paths.LOG_DIR)
+    
+    try:
+        expert_files = list(log_dir_path.rglob("train_set.jsonl"))
+        if expert_files:
+            expert_file = max(expert_files, key=os.path.getmtime)
+            print(f"[IL] Found expert data: {expert_file}")
+            
+            dataset = ExpertDataset(str(expert_file))
+            if len(dataset) > 0:
+                expert_loader = DataLoader(
+                    dataset, 
+                    batch_size=config.train.BATCH_SIZE, 
+                    shuffle=True
+                )
+                print(f"[IL] DataLoader ready with {len(dataset)} samples.")
+        else:
+            print("[IL] No expert data 'train_set.jsonl' found in logs.")
+    except Exception as e:
+        print(f"[IL] Failed to setup expert loader: {e}")
 
     stats_manager = StatsManager()
     total_episodes = args.episodes
@@ -225,7 +250,7 @@ def train(
                 pbar.write("[System] Updating Agents...")
                 for pid, agent in rl_agents.items():
                     if hasattr(agent, "update"):
-                        res = agent.update()
+                        res = agent.update(expert_loader=expert_loader)
                         if res:
                             # Use PID as key for per-agent logging
                             train_metrics[pid] = res

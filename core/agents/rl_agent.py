@@ -37,7 +37,7 @@ class RLAgent(BaseAgent):
         state_dim: int,
         action_dims: List[int] = [9, 5],  # [Target, Role]
         algorithm: str = "ppo",
-        backbone: str = "lstm",
+        backbone: str = "mlp", # Change default to mlp
         hidden_dim: int = 128,
         num_layers: int = 2,
     ):
@@ -68,11 +68,12 @@ class RLAgent(BaseAgent):
         self.current_action = None  # 현재 액션 저장
 
     def reset_hidden(self, batch_size: int = 1):
-        """에피소드 시작 시 RNN 은닉 상태 초기화"""
+        """에피소드 시작 시 은닉 상태 초기화 (RNN Only)"""
         if self.backbone in ["lstm", "gru"]:
             # 전달받은 batch_size를 정책 모델에 전달
             self.hidden_state = self.policy.init_hidden(batch_size=batch_size)
         else:
+            # MLP 등
             self.hidden_state = None
 
     def set_action(self, action: GameAction):
@@ -130,9 +131,9 @@ class RLAgent(BaseAgent):
             # REINFORCE 등 buffer가 없는 경우 직접 저장
             self.learner.rewards.append(reward)
 
-    def update(self):
+    def update(self, expert_loader=None):
         """학습 수행 - 알고리즘 객체에 위임"""
-        return self.learner.update()
+        return self.learner.update(expert_loader=expert_loader)
 
     def save(self, filepath: str):
         """모델 저장"""

@@ -77,7 +77,7 @@ class AgentConfigWidget(QGroupBox):
         # [백본 선택]
         rl_layout.addWidget(QLabel("Backbone:"))
         self.backbone_combo = QComboBox()
-        self.backbone_combo.addItems(["LSTM", "GRU"])
+        self.backbone_combo.addItems(["MLP", "LSTM", "GRU"])
         rl_layout.addWidget(self.backbone_combo)
 
         # [은닉층 차원]
@@ -145,7 +145,7 @@ class AgentConfigWidget(QGroupBox):
         agent_type="LLM",
         role="Random",  # [추가] Role 설정 인자
         algo="PPO",
-        backbone="LSTM",
+        backbone="MLP", # Change default to MLP
         hidden_dim=128,
         num_layers=2,
         load_model_path=None,  # [추가] 모델 경로 인자
