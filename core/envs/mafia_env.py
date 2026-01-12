@@ -603,7 +603,7 @@ class MafiaEnv(ParallelEnv):
         role_vec[int(status.my_role)] = 1.0
 
         # 2. 게임 상황 (4)
-        # Day (1) - 정규화 (최대 15일 가정)
+        # Day (1)
         day_vec = np.array([status.day / float(config.game.MAX_DAYS)], dtype=np.float32)
 
         # Phase One-hot (3)
