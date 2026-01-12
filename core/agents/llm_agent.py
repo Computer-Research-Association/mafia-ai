@@ -316,11 +316,6 @@ class LLMAgent(BaseAgent):
         final_system_msg = f"{role_specific_system_msg}\n{json_instruction}"
 
         user_template = prompt_data.get("user", "")
-        terminal_status_output = self._format_game_status(status)
-        print(
-            f"--- [Player {self.id}] Status for Terminal ---\n{terminal_status_output}\n-------------------------"
-        )
-
         conversation_log_for_llm = self._create_conversation_log(status)
         structured_summary_for_llm = self._create_structured_summary(status)
 
@@ -347,10 +342,6 @@ class LLMAgent(BaseAgent):
         )
 
         final_user_msg = user_template.format(game_data=game_data_for_llm)
-
-        print(
-            f"[Player {self.id}] Final System Msg:\n{final_system_msg}\n Final User Msg:\n{final_user_msg}\n"
-        )
 
         # LLM 호출 및 JSON 파싱
         response_str = self._call_llm(final_system_msg, final_user_msg)
