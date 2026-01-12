@@ -210,28 +210,35 @@ class LLMAgent(BaseAgent):
 
             candidate_id = -1
             if vote_counts:
-                # 최다 득표자 찾기 (단순 Max)
                 candidate_id = max(vote_counts, key=vote_counts.get)
 
             # 2. LLM의 의도(agree_execution)를 target_id로 변환
-            # 1(찬성) -> 후보 ID
-            # 그 외(-1 등) -> -1
             agree = int(action_dict.get("agree_execution", -1))
 
             if agree == 1 and candidate_id != -1:
                 action_dict["target_id"] = candidate_id
             else:
-                action_dict["target_id"] = -1  # 반대로 처리됨
+                action_dict["target_id"] = -1
 
-        # 일반 타겟 파싱 (문자열 처리 등)
+        # 일반 타겟 파싱
         raw_target = action_dict.get("target_id")
         if isinstance(raw_target, str) and raw_target.isdigit():
             action_dict["target_id"] = int(raw_target)
 
-        # 액션 유효성 검증 및 보정 (NIGHT, DAY_VOTE)
+        # 액션 유효성 검증 및 보정
         if status.phase in [Phase.NIGHT, Phase.DAY_VOTE]:
             target_id = action_dict.get("target_id")
             alive_players = [p.id for p in status.players if p.alive]
+
+            # 1. 경찰일 경우 이미 조사한 대상 목록 만들기
+            investigated_players = set()
+            if self.role == Role.POLICE:
+                for event in status.action_history:
+                    if (
+                        event.event_type == EventType.POLICE_RESULT
+                        and event.actor_id == self.id
+                    ):
+                        investigated_players.add(event.target_id)
 
             is_valid = True
 
@@ -239,35 +246,24 @@ class LLMAgent(BaseAgent):
             if target_id is None:
                 target_id = -1
 
-            # 1. 살아있는 플레이어를 타겟했는가? (Target이 -1이 아닐 때만)
+            # 1. 살아있는 플레이어를 타겟했는가?
             if target_id != -1 and target_id not in alive_players:
                 is_valid = False
-                print(
-                    f"[Player {self.id}] WARNING: LLM targeted non-survivor {target_id}. Overriding."
-                )
 
             # 2. (투표 시) 자기 자신에게 투표했는가?
             if status.phase == Phase.DAY_VOTE and target_id == self.id:
                 is_valid = False
-                print(
-                    f"[Player {self.id}] WARNING: LLM tried to vote for self. Overriding."
-                )
 
-            # 3. (경찰) 자기 자신을 조사했는가?
-            if (
-                self.role == Role.POLICE
-                and status.phase == Phase.NIGHT
-                and target_id == self.id
-            ):
-                is_valid = False
-                print(
-                    f"[Player {self.id}] WARNING: Police LLM tried to investigate self. Overriding."
-                )
+            # 3. (경찰) 자기 자신을 조사했거나, 이미 조사한 대상을 또 찍었는가?
+            if self.role == Role.POLICE and status.phase == Phase.NIGHT:
+                if target_id == self.id:
+                    is_valid = False
+                elif target_id in investigated_players:
+                    is_valid = False
 
-            # 4. (마피아) 동료 또는 자신을 공격/투표했는가?
+            # 4. (마피아) 동료 또는 자신을 공격했는가?
             if self.role == Role.MAFIA:
                 mafia_team = {self.id}
-                # 동료 파악
                 for event in status.action_history:
                     if (
                         event.event_type == EventType.POLICE_RESULT
@@ -277,15 +273,20 @@ class LLMAgent(BaseAgent):
 
                 if target_id in mafia_team:
                     is_valid = False
-                    print(
-                        f"[Player {self.id}] WARNING: Mafia LLM targeted teammate {target_id}. Overriding."
-                    )
 
             # 유효하지 않은 액션일 경우, 안전한 타겟으로 강제 변경
             if not is_valid:
                 possible_targets = list(set(alive_players) - {self.id})
+
+                # 마피아는 팀킬 방지
                 if self.role == Role.MAFIA:
                     possible_targets = list(set(possible_targets) - mafia_team)
+
+                # 경찰은 이미 조사한 사람 제외
+                if self.role == Role.POLICE:
+                    possible_targets = list(
+                        set(possible_targets) - investigated_players
+                    )
 
                 if possible_targets:
                     action_dict["target_id"] = random.choice(possible_targets)
