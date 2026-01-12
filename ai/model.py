@@ -41,9 +41,16 @@ class DynamicActorCritic(nn.Module):
                 batch_first=True,
                 dropout=0.2 if num_layers > 1 else 0,
             )
+        elif self.backbone_type == "mlp":
+            self.backbone = nn.Sequential(
+                nn.Linear(state_dim, hidden_dim),
+                nn.ReLU(),
+                nn.Linear(hidden_dim, hidden_dim),
+                nn.ReLU()
+            )
         else:
             raise ValueError(
-                f"Unsupported backbone: {backbone}. Choose 'lstm' or 'gru'"
+                f"Unsupported backbone: {backbone}. Choose 'lstm', 'gru', or 'mlp'"
             )
 
         feature_dim = hidden_dim
@@ -98,12 +105,19 @@ class DynamicActorCritic(nn.Module):
             hidden_state = self.init_hidden(current_batch_size)
 
         # RNN 통과
-        features, new_hidden_state = self.backbone(state, hidden_state)
+        if self.backbone_type == "mlp":
+            features = self.backbone(state)
+            new_hidden_state = None
+        else:
+            features, new_hidden_state = self.backbone(state, hidden_state)
 
         # Multi-Head Output
         target_logits = self.actor_target(features)
         role_logits = self.actor_role(features)
         state_value = self.critic(features)
+
+        if self.backbone_type == "mlp":
+            return None
 
         return (target_logits, role_logits), state_value, new_hidden_state
 

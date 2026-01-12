@@ -47,29 +47,39 @@ class PPO:
             mask = None
 
         with torch.no_grad():
-            # [수정] 입력 차원에 따른 유동적인 배치 처리
             state_tensor = torch.FloatTensor(obs)
 
-            # Case 1: 단일 입력 (Dim,) -> (1, 1, Dim)
-            if state_tensor.dim() == 1:
-                state_tensor = state_tensor.unsqueeze(0).unsqueeze(0)
-            # Case 2: 배치 입력 (Batch, Dim) -> (Batch, 1, Dim)
-            elif state_tensor.dim() == 2:
-                state_tensor = state_tensor.unsqueeze(1)
+            # RNN의 경우 시퀀스 차원 추가
+            if self.is_rnn:
+                if state_tensor.dim() == 1:
+                    state_tensor = state_tensor.unsqueeze(0).unsqueeze(0)
+                elif state_tensor.dim() == 2:
+                    state_tensor = state_tensor.unsqueeze(1)
+            else:
+                # MLP의 경우 배치 차원만 확인
+                if state_tensor.dim() == 1:
+                    state_tensor = state_tensor.unsqueeze(0)
 
-            # 모델 실행
+            # 모델 실행 - MLP일 경우 new_hidden은 None이 됨
             logits_tuple, _, new_hidden = self.policy_old(state_tensor, hidden_state)
 
-            # 결과 분리
             target_logits, role_logits = logits_tuple
 
-            # (Batch, 1, Dim) -> (Batch, Dim) or (Dim,)
-            if state_tensor.size(0) > 1:
-                target_logits = target_logits.squeeze(1)  # (Batch, 9)
-                role_logits = role_logits.squeeze(1)  # (Batch, 5)
-            else:
-                target_logits = target_logits.view(-1)
-                role_logits = role_logits.view(-1)
+            # Logits shape normalization: (Batch, Dim)
+            if target_logits.dim() > 2: # Reduce from (Batch, 1, Dim) to (Batch, Dim)
+                target_logits = target_logits.squeeze(1)
+                role_logits = role_logits.squeeze(1)
+            elif target_logits.dim() == 1 and state_tensor.size(0) > 1: # Batch case but 1D output
+                 # This shouldn't happen with correct model forward, but for safety
+                 pass
+            elif target_logits.dim() == 1: # Single Sample
+                pass 
+            
+            # Ensure shape is consistent for batch processing
+            if target_logits.dim() == 1:
+                 # If we had a single sample, temporarily view as batch of 1
+                 # But dist.sample() handles 1D logits fine by returning scalar.
+                 pass
 
             # 마스킹 적용 (Batch 지원)
             if mask is not None:
@@ -82,16 +92,20 @@ class PPO:
                 mask_role = mask_tensor[:, 9:]
 
                 # 마스킹 연산 (Broadcasting)
-                # 안전장치: 모든 액션이 마스킹되는 경우 방지 (sum > 0 일때만 적용)
                 valid_target = mask_target.sum(dim=1, keepdim=True) > 0
                 valid_role = mask_role.sum(dim=1, keepdim=True) > 0
 
-                target_logits = target_logits.masked_fill(
-                    (mask_target == 0) & valid_target, -1e9
-                )
-                role_logits = role_logits.masked_fill(
-                    (mask_role == 0) & valid_role, -1e9
-                )
+                target_logits_masked = target_logits.clone()
+                role_logits_masked = role_logits.clone()
+                
+                # Careful with shapes here. mask_target is (B, 9), target_logits is (B, 9)
+                target_logits_masked[mask_target == 0] = -1e9
+                role_logits_masked[mask_role == 0] = -1e9
+                
+                # If all masked (which shouldn't happen with valid_target check), revert or handle
+                # But here we rely on the mask logic being correct.
+                target_logits = target_logits_masked
+                role_logits = role_logits_masked
 
             # 확률 분포 생성 및 샘플링
             dist_target = Categorical(logits=target_logits)
@@ -108,13 +122,11 @@ class PPO:
             # 행동 스택 (Batch, 2)
             action = torch.stack([action_target, action_role], dim=-1)
 
-        # 버퍼 저장 (Batch 단위로 저장하지 않고, 리스트에 텐서를 추가하는 방식 유지)
-        # 주의: PPO 업데이트 시 텐서들을 stack하므로 여기서는 텐서 그대로 저장
-        self.buffer.states.append(torch.FloatTensor(obs))  # (Batch, Dim) 저장
-        self.buffer.actions.append(action)  # (Batch, 2) 저장
-        self.buffer.logprobs.append(action_logprob)  # (Batch,) 저장
+        # 버퍼 저장
+        self.buffer.states.append(torch.FloatTensor(obs))  # Save original flattened obs
+        self.buffer.actions.append(action)
+        self.buffer.logprobs.append(action_logprob)
 
-        # 병렬 환경일 경우 action을 list로 변환하여 반환
         return action.tolist(), new_hidden
 
     def update(self, expert_loader=None):
@@ -143,57 +155,23 @@ class PPO:
         # 여기서는 간단하게 Stack 후 차원 정리
 
         # List[(Batch, Dim)] -> Tensor(Time, Batch, Dim)
-        try:
-            old_states = torch.stack(self.buffer.states, dim=0).detach()
-            old_actions = torch.stack(self.buffer.actions, dim=0).detach()
-            old_logprobs = torch.stack(self.buffer.logprobs, dim=0).detach()
-        except RuntimeError:
-            # 혹시 차원이 안 맞으면 cat으로 시도 (가변 길이 방지)
-            old_states = torch.cat(
-                [
-                    s.unsqueeze(0) if s.dim() == 1 else s.unsqueeze(0)
-                    for s in self.buffer.states
-                ],
-                dim=0,
-            ).detach()
-            old_actions = torch.cat(
-                [
-                    a.unsqueeze(0) if a.dim() == 1 else a.unsqueeze(0)
-                    for a in self.buffer.actions
-                ],
-                dim=0,
-            ).detach()
-            old_logprobs = torch.cat(
-                [
-                    l.unsqueeze(0) if l.dim() == 0 else l.unsqueeze(0)
-                    for l in self.buffer.logprobs
-                ],
-                dim=0,
-            ).detach()
+        # Note: For MLP, we don't strictly need Time dim, but keeping it for compatibility
+        # Or we can just cat everything to (Total_Batch, Dim) immediately.
+        
+        # Flattening strategy:
+        # PPO usually treats (Time * Batch) as valid independent samples (for non-recurrent policy).
+        # We just concat everything into one big batch.
+        
+        old_states = torch.cat([s.view(-1, s.size(-1)) for s in self.buffer.states], dim=0).detach()
+        old_actions = torch.cat([a.view(-1, a.size(-1)) for a in self.buffer.actions], dim=0).detach()
+        old_logprobs = torch.cat([l.view(-1) for l in self.buffer.logprobs], dim=0).detach()
+        
+        # Rewards are already flattened list, convert to tensor
+        rewards = rewards.view(-1)
 
         # 30000판 처리를 위해 데이터를 단순히 플래튼(Flatten)하여 학습 (RNN 시퀀스 무시)
-        # 또는 Batch 차원을 유지하려면 복잡한 처리가 필요함.
-        # 여기서는 가장 안정적인 방법인 Flatten 적용 (Batch와 Time을 합침)
-        if old_states.dim() == 3:  # (Time, Batch, Dim)
-            old_states = old_states.view(-1, old_states.size(-1))
-            old_actions = old_actions.view(-1, old_actions.size(-1))
-            old_logprobs = old_logprobs.view(-1)
-            rewards = rewards.view(
-                -1
-            )  # Reward도 (Time, Batch)라면 Flatten 필요할 수 있음
-            # 주의: Reward는 이미 1D 리스트로 들어오므로 (Time * Batch) 길이일 것임 (Runner 구현에 따라 다름)
-            # Runner가 reward를 extend 했으면 1D, append 했으면 문제됨.
-            # 현재 Runner는 store_reward 루프를 돌므로 1D로 평탄화되어 들어옴.
-
-            # 하지만 buffer.states는 append(Tensor(Batch, Dim)) 했으므로 Stack하면 (Time, Batch, Dim).
-            # rewards는 (Time * Batch) 길이의 1D Tensor.
-            # 따라서 states도 (Time * Batch, Dim)으로 맞춰야 함.
-            pass
-
-        # 에피소드 분리 로직은 단일 에이전트 기준이므로, 대량 병렬 학습시에는
-        # 단순 미니배치 학습(Shuffle)으로 전환하는 것이 좋음.
-        # RNN 사용 시에는 시퀀스 보존이 필요하지만, 여기서는 안정성을 위해 단순 PPO로 진행 권장.
-
+        # MLP는 시퀀스 차원이 없으므로 바로 플래튼된 상태로 사용 가능
+        
         # 데이터셋 생성
         dataset_size = old_states.size(0)
         indices = torch.arange(dataset_size)
