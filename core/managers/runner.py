@@ -33,7 +33,7 @@ def train(
 
     sample_indices = list(range(0, env.num_envs, PLAYERS_PER_GAME))
     actual_num_games = len(sample_indices)
-    
+
     print(f"=== Start SuperSuit Parallel Training ===")
     print(f"  - Actual Parallel Games: {actual_num_games}")
 
@@ -42,6 +42,7 @@ def train(
 
     slot_episode_ids = [i + 1 for i in range(actual_num_games)]
     next_global_episode_id = actual_num_games + 1
+    final_avg_reward = 0
 
     # --- 초기화 ---
     obs, infos = env.reset()
@@ -53,7 +54,7 @@ def train(
 
     completed_episodes = 0
     current_rewards = {}  # 빈 딕셔너리 생성
-    train_metrics = {}    # 학습 메트릭 저장용
+    train_metrics = {}  # 학습 메트릭 저장용
 
     # 에이전트마다 자기 할당량을 직접 계산 (len)
     for pid in rl_agents.keys():
@@ -77,7 +78,7 @@ def train(
 
     while True:
         is_target_still_running = any(eid <= total_episodes for eid in slot_episode_ids)
-        
+
         if completed_episodes >= total_episodes and not is_target_still_running:
             break
 
@@ -156,7 +157,7 @@ def train(
             for slot_idx in finished_slot_indices:
                 slot_episode_ids[slot_idx] = next_global_episode_id
                 next_global_episode_id += 1
-            
+
             completed_episodes += num_finished_now
             finished_indices = np.where(dones)[0]
 
@@ -164,7 +165,7 @@ def train(
             # 1. Collect Completed Infos
             finished_infos = []
             finished_rewards = []
-            
+
             for j in finished_indices:
                 for pid in range(PLAYERS_PER_GAME):
                     # Info 수집
@@ -174,9 +175,9 @@ def train(
                     else:
                         idx = j * PLAYERS_PER_GAME + pid
                         info = infos[idx]
-                    
+
                     finished_infos.append(info)
-                    
+
                     # 해당 플레이어의 이번 판 원본 보상 수집 (info와 1:1 매칭)
                     r = current_rewards[pid][j] if pid in current_rewards else 0.0
                     finished_rewards.append(r)
@@ -186,19 +187,21 @@ def train(
                 infos=finished_infos,
                 rewards=finished_rewards,
                 rl_agents=rl_agents,
-                train_metrics=train_metrics
+                train_metrics=train_metrics,
             )
 
             # 대표 에이전트 평균 보상 로깅
             rep_pid = list(rl_agents.keys())[0]
             avg_reward = np.mean(current_rewards[rep_pid][finished_indices])
 
+            last_avg_reward = avg_reward
+
             logger.set_episode(int(completed_episodes))
             logger.log_metrics(
-                episode=int(completed_episodes), 
-                total_reward=avg_reward, 
+                episode=int(completed_episodes),
+                total_reward=avg_reward,
                 is_win=False,
-                **metrics
+                **metrics,
             )
 
             # 끝난 게임의 누적 보상 리셋
@@ -216,8 +219,8 @@ def train(
                     if hasattr(agent, "update"):
                         res = agent.update()
                         if res:
-                             # Use PID as key for per-agent logging
-                             train_metrics[pid] = res
+                            # Use PID as key for per-agent logging
+                            train_metrics[pid] = res
 
     # --- 학습 종료 및 저장 ---
     print("\n[System] Saving trained models...")
@@ -229,16 +232,18 @@ def train(
             agent.save(save_path)
             print(f"Saved: {save_path}")
 
+    return final_avg_reward
+
 
 def test(
-    env, 
-    all_agents: Dict[int, Any], 
-    args, 
+    env,
+    all_agents: Dict[int, Any],
+    args,
     logger: "LogManager" = None,
-    stop_event: Optional[threading.Event] = None
+    stop_event: Optional[threading.Event] = None,
 ):
     """
-    Runner centrally controls logging. 
+    Runner centrally controls logging.
     It extracts 'log_events' from env.infos and logs them via the provided logger.
     """
     num_episodes = args.episodes
@@ -254,22 +259,25 @@ def test(
 
     # Helper function to process logs from infos
     def process_logs(info_dict):
-        if not logger or not info_dict: return
+        if not logger or not info_dict:
+            return
         for _, info_item in info_dict.items():
             if isinstance(info_item, dict) and "log_events" in info_item:
                 for ev_dict in info_item["log_events"]:
                     try:
                         from core.engine.state import GameEvent
+
                         logger.log_event(GameEvent(**ev_dict))
-                    except Exception: pass
-                break # Process only once per turn
+                    except Exception:
+                        pass
+                break  # Process only once per turn
 
     completed_episodes = 0
-    
+
     # Initial Reset & Log (Captures Day 0 / Role assignments)
     obs, infos = env.reset()
     process_logs(infos)
-    
+
     # Stats
     win_counts = {Role.CITIZEN: 0, Role.MAFIA: 0}
 
@@ -277,18 +285,19 @@ def test(
     pbar = tqdm(total=num_episodes, desc="Collecting Data", unit="ep")
 
     while completed_episodes < num_episodes:
-        if stop_event and stop_event.is_set(): break
+        if stop_event and stop_event.is_set():
+            break
 
         # --- [1. 행동 결정] ---
         actions = {}
         for agent_id_str in env.agents:
             p_id = int(agent_id_str.split("_")[1])
             full_obs = obs[agent_id_str]
-            obs_vec = full_obs['observation']
+            obs_vec = full_obs["observation"]
             agent = all_agents[p_id]
-            
+
             action_obj = None
-            action_vector = [0, 0] 
+            action_vector = [0, 0]
 
             try:
                 # LLM / Rule / Heuristic
@@ -296,18 +305,24 @@ def test(
                     game_status = env.get_game_status(p_id)
                     action_obj = agent.get_action(game_status)
                     action_vector = action_obj.to_multi_discrete()
-                    actions[p_id] = action_obj 
+                    actions[p_id] = action_obj
 
                 # RL Agent
                 elif hasattr(agent, "select_action_vector"):
                     action_vector = agent.select_action_vector(full_obs)
-                    actions[p_id] = action_vector 
+                    actions[p_id] = action_vector
 
                 # 데이터 수집 (Runner 주도)
                 if data_manager:
                     current_ep_id = completed_episodes + 1
-                    action_mask = full_obs.get('action_mask')
-                    data_manager.record_turn(current_ep_id, p_id, obs_vec, action_vector, action_mask=action_mask)
+                    action_mask = full_obs.get("action_mask")
+                    data_manager.record_turn(
+                        current_ep_id,
+                        p_id,
+                        obs_vec,
+                        action_vector,
+                        action_mask=action_mask,
+                    )
 
             except Exception as e:
                 # 에러 발생 시 건너뜀 (데이터 오염 방지)
@@ -319,41 +334,43 @@ def test(
         done = not env.agents
 
         # --- [3. 로그 저장 (Runner 중앙 관리)] ---
-        process_logs(infos) # Log events occurring during step
+        process_logs(infos)  # Log events occurring during step
 
         obs = next_obs
 
         # --- [4. 종료 체크] ---
         if done:
             completed_episodes += 1
-            
+
             winner = env.game.winner
             if winner:
                 win_counts[winner] += 1
-            
+
             # 데이터 파일 저장 (Flush)
             if data_manager:
                 data_manager.flush_episode(
-                    completed_episodes, 
-                    winner_role=winner, 
-                    players=env.game.players
+                    completed_episodes, winner_role=winner, players=env.game.players
                 )
-            
+
             # 로그 메트릭 기록
             if logger:
-                is_win = (winner == Role.MAFIA) 
+                is_win = winner == Role.MAFIA
                 logger.log_metrics(completed_episodes, total_reward=0, is_win=is_win)
                 # 다음 에피소드 번호 세팅 (중요: Day 0 로그가 섞이지 않게 함)
                 logger.set_episode(completed_episodes + 1)
 
             pbar.update(1)
-            win_rate = (win_counts[Role.MAFIA] / completed_episodes) * 100 if completed_episodes > 0 else 0.0
+            win_rate = (
+                (win_counts[Role.MAFIA] / completed_episodes) * 100
+                if completed_episodes > 0
+                else 0.0
+            )
             pbar.set_postfix(mafia_win_rate=f"{win_rate:.1f}%")
-            
+
             # [중요] 목표를 아직 못 채웠을 때만 리셋 (불필요한 Day 0 로그 방지)
             if completed_episodes < num_episodes:
                 obs, infos = env.reset()
-                process_logs(infos) # Capture new episode's start logs
+                process_logs(infos)  # Capture new episode's start logs
 
     pbar.close()
     print(f"\n=== Test/Collection Finished ===")
