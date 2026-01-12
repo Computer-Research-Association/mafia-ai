@@ -116,13 +116,13 @@ class DynamicActorCritic(nn.Module):
         role_logits = self.actor_role(features)
         state_value = self.critic(features)
 
-        if self.backbone_type == "mlp":
-            return None
-
         return (target_logits, role_logits), state_value, new_hidden_state
 
     def init_hidden(self, batch_size=1):
         """RNN 은닉 상태 초기화"""
+        if self.backbone_type == "mlp":
+            return None
+
         # 모델 파라미터가 있는 장치(CPU/GPU)를 자동으로 찾음
         device = next(self.parameters()).device
 
