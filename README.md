@@ -1,6 +1,6 @@
 # Mafia AI: RL 및 IL 기반 전략 분석 연구 프로젝트
 
-본 프로젝트는 마피아 게임이라는 복잡한 사회적 상호작용 환경에서 강화학습($RL$)과 모방 학습($IL$) 기법의 효용성을 실험하고, 에이전트의 수렴 속도 및 창발적 전략 형성을 분석하는 연구 플랫폼입니다.
+본 프로젝트는 한동대학교 컴퓨터 연구 동아리 **CRA (Computer Research Association) 25-2기 신입 기수**가 진행한 연구 프로젝트입니다. 마피아 게임이라는 복잡한 사회적 상호작용 환경에서 강화학습()과 모방 학습() 기법의 효용성을 실험하고, 에이전트의 수렴 속도 및 창발적 전략 형성을 분석하는 연구 플랫폼을 지향합니다.
 
 ## 1. 연구 워크플로우 (Research Workflow)
 
@@ -13,13 +13,11 @@
 
 ## 2. 기술 스택 (Tech Stack)
 
-| 분류 | 기술 항목 |
-| :--- | :--- |
-| **AI & RL** | `PyTorch`, `Gymnasium`, `PettingZoo`, `SuperSuit`, `PPO`, `REINFORCE` |
-| **Models** | `LSTM`, `GRU`, `Deep MLP (Dynamic Actor-Critic)` |
-| **LLM** | `OpenAI API (Solar-pro)`, `Upstage API` |
-| **Engine** | `Python (Pydantic)`, `YAML` |
-| **GUI & Ops** | `PyQt6`, `TensorBoard`, `Python-dotenv` |
+| 이름 | 역할 | 담당 업무 | GitHub |
+| --- | --- | --- | --- |
+| **Taeju Park** | Project Manager |  $AI$ 알고리즘($PPO$, $REINFORCE$) 및 모델 구현, 시스템 통합 | [@xoxown31](https://github.com/xoxown31) |
+| **Changkwon Kim** | Software Engineer | $GUI$ 시뮬레이터(런처/뷰어) 개발 및 $TensorBoard$ 시각화 연동 | [@chang1025](https://www.google.com/search?q=https://github.com/chang1025) |
+| **Jinwon Hong** | AI Researcher | $LLM$ 에이전트 설계 및 게임 엔진/환경 로직 개발 | [@11Won11](https://www.google.com/search?q=https://github.com/11Won11) |
 
 ## 3. 핵심 시스템 사양
 
@@ -58,7 +56,3 @@ python main.py
 ```
 
 런처 인터페이스를 통해 학습 모드($Train$)와 테스트 모드($Test$)를 선택하고, 각 에이전트의 신경망 구조($Backbone$)와 역할을 개별적으로 설정할 수 있습니다.
-
----
-
-*본 문서는 프로젝트의 최신 업데이트를 반영하고 있으며, 연구 목적에 따른 방법론 비교 분석에 최적화되어 있습니다.*
