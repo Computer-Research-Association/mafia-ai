@@ -13,11 +13,14 @@
 
 ## 2. 기술 스택 (Tech Stack)
 
-| 이름 | 역할 | 담당 업무 | GitHub |
-| --- | --- | --- | --- |
-| **Taeju Park** | Project Manager |  $AI$ 알고리즘($PPO$, $REINFORCE$) 및 모델 구현, 시스템 통합 | [@xoxown31](https://github.com/xoxown31) |
-| **Changkwon Kim** | Software Engineer | $GUI$ 시뮬레이터(런처/뷰어) 개발 및 $TensorBoard$ 시각화 연동 | [@chang1025](https://www.google.com/search?q=https://github.com/chang1025) |
-| **Jinwon Hong** | AI Researcher | $LLM$ 에이전트 설계 및 게임 엔진/환경 로직 개발 | [@11Won11](https://www.google.com/search?q=https://github.com/11Won11) |
+| 분류        | 기술 항목                                                                 |
+|-------------|--------------------------------------------------------------------------|
+| AI & RL     | PyTorch, Gymnasium, PettingZoo, SuperSuit, PPO, REINFORCE                |
+| Models      | LSTM, GRU, Deep MLP (Dynamic Actor-Critic)                               |
+| LLM         | OpenAI API (Solar-pro), Upstage API                                      |
+| Engine      | Python (Pydantic), YAML                                                 |
+| GUI & Ops   | PyQt6, TensorBoard, Python-dotenv                                        |
+
 
 ## 3. 핵심 시스템 사양
 
@@ -37,11 +40,11 @@
 
 본 프로젝트는 한동대학교 CRA 25-2 시민팀에 의해 개발되었습니다.
 
-| 이름 | 역할 (Role) | 담당 업무 (Responsibility) |
-| :--- | :--- | :--- |
-| **Taeju Park** | Project Manager | $AI$ 알고리즘($PPO$, $REINFORCE$) 및 모델 구현, 시스템 통합 |
-| **Changkwon Kim** | Software Engineer | $GUI$ 시뮬레이터(런처/뷰어) 개발 및 $TensorBoard$ 시각화 연동 |
-| **Jinwon Hong** | AI Researcher | $LLM$ 에이전트 설계 및 게임 엔진/환경 로직 개발 |
+| 이름 | 역할 | 담당 업무 | GitHub |
+| --- | --- | --- | --- |
+| **Taeju Park** | Project Manager |  $AI$ 알고리즘($PPO$, $REINFORCE$) 및 모델 구현, 시스템 통합 | [@xoxown31](https://github.com/xoxown31) |
+| **Changkwon Kim** | Software Engineer | $GUI$ 시뮬레이터(런처/뷰어) 개발 및 $TensorBoard$ 시각화 연동 | [@chang1025](https://www.google.com/search?q=https://github.com/chang1025) |
+| **Jinwon Hong** | AI Researcher | $LLM$ 에이전트 설계 및 게임 엔진/환경 로직 개발 | [@11Won11](https://www.google.com/search?q=https://github.com/11Won11) |
 
 ## 5. 실행 가이드
 
