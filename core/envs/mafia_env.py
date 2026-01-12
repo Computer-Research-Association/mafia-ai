@@ -10,6 +10,8 @@ from pettingzoo.utils import parallel_to_aec, wrappers
 
 from core.engine.game import MafiaGame
 from core.agents.base_agent import BaseAgent
+from core.agents.rule_base_agent import RuleBaseAgent
+from core.agents.llm_agent import LLMAgent
 from config import config, Role, Phase, EventType, ActionType
 from core.engine.state import GameStatus, GameAction, PlayerStatus, GameEvent
 
@@ -34,8 +36,11 @@ class MafiaEnv(ParallelEnv):
 
         # Create dummy agents for the engine
         # MafiaGame expects a list of BaseAgent instances
-        self.internal_agents = [EnvAgent(i) for i in range(config.game.PLAYER_COUNT)]
-        self.game = MafiaGame(agents=self.internal_agents)
+        self.game_agents = [EnvAgent(i) for i in range(config.game.PLAYER_COUNT)]
+        self.game = MafiaGame(agents=self.game_agents)
+        
+        # Internal agents for environment internalization (RBA/LLM)
+        self.internal_agents: Dict[int, Any] = {}
 
         # === [Multi-Discrete Action Space] ===
         # 형태: [Target, Role]
@@ -87,6 +92,13 @@ class MafiaEnv(ParallelEnv):
         self.last_protected_player = None
         self.attack_was_blocked = False
 
+        # 내부 에이전트(RBA/LLM) 초기화 및 동기화
+        self.internal_agents.clear()
+        for player in self.game.players:
+            # 기본적으로 RuleBaseAgent 사용
+            # 추후 config 등을 통해 LLM 사용 여부 결정 가능
+            self.internal_agents[player.id] = RuleBaseAgent(player.id, player.role)
+
         observations = {}
         infos = {}
 
@@ -108,6 +120,24 @@ class MafiaEnv(ParallelEnv):
         return observations, infos
 
     def step(self, actions):
+        # 환경 내재화: 액션이 없는 에이전트(RBA/LLM)의 액션 생성
+        # 현재 생존한 모든 플레이어에 대해 확인
+        current_alive_ids = [p.id for p in self.game.players if p.alive]
+        
+        for pid in current_alive_ids:
+            agent_name = self._id_to_agent(pid)
+            
+            # 외부에서 액션이 주어지지 않은 경우 (RL 에이전트가 아님)
+            if agent_name not in actions and pid in self.internal_agents:
+                status = self.game.get_game_status(pid)
+                internal_agent = self.internal_agents[pid]
+                
+                # 에이전트 로직 수행 (Role은 Reset 시 이미 동기화됨)
+                game_action = internal_agent.get_action(status)
+                
+                # 결과를 Multi-Discrete 벡터로 변환하여 actions에 추가
+                actions[agent_name] = game_action.to_multi_discrete()
+
         # Convert string keys to int keys for the engine
         engine_actions = {}
         for agent_id, action in actions.items():
