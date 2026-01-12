@@ -158,6 +158,7 @@ class LogLeft(QWidget):
         paths = list(set(file_paths))
         count = len(paths)
         success_count = 0
+        error_msg = ""  # 초기화
 
         # 삭제 여부 재확인
         reply = QMessageBox.question(
