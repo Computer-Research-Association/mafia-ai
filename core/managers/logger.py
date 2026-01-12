@@ -113,9 +113,23 @@ class LogManager:
         # Individual Agent Charts (Separate charts per agent)
         individual_charts = {}
         for i in range(config.game.PLAYER_COUNT):
-            individual_charts[f"Agent {i} Reward"] = [
+            # 1. Policy Metrics (학습 효율성)
+            individual_charts[f"Agent {i} - Policy"] = [
                 "Multiline",
-                [f"Agent_{i}/Reward_Total"],
+                [
+                    f"Agent_{i}/Loss",
+                    f"Agent_{i}/Entropy",
+                    f"Agent_{i}/KL_Divergence",
+                    f"Agent_{i}/Clip_Fraction"
+                ]
+            ]
+            # 2. Performance Metrics (성과)
+            individual_charts[f"Agent {i} - Performance"] = [
+                "Multiline",
+                [
+                    f"Agent_{i}/Reward",
+                    f"Agent_{i}/Win_Rate"
+                ]
             ]
 
         layout = {
@@ -136,21 +150,6 @@ class LogManager:
                         "Game/Avg_Day_When_Mafia_Wins",
                         "Game/Avg_Day_When_Citizen_Wins",
                     ],
-                ],
-            },
-            "Training Details": {
-                "Team Loss": ["Multiline", ["Train/Mafia_Loss", "Train/Citizen_Loss"]],
-                "Team Entropy": [
-                    "Multiline",
-                    ["Train/Mafia_Entropy", "Train/Citizen_Entropy"],
-                ],
-                "Policy Trust (KL)": [
-                    "Multiline",
-                    ["Train/Mafia_ApproxKL", "Train/Citizen_ApproxKL"],
-                ],
-                "Clip Fraction": [
-                    "Multiline",
-                    ["Train/Mafia_ClipFrac", "Train/Citizen_ClipFrac"],
                 ],
             },
             "Individual Agents": individual_charts,

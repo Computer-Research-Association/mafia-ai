@@ -15,43 +15,66 @@ class StatsManager:
     def calculate_stats(
         self, 
         infos: Any, 
+        rewards: List[float], 
         rl_agents: Dict[int, Any], 
-        all_agents: Dict[int, Any],
-        episode_rewards: Dict[int, float], 
-        is_wins: Dict[int, bool],
         train_metrics: Dict[str, Dict[str, List[float]]]
     ) -> Dict[str, float]:
         
         metrics = {}
-        
-        # --- 1. Agent Stats (Brain) ---
         mafia_rewards = []
         citizen_rewards = []
+        slot_rewards = defaultdict(list)
+        slot_wins = defaultdict(list)
 
+        # 1. 모든 플레이어 인스턴스를 순회하며 실제 역할(role) 기준으로 분류
+        for i, info in enumerate(infos):
+            pid = i % 8  # 플레이어 번호 추출
+            role = info.get('role')
+            r = rewards[i]
+            win = 1 if info.get('win', False) else 0
+            
+            # 슬롯(PID)별 보상/승리 데이터 수집
+            if pid in rl_agents:
+                slot_rewards[pid].append(r)
+                slot_wins[pid].append(win)
+
+            # 팀별 데이터 분류 (실제 게임 엔진이 부여한 역할 기준)
+            if role == Role.MAFIA:
+                mafia_rewards.append(r)
+            else:
+                citizen_rewards.append(r)
+
+        # 2. 에이전트 슬롯별 지표 계산
         for pid in rl_agents.keys():
-            # Update recent wins
-            win = 1 if is_wins.get(pid, False) else 0
-            self.recent_wins[pid].append(win)
+            avg_r = np.mean(slot_rewards[pid]) if slot_rewards[pid] else 0.0
+            avg_w = np.mean(slot_wins[pid]) if slot_wins[pid] else 0.0
+            
+            # 최근 승률 히스토리 업데이트
+            self.recent_wins[pid].append(avg_w)
             if len(self.recent_wins[pid]) > self.window_size:
                 self.recent_wins[pid].pop(0)
             
-            win_rate = np.mean(self.recent_wins[pid]) if self.recent_wins[pid] else 0.0
-            
-            reward = episode_rewards.get(pid, 0.0)
-            metrics[f"Agent_{pid}/Reward_Total"] = reward
-            metrics[f"Agent_{pid}/Win_Rate"] = win_rate
+            metrics[f"Agent_{pid}/Reward"] = avg_r
+            metrics[f"Agent_{pid}/Win_Rate"] = np.mean(self.recent_wins[pid])
 
-            # Collect Team Rewards
-            if all_agents[pid].role == Role.MAFIA:
-                mafia_rewards.append(reward)
-            else:
-                citizen_rewards.append(reward)
-
-        metrics["Reward/Total"] = sum(episode_rewards.values())
+        # 3. 팀별 평균 지표 계산
+        metrics["Reward/Total"] = sum(rewards)
         metrics["Reward/Mafia_Avg"] = np.mean(mafia_rewards) if mafia_rewards else 0.0
         metrics["Reward/Citizen_Avg"] = np.mean(citizen_rewards) if citizen_rewards else 0.0
 
         # Team/Role Training Stats
+        # 이제 train_metrics는 pid를 key로 가짐
+        for pid, agent_metrics in train_metrics.items():
+            if "loss" in agent_metrics:
+                metrics[f"Agent_{pid}/Loss"] = agent_metrics["loss"]
+            if "entropy" in agent_metrics:
+                metrics[f"Agent_{pid}/Entropy"] = agent_metrics["entropy"]
+            if "approx_kl" in agent_metrics:
+                metrics[f"Agent_{pid}/KL_Divergence"] = agent_metrics["approx_kl"]
+            if "clip_frac" in agent_metrics:
+                metrics[f"Agent_{pid}/Clip_Fraction"] = agent_metrics["clip_frac"]
+        
+        # 이전 role_key 기반 로직 제거 (더 이상 사용 안함)
         for role_key in ["Mafia", "Citizen"]:
             role_metrics = train_metrics.get(role_key, {})
             if "loss" in role_metrics and role_metrics["loss"]:

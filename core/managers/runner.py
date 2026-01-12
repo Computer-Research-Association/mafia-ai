@@ -163,64 +163,35 @@ def train(
             # --- [Stats Tracking Logic] ---
             # 1. Collect Completed Infos
             finished_infos = []
-            if isinstance(infos, dict) and isinstance(list(infos.values())[0], (list, np.ndarray)):
-                 # SuperSuit Stacked Dict: {'player_0': [info0, info1...], ...}
-                 for j in finished_indices:
-                     # Check Key ("player_0") exists
-                     key_0 = "player_0"
-                     if key_0 in infos:
-                         finished_infos.append(infos[key_0][j])
-                     else:
-                         # Fallback
-                         first_key = list(infos.keys())[0]
-                         finished_infos.append(infos[first_key][j])
+            finished_rewards = []
             
-            elif isinstance(infos, (list, tuple)):
-                 # Standard Gym Vector Env: infos is list of dicts (length = total agents)
-                 for j in finished_indices:
-                     # Game j's Player 0 is at index j * PLAYERS_PER_GAME
-                     idx = j * PLAYERS_PER_GAME
-                     finished_infos.append(infos[idx])
-            
-            # 2. Collect Rewards & Wins for Legacy Stats
-            agent_rewards_stats = {}
-            agent_wins_stats = {}
-            
-            for pid in rl_agents.keys():
-                # Reward (Avg of finished games)
-                avg_r = np.mean(current_rewards[pid][finished_indices])
-                agent_rewards_stats[pid] = avg_r
-                
-                # Win (Check via infos)
-                batch_wins = []
-                for j in finished_indices:
-                    w = False
-                    if isinstance(infos, (list, tuple)):
-                        idx = j * PLAYERS_PER_GAME + pid
-                        if idx < len(infos):
-                            w = infos[idx].get('win', False)
-                    elif isinstance(infos, dict):
+            for j in finished_indices:
+                for pid in range(PLAYERS_PER_GAME):
+                    # Info 수집
+                    if isinstance(infos, dict):
                         agent_key = f"player_{pid}"
-                        if agent_key in infos and j < len(infos[agent_key]):
-                             w = infos[agent_key][j].get('win', False)
+                        info = infos[agent_key][j] if agent_key in infos else {}
+                    else:
+                        idx = j * PLAYERS_PER_GAME + pid
+                        info = infos[idx]
                     
-                    batch_wins.append(w)
-                
-                agent_wins_stats[pid] = (np.mean(batch_wins) > 0.5) if batch_wins else False
+                    finished_infos.append(info)
+                    
+                    # 해당 플레이어의 이번 판 원본 보상 수집 (info와 1:1 매칭)
+                    r = current_rewards[pid][j] if pid in current_rewards else 0.0
+                    finished_rewards.append(r)
 
             # 3. Calculate Stats
             metrics = stats_manager.calculate_stats(
                 infos=finished_infos,
+                rewards=finished_rewards,
                 rl_agents=rl_agents,
-                all_agents=all_agents,
-                episode_rewards=agent_rewards_stats,
-                is_wins=agent_wins_stats,
                 train_metrics=train_metrics
             )
 
             # 대표 에이전트 평균 보상 로깅
             rep_pid = list(rl_agents.keys())[0]
-            avg_reward = agent_rewards_stats[rep_pid]
+            avg_reward = np.mean(current_rewards[rep_pid][finished_indices])
 
             logger.set_episode(int(completed_episodes))
             logger.log_metrics(
@@ -245,9 +216,8 @@ def train(
                     if hasattr(agent, "update"):
                         res = agent.update()
                         if res:
-                             # Try to categorize metrics by Role
-                             role_key = "Mafia" if all_agents[pid].role == Role.MAFIA else "Citizen"
-                             train_metrics[role_key] = res
+                             # Use PID as key for per-agent logging
+                             train_metrics[pid] = res
 
     # --- 학습 종료 및 저장 ---
     print("\n[System] Saving trained models...")
