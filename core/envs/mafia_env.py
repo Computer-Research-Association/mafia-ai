@@ -100,7 +100,10 @@ class MafiaEnv(ParallelEnv):
                 "observation": self._encode_observation(pid),
                 "action_mask": self._get_action_mask(pid),  # 액션 마스크 포함 필수
             }
-            infos[agent] = {"log_events": new_events}
+            infos[agent] = {
+                "log_events": new_events,
+                "role": self.game.players[pid].role,
+            }
         
         return observations, infos
 
