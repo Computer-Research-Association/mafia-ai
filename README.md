@@ -35,6 +35,8 @@
 
 ## 4. 팀원 정보 (Contributors)
 
+본 프로젝트는 한동대학교 CRA 25-2기 신입 단원들에 의해 개발되었습니다.
+
 | 이름 | 역할 (Role) | 담당 업무 (Responsibility) |
 | :--- | :--- | :--- |
 | **Taeju Park** | Project Manager | $AI$ 알고리즘($PPO$, $REINFORCE$) 및 모델 구현, 시스템 통합 |
