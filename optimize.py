@@ -3,6 +3,7 @@ import argparse
 from argparse import Namespace
 import torch
 import numpy as np
+import os
 
 # 프로젝트 모듈 가져오기
 from config import config
@@ -113,30 +114,36 @@ def objective(trial):
 
 
 if __name__ == "__main__":
-    # 1. DB 파일에 저장 (중간에 꺼져도 이어하기 가능)
-    storage_name = "sqlite:///mafia_optuna.db"
+    # 1. DB 파일 설정
+    db_file_path = "mafia_optuna.db"
+    storage_name = f"sqlite:///{db_file_path}"
 
-    # 2. 스터디 생성 (Maximize: 보상을 높이는 게 목표)
-    # Pruner: 초반 50판(warmup)은 봐주고, 그 뒤로 하위 50%는 가차 없이 자름
+    # [핵심 수정] 기존 DB 파일이 있다면 삭제 (덮어쓰기 효과)
+    if os.path.exists(db_file_path):
+        os.remove(db_file_path)
+        print(f"기존 DB 파일({db_file_path})을 삭제하고 새로 시작합니다.")
+
+    # 2. 스터디 생성
+    # 파일이 삭제되었으므로 load_if_exists는 의미가 없지만,
+    # 혹시 모를 상황을 위해 True로 둬도 상관없습니다.
     study = optuna.create_study(
         study_name="mafia-ppo-tuning",
         direction="maximize",
         storage=storage_name,
-        load_if_exists=True,
+        load_if_exists=True,  # 없으면 만들고, 있으면 로드함 (방금 지웠으니 무조건 새로 만듦)
         pruner=optuna.pruners.MedianPruner(n_startup_trials=5, n_warmup_steps=50),
     )
 
-    print("=== 🕵️ Mafia AI Hyperparameter Optimization Start ===")
+    print("=== Mafia AI Hyperparameter Optimization Start ===")
     print(f"Logs will be saved to: {storage_name}")
 
-    # 3. 최적화 실행 (20번 시도)
-    study.optimize(objective, n_trials=1)
+    # 3. 최적화 실행
+    study.optimize(objective, n_trials=20)  # 20번 시도로 수정
 
     # 4. 결과 출력
     print("\n==================================")
-    print(f"🏆 Best Value (Reward): {study.best_value}")
-    print(f"🏆 Best Params: {study.best_params}")
+    print(f"Best Value (Reward): {study.best_value}")
+    print(f"Best Params: {study.best_params}")
     print("==================================")
 
-    # 대시보드 실행 명령어 안내
     print(f"\n[Tip] View dashboard: optuna-dashboard {storage_name}")

@@ -42,7 +42,9 @@ def train(
 
     slot_episode_ids = [i + 1 for i in range(actual_num_games)]
     next_global_episode_id = actual_num_games + 1
-    final_avg_reward = 0
+
+    total_reward_sum = 0.0
+    total_game_count = 0
 
     # --- 초기화 ---
     obs, infos = env.reset()
@@ -193,8 +195,14 @@ def train(
             # 대표 에이전트 평균 보상 로깅
             rep_pid = list(rl_agents.keys())[0]
             avg_reward = np.mean(current_rewards[rep_pid][finished_indices])
+            raw_scores = current_rewards[rep_pid][finished_indices]
 
-            last_avg_reward = avg_reward
+            total_reward_sum += np.sum(raw_scores)  # 점수 합계 더하기
+            total_game_count += len(raw_scores)  # 게임 횟수 더하기
+
+            current_avg = (
+                total_reward_sum / total_game_count if total_game_count > 0 else 0
+            )
 
             logger.set_episode(int(completed_episodes))
             logger.log_metrics(
@@ -232,7 +240,12 @@ def train(
             agent.save(save_path)
             print(f"Saved: {save_path}")
 
-    return last_avg_reward
+    if total_game_count == 0:
+        return -999.0
+
+    final_average_score = total_reward_sum / total_game_count
+
+    return final_average_score
 
 
 def test(
