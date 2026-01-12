@@ -604,7 +604,7 @@ class MafiaEnv(ParallelEnv):
 
         # 2. 게임 상황 (4)
         # Day (1) - 정규화 (최대 15일 가정)
-        day_vec = np.array([status.day / 15.0], dtype=np.float32)
+        day_vec = np.array([status.day / float(config.game.MAX_DAYS)], dtype=np.float32)
 
         # Phase One-hot (3)
         phase_vec = np.zeros(3, dtype=np.float32)

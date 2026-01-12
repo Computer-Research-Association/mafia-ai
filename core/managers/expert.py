@@ -1,6 +1,8 @@
 import json
 import os
 import numpy as np
+import torch
+from torch.utils.data import Dataset, DataLoader
 from typing import Any, Dict, List, Optional
 from pathlib import Path
 
@@ -123,3 +125,52 @@ class ExpertDataManager:
         
         # 메모리 해제
         del self.episode_buffers[episode_id]
+
+
+class ExpertDataset(Dataset):
+    def __init__(self, data_path: str):
+        self.samples = []
+        if not os.path.exists(data_path):
+            print(f"[ExpertDataset] File not found: {data_path}")
+            return
+
+        with open(data_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                try:
+                    entry = json.loads(line)
+                    # Only learn from winners
+                    if not entry.get("is_winner", False):
+                        continue
+
+                    obs_seq = entry["obs"]
+                    act_seq = entry["acts"]
+                    mask_seq = entry.get("masks", [])
+
+                    for i in range(len(obs_seq)):
+                        # If act is [target, role] 
+                        act = act_seq[i]
+                        
+                        # Validate dimensions
+                        if len(act) != 2:
+                            continue
+
+                        sample = {
+                            "obs": np.array(obs_seq[i], dtype=np.float32),
+                            "act": np.array(act, dtype=np.int64),
+                            "mask": np.array(mask_seq[i], dtype=np.float32) if i < len(mask_seq) else np.ones(14, dtype=np.float32)
+                        }
+                        self.samples.append(sample)
+                except Exception as e:
+                    print(f"[ExpertDataset] Error loading line: {e}")
+
+    def __len__(self):
+        return len(self.samples)
+
+    def __getitem__(self, idx):
+        sample = self.samples[idx]
+        return {
+            "obs": torch.tensor(sample["obs"], dtype=torch.float32),
+            "act_target": torch.tensor(sample["act"][0], dtype=torch.long),
+            "act_role": torch.tensor(sample["act"][1], dtype=torch.long),
+            "mask": torch.tensor(sample["mask"], dtype=torch.float32)
+        }

@@ -117,9 +117,11 @@ class PPO:
         # 병렬 환경일 경우 action을 list로 변환하여 반환
         return action.tolist(), new_hidden
 
-    def update(self, il_loss_fn=None):
+    def update(self, expert_loader=None):
         if len(self.buffer.rewards) == 0:
             return {}
+
+        expert_iter = iter(expert_loader) if expert_loader is not None else None
 
         rewards = []
         discounted_reward = 0
@@ -260,6 +262,33 @@ class PPO:
                     + 0.5 * self.MseLoss(state_values, mb_rewards)
                     - self.entropy_coef * dist_entropy
                 )
+
+                # === Imitation Learning Loss Injection ===
+                if expert_iter is not None:
+                    try:
+                        batch = next(expert_iter)
+                    except StopIteration:
+                        expert_iter = iter(expert_loader)
+                        batch = next(expert_iter)
+                    
+                    if batch is not None:
+                        exp_obs = batch['obs']
+                        exp_target = batch['act_target']
+                        exp_role = batch['act_role']
+                        
+                        # Forward pass for expert data
+                        logits_tuple, _, _ = self.policy(exp_obs)
+                        target_logits, role_logits = logits_tuple
+
+                        if target_logits.dim() == 3:
+                            target_logits = target_logits.squeeze(1)
+                            role_logits = role_logits.squeeze(1)
+                        
+                        # CrossEntropyLoss
+                        ce_loss = nn.CrossEntropyLoss()
+                        il_loss = ce_loss(target_logits, exp_target) + ce_loss(role_logits, exp_role)
+                        
+                        loss += config.train.IL_COEF * il_loss
 
                 self.optimizer.zero_grad()
                 loss.mean().backward()

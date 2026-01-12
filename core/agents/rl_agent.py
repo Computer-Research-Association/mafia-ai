@@ -130,9 +130,9 @@ class RLAgent(BaseAgent):
             # REINFORCE 등 buffer가 없는 경우 직접 저장
             self.learner.rewards.append(reward)
 
-    def update(self):
+    def update(self, expert_loader=None):
         """학습 수행 - 알고리즘 객체에 위임"""
-        return self.learner.update()
+        return self.learner.update(expert_loader=expert_loader)
 
     def save(self, filepath: str):
         """모델 저장"""
