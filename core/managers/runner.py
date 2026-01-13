@@ -112,7 +112,7 @@ def train(
             break
 
         # --- [1. 행동 결정 (Batch Action)] ---
-        all_actions = np.zeros((env.num_envs, 2), dtype=int)
+        all_actions = np.full((env.num_envs, 2), -1, dtype=int)
 
         for pid in range(PLAYERS_PER_GAME):
             # PID별 인덱스 추출
