@@ -22,7 +22,8 @@ Thumbs.db
 *.log
 logs/
 checkpoints/
-models/
+# ai폴더 안에 있는 models는 포함하고 root의 models 폴더만 무시
+/models/
 data/
 *.pt
 *.pth
