@@ -18,6 +18,7 @@ def make_env_for_worker():
 
 
 from core.envs.mafia_env import MafiaEnv
+from core.envs.encoders import MDPEncoder, POMDPEncoder
 from core.agents.rl_agent import RLAgent
 from core.agents.llm_agent import LLMAgent
 from core.agents.rule_base_agent import RuleBaseAgent
@@ -53,7 +54,7 @@ class ExperimentManager:
         메인 프로세스용 환경
         [수정] Runner가 로그를 중앙 관리하므로, Env 내부에는 logger를 주지 않습니다.
         """
-        return MafiaEnv()
+        return MafiaEnv(player_configs=self.player_configs)
 
     def build_vec_env(self, num_envs: int = 8, num_cpus: int = 4):
         """
@@ -63,7 +64,7 @@ class ExperimentManager:
 
         # 1. 단일 환경 템플릿 생성
         # [수정] 리스트 대신 단일 인스턴스를 사용해 에러 해결
-        env = MafiaEnv()
+        env = MafiaEnv(player_configs=self.player_configs)
 
         # 2. PettingZoo -> Gymnasium 변환
         env = ss.pettingzoo_env_to_vec_env_v1(env)
@@ -83,7 +84,6 @@ class ExperimentManager:
         return vec_env
 
     def build_agents(self) -> Dict[int, Any]:
-        state_dim = config.game.OBS_DIM
         agents = {}
 
         if not self.player_configs:
@@ -97,10 +97,17 @@ class ExperimentManager:
 
                 print(role)
 
+                # Determine state dimension based on backbone/encoder
+                bb = p_config.get("backbone", "mlp").lower()
+                if bb in ["rnn", "lstm", "gru"]:
+                    current_state_dim = POMDPEncoder().observation_dim
+                else:
+                    current_state_dim = MDPEncoder().observation_dim
+
                 agent = RLAgent(
                     player_id=i,
                     role=role,
-                    state_dim=state_dim,
+                    state_dim=current_state_dim,
                     action_dims=config.game.ACTION_DIMS,
                     algorithm=p_config["algo"],
                     backbone=p_config["backbone"],
