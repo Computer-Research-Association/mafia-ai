@@ -105,19 +105,31 @@ class RLAgent(BaseAgent):
         Returns:
             action_vector: [Target, Role] 형태의 리스트
         """
+        obs_is_batch = False
         if isinstance(state, dict):
             obs = state["observation"]
             mask = state.get("action_mask", action_mask)
         else:
             obs = state
             mask = action_mask
+        
+        # Check if observation is batched (ndim > 1)
+        if hasattr(obs, 'ndim') and obs.ndim > 1:
+            obs_is_batch = True
+        elif isinstance(obs, list) and len(obs) > 0 and isinstance(obs[0], list):
+            obs_is_batch = True
 
         state_dict = {"observation": obs, "action_mask": mask}
 
         # learner.select_action returns ([target, role], hidden_state)
+        # Note: learner.select_action usually returns a batched list like [[t, r]] for 1 item batch
         action_vector, self.hidden_state = self.learner.select_action(
             state_dict, self.hidden_state
         )
+
+        # If input was not batched (single item), unwrap the batch dimension from output
+        if not obs_is_batch and isinstance(action_vector, list) and len(action_vector) == 1 and isinstance(action_vector[0], list):
+            return action_vector[0]
 
         return action_vector
 
@@ -136,22 +148,44 @@ class RLAgent(BaseAgent):
         return self.learner.update(expert_loader=expert_loader)
 
     def save(self, filepath: str):
-        """모델 저장"""
-        torch.save(
-            {
-                "policy_state_dict": self.policy.state_dict(),
-                "algorithm": self.algorithm,
-                "backbone": self.backbone,
-                "state_dim": self.state_dim,
-                "action_dim": self.action_dim,
-            },
-            filepath,
-        )
+        """모델의 가중치와 구조 설정을 모두 저장"""
+        torch.save({
+            "policy_state_dict": self.policy.state_dict(),
+            "algorithm": self.algorithm,
+            "backbone": self.backbone,
+            "state_dim": self.state_dim,
+            "action_dims": self.action_dims,
+            "hidden_dim": self.policy.hidden_dim,  # 추가
+            "num_layers": self.policy.num_layers,  # 추가
+        }, filepath)
 
     def load(self, filepath: str):
-        """모델 로드"""
-        checkpoint = torch.load(filepath)
+        """파일의 설정값에 맞춰 모델을 자동으로 재구성하여 로드"""
+        checkpoint = torch.load(filepath, map_location=torch.device('cpu')) # 장치 문제 해결
+        
+        # 이전 버전 호환성 체크 (키가 없을 경우 기본값 또는 현재 설정 사용)
+        hidden_dim = checkpoint.get("hidden_dim", 128)
+        num_layers = checkpoint.get("num_layers", 2)
+        action_dims = checkpoint.get("action_dims", self.action_dims)
+        backbone = checkpoint.get("backbone", self.backbone) # 저장된 backbone이 있으면 사용
+        
+        # 1. 저장된 설정으로 모델(Policy)을 새로 생성하여 구조 일치시킴
+        self.policy = DynamicActorCritic(
+            state_dim=checkpoint["state_dim"],
+            action_dims=action_dims,
+            backbone=backbone,
+            hidden_dim=hidden_dim,
+            num_layers=num_layers
+        )
+        
+        # 속성 업데이트 (나중에 save할 때 반영되도록)
+        self.backbone = backbone
+        self.action_dims = action_dims
+        
+        # 2. 가중치 로드
         self.policy.load_state_dict(checkpoint["policy_state_dict"])
-
+        
+        # 3. 알고리즘(PPO 등) 재설정
         if self.algorithm == "ppo":
+            self.learner.policy = self.policy
             self.learner.policy_old.load_state_dict(self.policy.state_dict())
