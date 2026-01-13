@@ -150,7 +150,8 @@ class RLAgent(BaseAgent):
 
     def load(self, filepath: str):
         """모델 로드"""
-        checkpoint = torch.load(filepath)
+        # map_location 추가하여 CPU/GPU 어디서든 로드 가능하게 수정
+        checkpoint = torch.load(filepath, map_location=torch.device('cpu')) 
         self.policy.load_state_dict(checkpoint["policy_state_dict"])
 
         if self.algorithm == "ppo":
