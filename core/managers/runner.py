@@ -313,6 +313,10 @@ def test(
 
     # Initial Reset & Log (Captures Day 0 / Role assignments)
     obs, infos = env.reset()
+    # 추가: 에이전트 은닉 상태 초기화
+    for agent in all_agents.values():
+        if hasattr(agent, "reset_hidden"):
+            agent.reset_hidden(batch_size=1)
     process_logs(infos)
 
     # Stats
@@ -371,6 +375,16 @@ def test(
                     else 0.0
                 )
                 pbar.set_postfix(mafia_win_rate=f"{win_rate:.1f}%")
+
+                # [중요] 목표를 아직 못 채웠을 때만 리셋 (불필요한 Day 0 로그 방지)
+                if completed_episodes < num_episodes:
+                    obs, infos = env.reset()
+
+                # 추가: 에이전트 은닉 상태 초기화
+                for agent in all_agents.values():
+                    if hasattr(agent, "reset_hidden"):
+                        agent.reset_hidden(batch_size=1)
+                process_logs(infos)  # Capture new episode's start logs
 
                 if completed_episodes < num_episodes:
                     obs, infos = env.reset()
