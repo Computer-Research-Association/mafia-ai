@@ -64,7 +64,6 @@ class MafiaGame:
             else:
                 # 만약 카드가 모자르면 시민
                 p.role = Role.CITIZEN
-            print(f"[Setup] Player {p.id} -> Random Role: {p.role.name}")
 
         # 4. 상태 초기화 및 시스템 메시지 기록
         for p in self.players:
