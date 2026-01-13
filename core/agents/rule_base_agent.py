@@ -106,8 +106,10 @@ class RuleBaseAgent(BaseAgent):
             # 맞경
             if len(police_claims) >= 2:
                 claimants = [pid for pid in police_claims.keys() if pid in targets]
+                first_police_id = claimants[0]  # 1. 가장 먼저 주장한 경찰
+                target_of_first = police_claims[first_police_id]
                 if claimants:
-                    return GameAction(target_id=random.choice(claimants))
+                    return GameAction(target_id=target_of_first)
 
             # 경찰이 1명
             elif len(police_claims) == 1:
