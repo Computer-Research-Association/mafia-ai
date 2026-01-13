@@ -50,9 +50,7 @@ class RuleBaseAgent(BaseAgent):
             # 맞경
             for event in status.action_history:
                 if event.day == status.day and event.event_type == EventType.CLAIM:
-                    print(
-                        f"[DEBUG] Claim Event: Actor={event.actor_id}, Target={event.target_id}, Me={self.id}, Value={event.value}"
-                    )
+                    pass
 
                 if (
                     event.day == status.day
@@ -62,9 +60,6 @@ class RuleBaseAgent(BaseAgent):
                     and event.target_id == self.id
                     and event.actor_id != self.id
                 ):
-                    print(
-                        f"[MAFIA ALERT] Counter-Claim Triggered against {event.actor_id}!"
-                    )
                     return GameAction(target_id=event.actor_id, claim_role=Role.POLICE)
 
             # 시민 모방
