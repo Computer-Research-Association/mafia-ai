@@ -1,58 +1,48 @@
 import torch
 
 class RolloutBuffer:
-    def __init__(self):
-        self.actions = []
-        self.states = []
-        self.logprobs = []
-        self.rewards = []
-        self.is_terminals = []
-        self.hidden_states = []
-        self.masks = []
+    def __init__(self, num_envs=1):
+        self.num_envs = num_envs
+        self.reset()
     
+    def reset(self):
+        self.states = [[] for _ in range(self.num_envs)]
+        self.actions = [[] for _ in range(self.num_envs)]
+        self.logprobs = [[] for _ in range(self.num_envs)]
+        self.rewards = [[] for _ in range(self.num_envs)]
+        self.is_terminals = [[] for _ in range(self.num_envs)]
+        self.masks = [[] for _ in range(self.num_envs)]
+        self.values = [[] for _ in range(self.num_envs)]
+
+    def resize(self, num_envs):
+        self.num_envs = num_envs
+        self.reset()
+
     def clear(self):
-        del self.actions[:]
-        del self.states[:]
-        del self.logprobs[:]
-        del self.rewards[:]
-        del self.is_terminals[:]
-        del self.hidden_states[:]
-        del self.masks[:]
+        self.reset()
 
-    def get_episodes(self):
+    def insert(self, slot_idx, state, action, logprob, mask=None, value=None):
+        if slot_idx >= self.num_envs:
+            return
+        self.states[slot_idx].append(state)
+        self.actions[slot_idx].append(action)
+        self.logprobs[slot_idx].append(logprob)
+        if mask is not None:
+            self.masks[slot_idx].append(mask)
+        if value is not None:
+            self.values[slot_idx].append(value)
+
+    def insert_reward(self, slot_idx, reward, is_terminal):
+        if slot_idx >= self.num_envs:
+            return
+        self.rewards[slot_idx].append(reward)
+        self.is_terminals[slot_idx].append(is_terminal)
+
+    def get_data(self):
         """
-        Splits the buffer into episodic sequences based on is_terminals.
-        Returns a list of dictionaries, each containing data for one episode.
+        Returns data appropriate for training.
+        For RNN: List of trajectories (sequences).
+        For MLP: Flattened batch.
+        But logic is better handled in PPO update method using raw lists.
         """
-        episodes = []
-        if len(self.is_terminals) == 0:
-            return episodes
-
-        start_idx = 0
-        for i, done in enumerate(self.is_terminals):
-            if done:
-                # Extract slice for this episode
-                episode_data = {
-                    "states": self.states[start_idx : i+1],
-                    "actions": self.actions[start_idx : i+1],
-                    "logprobs": self.logprobs[start_idx : i+1],
-                    "rewards": self.rewards[start_idx : i+1],
-                    "is_terminals": self.is_terminals[start_idx : i+1],
-                    "masks": self.masks[start_idx : i+1] if self.masks else []
-                }
-                episodes.append(episode_data)
-                start_idx = i + 1
-        
-        # If there is remaining data that didn't end with done (e.g. truncated), add it
-        if start_idx < len(self.is_terminals):
-             episode_data = {
-                "states": self.states[start_idx:],
-                "actions": self.actions[start_idx:],
-                "logprobs": self.logprobs[start_idx:],
-                "rewards": self.rewards[start_idx:],
-                "is_terminals": self.is_terminals[start_idx:],
-                "masks": self.masks[start_idx:] if self.masks else []
-            }
-             episodes.append(episode_data)
-
-        return episodes
+        return self

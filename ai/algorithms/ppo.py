@@ -46,25 +46,31 @@ class PPO:
             obs = state
             mask = None
 
+        obs_is_batch = False
+        if hasattr(obs, 'ndim') and obs.ndim > 1:
+            obs_is_batch = True
+        elif isinstance(obs, list) and len(obs) > 0 and isinstance(obs[0], list):
+            obs_is_batch = True
+
         with torch.no_grad():
             state_tensor = torch.FloatTensor(obs)
 
             # Add dimensions for batch/seq if needed
             if self.is_recurrent:
-                # (Batch=1, Seq=1, Feature)
+                # (Batch, Seq=1, Feature)
                 if state_tensor.dim() == 1:
                     state_tensor = state_tensor.unsqueeze(0).unsqueeze(0)
                 elif state_tensor.dim() == 2:
                     state_tensor = state_tensor.unsqueeze(1)
             else:
-                # (Batch=1, Feature)
+                # (Batch, Feature)
                 if state_tensor.dim() == 1:
                     state_tensor = state_tensor.unsqueeze(0)
 
             # Forward pass with policy_old
-            logits_tuple, _, new_hidden = self.policy_old(state_tensor, hidden_state)
+            logits_tuple, state_values, new_hidden = self.policy_old(state_tensor, hidden_state)
             target_logits, role_logits = logits_tuple
-
+            
             # Squeeze if necessary to get (Batch, Dim)
             if target_logits.dim() > 2:
                 target_logits = target_logits.squeeze(1)
@@ -102,196 +108,196 @@ class PPO:
 
             action = torch.stack([action_target, action_role], dim=-1)
 
-        # Save to buffer
-        self.buffer.states.append(torch.FloatTensor(obs))
-        self.buffer.actions.append(action)
-        self.buffer.logprobs.append(action_logprob)
-        if mask is not None:
-            self.buffer.masks.append(torch.FloatTensor(mask))
+        # Save to buffer per slot
+        actions_list = action.detach().cpu()
+        logprobs_list = action_logprob.detach().cpu()
+        values_list = state_values.detach().cpu().squeeze()
+        if values_list.dim() == 0: values_list = values_list.unsqueeze(0)
+
+        # Batch iteration
+        batch_size = len(obs) if obs_is_batch else 1
+        
+        # Ensure lists if not batch
+        if not obs_is_batch:
+            obs = [obs]
+            if mask is not None: mask = [mask]
+            
+        for i in range(batch_size):
+            self.buffer.insert(
+                slot_idx=i,
+                state=obs[i],
+                action=actions_list[i],
+                logprob=logprobs_list[i],
+                mask=mask[i] if mask is not None else None,
+                value=values_list[i]
+            )
 
         return action.tolist(), new_hidden
 
-    def _compute_gae(self, rewards, values, is_terminals):
-        gae_lambda = getattr(self.config.train, "GAE_LAMBDA", 0.95)
-        advantages = []
-        gae = 0
-        
-        # Basic GAE: delta = r + gamma * v_next - v
-        # We assume value of next state after termination is 0
-        values = list(values)
-        values_next = values[1:] + [0]
-        
-        for r, v, v_next, done in zip(reversed(rewards), reversed(values), reversed(values_next), reversed(is_terminals)):
-            if done:
-                delta = r - v
-                gae = delta
-            else:
-                delta = r + self.gamma * v_next - v
-                gae = delta + self.gamma * gae_lambda * gae
-            advantages.insert(0, gae)
-            
-        advantages = torch.tensor(advantages, dtype=torch.float32)
-        returns = advantages + torch.tensor(values, dtype=torch.float32)
-        return returns, advantages
-
     def update(self):
-        if self.is_recurrent:
-            self._update_recurrent()
-        else:
-            self._update_mlp()
+        # Flattened data components
+        flat_states = []
+        flat_actions = []
+        flat_logprobs = []
+        flat_returns = []
+        flat_advantages = []
+        flat_masks = []
         
+        # Helper for GAE
+        gae_lambda = getattr(self.config.train, "GAE_LAMBDA", 0.95)
+        
+        # Process each slot (trajectory)
+        for i in range(self.buffer.num_envs):
+            # Get data for this slot
+            rewards = self.buffer.rewards[i]
+            if not rewards: continue
+            
+            values = self.buffer.values[i]
+            terminals = self.buffer.is_terminals[i]
+            
+            # Compute GAE
+            advantages = []
+            gae = 0
+            # We assume value of next state after termination is 0
+            # Append 0 to values to handle index i+1
+            values_ext = values + [0]
+            
+            for t in reversed(range(len(rewards))):
+                if terminals[t]:
+                    delta = rewards[t] - values[t]
+                    gae = delta
+                else:
+                    delta = rewards[t] + self.gamma * values_ext[t+1] - values[t]
+                    gae = delta + self.gamma * gae_lambda * gae
+                advantages.insert(0, gae)
+                
+            # Returns = Adv + Value
+            returns = [a + v for a, v in zip(advantages, values)]
+            
+            # Store processed data
+            flat_states.append(torch.tensor(self.buffer.states[i], dtype=torch.float32))
+            flat_actions.append(torch.stack(self.buffer.actions[i]))
+            flat_logprobs.append(torch.stack(self.buffer.logprobs[i]))
+            flat_returns.append(torch.tensor(returns, dtype=torch.float32))
+            flat_advantages.append(torch.tensor(advantages, dtype=torch.float32))
+            
+            if self.buffer.masks[i]:
+                 flat_masks.append(torch.stack(self.buffer.masks[i]))
+            else:
+                 pass # Handle later
+
+        if not flat_states:
+            return
+
+        if self.is_recurrent:
+            self._update_recurrent_opt(flat_states, flat_actions, flat_logprobs, flat_returns, flat_advantages, flat_masks)
+        else:
+            self._update_mlp_opt(flat_states, flat_actions, flat_logprobs, flat_returns, flat_advantages, flat_masks)
+
         # Updates done, sync policy_old
         self.policy_old.load_state_dict(self.policy.state_dict())
         self.buffer.clear()
 
-    def _update_mlp(self):
-        # Flatten buffer data
-        old_states = torch.stack(self.buffer.states).detach()
-        old_actions = torch.stack(self.buffer.actions).detach().squeeze() 
-        old_logprobs = torch.stack(self.buffer.logprobs).detach().squeeze()
-
-        # Get masks
-        old_masks = None
-        if self.buffer.masks and self.buffer.masks[0] is not None:
-             old_masks = torch.stack(self.buffer.masks).detach()
-
-        # 1. Get Values for GAE
-        with torch.no_grad():
-            _, values, _ = self.policy(old_states)
-            values = values.squeeze().tolist()
-            if not isinstance(values, list): values = [values]
-
-        # 2. Compute GAE
-        rewards = self.buffer.rewards
-        is_terminals = self.buffer.is_terminals
-        returns, advantages = self._compute_gae(rewards, values, is_terminals)
+    def _update_mlp_opt(self, states, actions, logprobs, returns, advantages, masks):
+        # Flatten all slots
+        b_states = torch.cat(states)
+        b_actions = torch.cat(actions)
+        b_logprobs = torch.cat(logprobs)
+        b_returns = torch.cat(returns)
+        b_advantages = torch.cat(advantages)
+        
+        b_masks = None
+        if masks:
+            b_masks = torch.cat(masks)
 
         # Normalize advantages
-        if len(advantages) > 1:
-            advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-7)
+        if b_advantages.numel() > 1:
+             b_advantages = (b_advantages - b_advantages.mean()) / (b_advantages.std() + 1e-7)
 
-        # Optimize for K epochs
+        # Optimize
         for _ in range(self.k_epochs):
-            # Evaluate old actions and values (using CURRENT policy)
-            # Flattened forward pass
-            logits_tuple, state_values, _ = self.policy(old_states)
+            # Forward (Batch)
+            logits_tuple, state_values, _ = self.policy(b_states)
             target_logits, role_logits = logits_tuple
             
             state_values = state_values.squeeze()
             if target_logits.dim() > 2: target_logits = target_logits.squeeze(1); role_logits = role_logits.squeeze(1)
 
             # Masking
-            if old_masks is not None:
-                 mask_target = old_masks[:, :9]
-                 mask_role = old_masks[:, 9:]
+            if b_masks is not None:
+                 mask_target = b_masks[:, :9]
+                 mask_role = b_masks[:, 9:]
                  target_logits[mask_target==0] = -1e9
                  role_logits[mask_role==0] = -1e9
 
             dist_target = Categorical(logits=target_logits)
             dist_role = Categorical(logits=role_logits)
 
-            action_target = old_actions[:, 0]
-            action_role = old_actions[:, 1]
+            action_target = b_actions[:, 0]
+            action_role = b_actions[:, 1]
             
-            logprobs = dist_target.log_prob(action_target) + dist_role.log_prob(action_role)
+            logprobs_new = dist_target.log_prob(action_target) + dist_role.log_prob(action_role)
             dist_entropy = dist_target.entropy() + dist_role.entropy()
 
             # Ratios
-            ratios = torch.exp(logprobs - old_logprobs.detach())
+            ratios = torch.exp(logprobs_new - b_logprobs)
 
-            # Advantages
-            surr1 = ratios * advantages
-            surr2 = torch.clamp(ratios, 1 - self.eps_clip, 1 + self.eps_clip) * advantages
+            # Loss
+            surr1 = ratios * b_advantages
+            surr2 = torch.clamp(ratios, 1 - self.eps_clip, 1 + self.eps_clip) * b_advantages
 
-            loss = -torch.min(surr1, surr2) + self.value_loss_coef * self.MseLoss(state_values, returns) - self.entropy_coef * dist_entropy
+            loss = -torch.min(surr1, surr2) + self.value_loss_coef * self.MseLoss(state_values, b_returns) - self.entropy_coef * dist_entropy
 
             self.optimizer.zero_grad()
             loss.mean().backward()
             self.optimizer.step()
 
-    def _update_recurrent(self):
-        episodes = self.buffer.get_episodes()
-        
-        processed_episodes = []
-        for ep in episodes:
-            states = torch.stack(ep["states"]).detach() # (Seq, Dim)
+    def _update_recurrent_opt(self, states, actions, logprobs, returns, advantages, masks):
+        # states is list of (Seq, Dim) tensors
+        # Iterate over trajectories
+        for i in range(len(states)):
+            seq_states = states[i] # (Seq, Dim)
+            seq_actions = actions[i]
+            seq_logprobs = logprobs[i]
+            seq_returns = returns[i]
+            seq_advantages = advantages[i]
+            seq_masks = masks[i] if masks else None
             
-            # Get values (Seq)
-            with torch.no_grad():
-                 # Input (1, Seq, Dim)
-                 _, vals, _ = self.policy(states.unsqueeze(0), None)
-                 vals = vals.squeeze().tolist() 
-                 if not isinstance(vals, list): vals = [vals]
-            
-            rewards = ep["rewards"]
-            is_terminals = ep["is_terminals"]
-            
-            returns, advantages = self._compute_gae(rewards, vals, is_terminals)
-            
-            ep["returns"] = returns
-            ep["advantages"] = advantages
-            processed_episodes.append(ep)
+            if seq_advantages.numel() > 1:
+                 seq_advantages = (seq_advantages - seq_advantages.mean()) / (seq_advantages.std() + 1e-7)
 
-        # Optimization
-        for _ in range(self.k_epochs):
-            # Shuffle episodes if desired, but for RNN we just iterate
-            # One update per episode (Batch Size = 1 Episode)
-            for ep in processed_episodes:
-                states = torch.stack(ep["states"]).detach() # (Seq, Dim)
-                actions = torch.stack(ep["actions"]).detach().squeeze() # (Seq, 2)
-                old_logprobs = torch.stack(ep["logprobs"]).detach().squeeze() # (Seq)
+            for _ in range(self.k_epochs):
+                # Forward (Batch=1, Seq, Dim)
+                states_input = seq_states.unsqueeze(0)
                 
-                returns = ep["returns"]
-                advantages = ep["advantages"]
-                
-                masks = None
-                if ep["masks"]:
-                     masks = torch.stack(ep["masks"]).detach()
-
-                # Forward with BPTT (Seq of states)
-                # Input: (1, Seq, Dim)
-                # Hidden: None (Start of episode)
-                
-                states_input = states.unsqueeze(0) # (1, Seq, Dim)
-                
-                # Policy Forward
                 logits_tuple, state_values, _ = self.policy(states_input, None)
                 target_logits, role_logits = logits_tuple
                 
-                # Output shapes: (1, Seq, Dim), (1, Seq, 1)
-                target_logits = target_logits.squeeze(0) # (Seq, Dim)
+                target_logits = target_logits.squeeze(0) 
                 role_logits = role_logits.squeeze(0)
-                state_values = state_values.squeeze(0).squeeze(-1) # (Seq)
+                state_values = state_values.squeeze(0).squeeze(-1)
 
-                # Masking
-                if masks is not None:
-                    mask_target = masks[:, :9]
-                    mask_role = masks[:, 9:]
+                if seq_masks is not None:
+                    mask_target = seq_masks[:, :9]
+                    mask_role = seq_masks[:, 9:]
                     target_logits[mask_target == 0] = -1e9
                     role_logits[mask_role == 0] = -1e9
 
                 dist_target = Categorical(logits=target_logits)
                 dist_role = Categorical(logits=role_logits)
                 
-                # Actions shape check
-                if actions.dim() == 1: # If only 1 step
-                    actions = actions.unsqueeze(0)
-
-                logprobs = dist_target.log_prob(actions[:, 0]) + dist_role.log_prob(actions[:, 1])
+                act_target = seq_actions[:, 0]
+                act_role = seq_actions[:, 1]
+                
+                logprobs_new = dist_target.log_prob(act_target) + dist_role.log_prob(act_role)
                 dist_entropy = dist_target.entropy() + dist_role.entropy()
                 
-                # Normalize advantages
-                if len(advantages) > 1:
-                     advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-7)
-
-                # Ratios
-                ratios = torch.exp(logprobs - old_logprobs)
+                ratios = torch.exp(logprobs_new - seq_logprobs.detach())
                 
-                # Loss
-                surr1 = ratios * advantages
-                surr2 = torch.clamp(ratios, 1 - self.eps_clip, 1 + self.eps_clip) * advantages
+                surr1 = ratios * seq_advantages
+                surr2 = torch.clamp(ratios, 1 - self.eps_clip, 1 + self.eps_clip) * seq_advantages
                 
-                loss = -torch.min(surr1, surr2) + self.value_loss_coef * self.MseLoss(state_values, returns) - self.entropy_coef * dist_entropy
+                loss = -torch.min(surr1, surr2) + self.value_loss_coef * self.MseLoss(state_values, seq_returns) - self.entropy_coef * dist_entropy
                 
                 self.optimizer.zero_grad()
                 loss.mean().backward()
