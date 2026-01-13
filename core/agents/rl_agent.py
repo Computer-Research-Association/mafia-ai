@@ -136,23 +136,44 @@ class RLAgent(BaseAgent):
         return self.learner.update(expert_loader=expert_loader)
 
     def save(self, filepath: str):
-        """모델 저장"""
-        torch.save(
-            {
-                "policy_state_dict": self.policy.state_dict(),
-                "algorithm": self.algorithm,
-                "backbone": self.backbone,
-                "state_dim": self.state_dim,
-                "action_dim": self.action_dim,
-            },
-            filepath,
-        )
+        """모델의 가중치와 구조 설정을 모두 저장"""
+        torch.save({
+            "policy_state_dict": self.policy.state_dict(),
+            "algorithm": self.algorithm,
+            "backbone": self.backbone,
+            "state_dim": self.state_dim,
+            "action_dims": self.action_dims,
+            "hidden_dim": self.policy.hidden_dim,  # 추가
+            "num_layers": self.policy.num_layers,  # 추가
+        }, filepath)
 
     def load(self, filepath: str):
-        """모델 로드"""
-        # map_location 추가하여 CPU/GPU 어디서든 로드 가능하게 수정
-        checkpoint = torch.load(filepath, map_location=torch.device('cpu')) 
+        """파일의 설정값에 맞춰 모델을 자동으로 재구성하여 로드"""
+        checkpoint = torch.load(filepath, map_location=torch.device('cpu')) # 장치 문제 해결
+        
+        # 이전 버전 호환성 체크 (키가 없을 경우 기본값 또는 현재 설정 사용)
+        hidden_dim = checkpoint.get("hidden_dim", 128)
+        num_layers = checkpoint.get("num_layers", 2)
+        action_dims = checkpoint.get("action_dims", self.action_dims)
+        backbone = checkpoint.get("backbone", self.backbone) # 저장된 backbone이 있으면 사용
+        
+        # 1. 저장된 설정으로 모델(Policy)을 새로 생성하여 구조 일치시킴
+        self.policy = DynamicActorCritic(
+            state_dim=checkpoint["state_dim"],
+            action_dims=action_dims,
+            backbone=backbone,
+            hidden_dim=hidden_dim,
+            num_layers=num_layers
+        )
+        
+        # 속성 업데이트 (나중에 save할 때 반영되도록)
+        self.backbone = backbone
+        self.action_dims = action_dims
+        
+        # 2. 가중치 로드
         self.policy.load_state_dict(checkpoint["policy_state_dict"])
-
+        
+        # 3. 알고리즘(PPO 등) 재설정
         if self.algorithm == "ppo":
+            self.learner.policy = self.policy
             self.learner.policy_old.load_state_dict(self.policy.state_dict())
