@@ -49,8 +49,8 @@ class RuleBaseAgent(BaseAgent):
         if self.role == Role.MAFIA:
             # 맞경
             for event in status.action_history:
-                # if event.day == status.day and event.event_type == EventType.CLAIM:
-                #     pass
+                if event.day == status.day and event.event_type == EventType.CLAIM:
+                    pass
 
                 if (
                     event.day == status.day
@@ -60,7 +60,7 @@ class RuleBaseAgent(BaseAgent):
                     and event.target_id == self.id
                     and event.actor_id != self.id
                 ):
-                    return GameAction(target_id=event.actor_id, claim_role=Role.POLICE)
+                    return GameAction(target_id=event.actor_id, claim_role=Role.MAFIA)
 
             # 시민 모방
             if targets and random.random() < 0.8:

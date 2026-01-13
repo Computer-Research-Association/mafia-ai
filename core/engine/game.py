@@ -95,6 +95,7 @@ class MafiaGame:
             self._process_night(actions)
             self.phase = Phase.DAY_DISCUSSION
             self.day += 1
+            self.discussion_round = 0
 
         is_over, is_win = self.check_game_over()
         if is_over:
@@ -168,7 +169,7 @@ class MafiaGame:
             self.history.append(event)
 
         # 토론 종료 조건 확인
-        if pass_count >= alive_count * 0.5:
+        if pass_count == alive_count * 0.5:
             return True
 
         self.discussion_round += 1
