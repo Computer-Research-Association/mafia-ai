@@ -53,7 +53,6 @@ class MafiaGame:
             p.role = p.fixed_role
             if p.role in available_roles:
                 available_roles.remove(p.role)
-            print(f"[Setup] Player {p.id} -> Fixed Role: {p.role.name}")
 
         # 3. [그룹 2] 나머지 인원 랜덤 할당
         # 남은 카드를 섞어서 순서대로 배분
