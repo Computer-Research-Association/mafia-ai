@@ -105,19 +105,31 @@ class RLAgent(BaseAgent):
         Returns:
             action_vector: [Target, Role] 형태의 리스트
         """
+        obs_is_batch = False
         if isinstance(state, dict):
             obs = state["observation"]
             mask = state.get("action_mask", action_mask)
         else:
             obs = state
             mask = action_mask
+        
+        # Check if observation is batched (ndim > 1)
+        if hasattr(obs, 'ndim') and obs.ndim > 1:
+            obs_is_batch = True
+        elif isinstance(obs, list) and len(obs) > 0 and isinstance(obs[0], list):
+            obs_is_batch = True
 
         state_dict = {"observation": obs, "action_mask": mask}
 
         # learner.select_action returns ([target, role], hidden_state)
+        # Note: learner.select_action usually returns a batched list like [[t, r]] for 1 item batch
         action_vector, self.hidden_state = self.learner.select_action(
             state_dict, self.hidden_state
         )
+
+        # If input was not batched (single item), unwrap the batch dimension from output
+        if not obs_is_batch and isinstance(action_vector, list) and len(action_vector) == 1 and isinstance(action_vector[0], list):
+            return action_vector[0]
 
         return action_vector
 
