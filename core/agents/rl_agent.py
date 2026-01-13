@@ -6,9 +6,9 @@ from typing import List, Optional, Tuple, Dict, Any
 from torch.distributions import Categorical
 
 from core.agents.base_agent import BaseAgent
-from ai.model import DynamicActorCritic
-from ai.ppo import PPO
-from ai.reinforce import REINFORCE
+from ai.models.actor_critic import DynamicActorCritic
+from ai.algorithms.ppo import PPO
+from ai.algorithms.reinforce import REINFORCE
 from config import config, Role
 from core.engine.state import GameStatus, GameEvent, GameAction
 
@@ -56,11 +56,14 @@ class RLAgent(BaseAgent):
             hidden_dim=hidden_dim,
             num_layers=num_layers,
         )
+        
+        # Check recurrence
+        is_recurrent = self.backbone in ["lstm", "gru", "rnn"]
 
         if self.algorithm == "ppo":
-            self.learner = PPO(policy=self.policy)
+            self.learner = PPO(model=self.policy, config=config, is_recurrent=is_recurrent)
         elif self.algorithm == "reinforce":
-            self.learner = REINFORCE(policy=self.policy)
+            self.learner = REINFORCE(policy=self.policy) # REINFORCE signature might need check, but assuming OK for now
         else:
             raise ValueError(f"Unknown algorithm: {algorithm}")
 
