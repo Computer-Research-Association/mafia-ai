@@ -385,10 +385,6 @@ def test(
                             agent.reset_hidden(batch_size=1)
                     process_logs(infos)  # Capture new episode's start logs
 
-                if completed_episodes < num_episodes:
-                    obs, infos = env.reset()
-                    process_logs(infos)
-
     finally:
         # 루프 정리 (추가된 부분)
         loop.close()

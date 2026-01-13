@@ -49,8 +49,8 @@ class RuleBaseAgent(BaseAgent):
         if self.role == Role.MAFIA:
             # 맞경
             for event in status.action_history:
-                if event.day == status.day and event.event_type == EventType.CLAIM:
-                    pass
+                # if event.day == status.day and event.event_type == EventType.CLAIM:
+                #     pass
 
                 if (
                     event.day == status.day
