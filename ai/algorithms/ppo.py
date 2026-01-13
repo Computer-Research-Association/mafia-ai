@@ -83,7 +83,6 @@ class PPO:
                 role_logits_masked = role_logits.clone()
 
                 # Apply mask (-1e9 for invalid actions)
-                # Valid check might be needed to avoid all -Inf
                 target_logits_masked[mask_target == 0] = -1e9
                 role_logits_masked[mask_role == 0] = -1e9
                 
@@ -107,8 +106,33 @@ class PPO:
         self.buffer.states.append(torch.FloatTensor(obs))
         self.buffer.actions.append(action)
         self.buffer.logprobs.append(action_logprob)
+        if mask is not None:
+            self.buffer.masks.append(torch.FloatTensor(mask))
 
         return action.tolist(), new_hidden
+
+    def _compute_gae(self, rewards, values, is_terminals):
+        gae_lambda = 0.95
+        advantages = []
+        gae = 0
+        
+        # Basic GAE: delta = r + gamma * v_next - v
+        # We assume value of next state after termination is 0
+        values = list(values)
+        values_next = values[1:] + [0]
+        
+        for r, v, v_next, done in zip(reversed(rewards), reversed(values), reversed(values_next), reversed(is_terminals)):
+            if done:
+                delta = r - v
+                gae = delta
+            else:
+                delta = r + self.gamma * v_next - v
+                gae = delta + self.gamma * gae_lambda * gae
+            advantages.insert(0, gae)
+            
+        advantages = torch.tensor(advantages, dtype=torch.float32)
+        returns = advantages + torch.tensor(values, dtype=torch.float32)
+        return returns, advantages
 
     def update(self):
         if self.is_recurrent:
@@ -121,23 +145,30 @@ class PPO:
         self.buffer.clear()
 
     def _update_mlp(self):
-        # Calculate rewards (Monte Carlo)
-        rewards = []
-        discounted_reward = 0
-        for reward, is_terminal in zip(reversed(self.buffer.rewards), reversed(self.buffer.is_terminals)):
-            if is_terminal:
-                discounted_reward = 0
-            discounted_reward = reward + (self.gamma * discounted_reward)
-            rewards.insert(0, discounted_reward)
-        
-        rewards = torch.tensor(rewards, dtype=torch.float32)
-        if len(rewards) > 1 and rewards.std() > 1e-7:
-            rewards = (rewards - rewards.mean()) / (rewards.std() + 1e-7)
-
         # Flatten buffer data
         old_states = torch.stack(self.buffer.states).detach()
         old_actions = torch.stack(self.buffer.actions).detach().squeeze() 
         old_logprobs = torch.stack(self.buffer.logprobs).detach().squeeze()
+
+        # Get masks
+        old_masks = None
+        if self.buffer.masks and self.buffer.masks[0] is not None:
+             old_masks = torch.stack(self.buffer.masks).detach()
+
+        # 1. Get Values for GAE
+        with torch.no_grad():
+            _, values, _ = self.policy(old_states)
+            values = values.squeeze().tolist()
+            if not isinstance(values, list): values = [values]
+
+        # 2. Compute GAE
+        rewards = self.buffer.rewards
+        is_terminals = self.buffer.is_terminals
+        returns, advantages = self._compute_gae(rewards, values, is_terminals)
+
+        # Normalize advantages
+        if len(advantages) > 1:
+            advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-7)
 
         # Optimize for K epochs
         for _ in range(self.k_epochs):
@@ -146,21 +177,15 @@ class PPO:
             logits_tuple, state_values, _ = self.policy(old_states)
             target_logits, role_logits = logits_tuple
             
-            # Re-Calculate LogProbs
-            # We need to apply masking if we want exact same probs, but states stored don't have masks attached in buffer directly usually?
-            # Existing PPO code didn't store masks in buffer. It just learned from pure logits?
-            # Wait, if we don't mask during update, we might assign probability to invalid actions? 
-            # But the actions taken (old_actions) ARE valid.
-            # However, Categorical distribution normalization depends on all logits.
-            # If we don't mask, the dist is different.
-            # Original code: `mb_states = old_states[batch_idx]`, passed to `self.policy`.
-            # Original code `update` method DID NOT apply masks.
-            # This is a common simplification/oversight in simple PPO impls if masks aren't stored.
-            # I will follow original implementation (no masks in update).
-            
-            # Squeeze outputs
             state_values = state_values.squeeze()
             if target_logits.dim() > 2: target_logits = target_logits.squeeze(1); role_logits = role_logits.squeeze(1)
+
+            # Masking
+            if old_masks is not None:
+                 mask_target = old_masks[:, :9]
+                 mask_role = old_masks[:, 9:]
+                 target_logits[mask_target==0] = -1e9
+                 role_logits[mask_role==0] = -1e9
 
             dist_target = Categorical(logits=target_logits)
             dist_role = Categorical(logits=role_logits)
@@ -175,13 +200,10 @@ class PPO:
             ratios = torch.exp(logprobs - old_logprobs.detach())
 
             # Advantages
-            advantages = rewards - state_values.detach()
-
-            # Surrogate Loss
             surr1 = ratios * advantages
             surr2 = torch.clamp(ratios, 1 - self.eps_clip, 1 + self.eps_clip) * advantages
 
-            loss = -torch.min(surr1, surr2) + self.value_loss_coef * self.MseLoss(state_values, rewards) - self.entropy_coef * dist_entropy
+            loss = -torch.min(surr1, surr2) + self.value_loss_coef * self.MseLoss(state_values, returns) - self.entropy_coef * dist_entropy
 
             self.optimizer.zero_grad()
             loss.mean().backward()
@@ -190,22 +212,24 @@ class PPO:
     def _update_recurrent(self):
         episodes = self.buffer.get_episodes()
         
-        # Pre-calculate rewards for all episodes
-        # It's better to do this per episode
         processed_episodes = []
         for ep in episodes:
-            rewards = []
-            discounted_reward = 0
-            for r, t in zip(reversed(ep["rewards"]), reversed(ep["is_terminals"])):
-                if t: discounted_reward = 0
-                discounted_reward = r + (self.gamma * discounted_reward)
-                rewards.insert(0, discounted_reward)
+            states = torch.stack(ep["states"]).detach() # (Seq, Dim)
             
-            rewards = torch.tensor(rewards, dtype=torch.float32)
-            if len(rewards) > 1 and rewards.std() > 1e-7:
-                rewards = (rewards - rewards.mean()) / (rewards.std() + 1e-7)
+            # Get values (Seq)
+            with torch.no_grad():
+                 # Input (1, Seq, Dim)
+                 _, vals, _ = self.policy(states.unsqueeze(0), None)
+                 vals = vals.squeeze().tolist() 
+                 if not isinstance(vals, list): vals = [vals]
             
-            ep["discounted_rewards"] = rewards
+            rewards = ep["rewards"]
+            is_terminals = ep["is_terminals"]
+            
+            returns, advantages = self._compute_gae(rewards, vals, is_terminals)
+            
+            ep["returns"] = returns
+            ep["advantages"] = advantages
             processed_episodes.append(ep)
 
         # Optimization
@@ -216,7 +240,13 @@ class PPO:
                 states = torch.stack(ep["states"]).detach() # (Seq, Dim)
                 actions = torch.stack(ep["actions"]).detach().squeeze() # (Seq, 2)
                 old_logprobs = torch.stack(ep["logprobs"]).detach().squeeze() # (Seq)
-                rewards = ep["discounted_rewards"]
+                
+                returns = ep["returns"]
+                advantages = ep["advantages"]
+                
+                masks = None
+                if ep["masks"]:
+                     masks = torch.stack(ep["masks"]).detach()
 
                 # Forward with BPTT (Seq of states)
                 # Input: (1, Seq, Dim)
@@ -233,6 +263,13 @@ class PPO:
                 role_logits = role_logits.squeeze(0)
                 state_values = state_values.squeeze(0).squeeze(-1) # (Seq)
 
+                # Masking
+                if masks is not None:
+                    mask_target = masks[:, :9]
+                    mask_role = masks[:, 9:]
+                    target_logits[mask_target == 0] = -1e9
+                    role_logits[role_mask == 0] = -1e9
+
                 dist_target = Categorical(logits=target_logits)
                 dist_role = Categorical(logits=role_logits)
                 
@@ -243,17 +280,18 @@ class PPO:
                 logprobs = dist_target.log_prob(actions[:, 0]) + dist_role.log_prob(actions[:, 1])
                 dist_entropy = dist_target.entropy() + dist_role.entropy()
                 
+                # Normalize advantages
+                if len(advantages) > 1:
+                     advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-7)
+
                 # Ratios
                 ratios = torch.exp(logprobs - old_logprobs)
-                
-                # Advantages
-                advantages = rewards - state_values.detach()
                 
                 # Loss
                 surr1 = ratios * advantages
                 surr2 = torch.clamp(ratios, 1 - self.eps_clip, 1 + self.eps_clip) * advantages
                 
-                loss = -torch.min(surr1, surr2) + self.value_loss_coef * self.MseLoss(state_values, rewards) - self.entropy_coef * dist_entropy
+                loss = -torch.min(surr1, surr2) + self.value_loss_coef * self.MseLoss(state_values, returns) - self.entropy_coef * dist_entropy
                 
                 self.optimizer.zero_grad()
                 loss.mean().backward()
