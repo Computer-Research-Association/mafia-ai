@@ -95,6 +95,7 @@ class MafiaGame:
             self._process_night(actions)
             self.phase = Phase.DAY_DISCUSSION
             self.day += 1
+            self.discussion_round = 0
 
         is_over, is_win = self.check_game_over()
         if is_over:
