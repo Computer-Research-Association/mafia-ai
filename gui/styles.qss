@@ -72,3 +72,13 @@ QScrollArea {
     background-color: transparent;
 }
 
+/* [추가] 스핀박스 화살표 버튼 크기 키우기 */
+QSpinBox::up-button, QSpinBox::down-button {
+    width: 25px;          /* 버튼 너비 넓힘 */
+    background: #444;     /* 버튼 배경색 */
+    border-radius: 2px;
+}
+
+QSpinBox::up-button:hover, QSpinBox::down-button:hover {
+    background: #555;     /* 마우스 올렸을 때 색상 */
+}
