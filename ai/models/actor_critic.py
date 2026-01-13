@@ -52,11 +52,9 @@ class DynamicActorCritic(nn.Module):
         # 1. Dimension adjustment (Batch, Seq, Feature)
         if state.dim() == 2:
             state = state.unsqueeze(1)
-        elif state.dim() > 3:
-            b = state.size(0)
-            d = state.size(-1)
-            state = state.view(b, -1, d)
-
+        
+        # NOTE: Removed dangerous flattening logic for dim > 3 to prevent data mixing in parallel envs
+        
         # Current Batch Size
         current_batch_size = state.size(0)
 

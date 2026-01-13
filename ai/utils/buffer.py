@@ -13,6 +13,8 @@ class RolloutBuffer:
         self.is_terminals = [[] for _ in range(self.num_envs)]
         self.masks = [[] for _ in range(self.num_envs)]
         self.values = [[] for _ in range(self.num_envs)]
+        # Store initial hidden state for each slot (for truncated BPTT)
+        self.initial_hidden_states = [None for _ in range(self.num_envs)]
 
     def resize(self, num_envs):
         self.num_envs = num_envs
@@ -21,9 +23,14 @@ class RolloutBuffer:
     def clear(self):
         self.reset()
 
-    def insert(self, slot_idx, state, action, logprob, mask=None, value=None):
+    def insert(self, slot_idx, state, action, logprob, mask=None, value=None, hidden_state=None):
         if slot_idx >= self.num_envs:
             return
+            
+        # Capture the hidden state at the start of the trajectory chunk
+        if len(self.states[slot_idx]) == 0 and hidden_state is not None:
+             self.initial_hidden_states[slot_idx] = hidden_state
+
         self.states[slot_idx].append(state)
         self.actions[slot_idx].append(action)
         self.logprobs[slot_idx].append(logprob)

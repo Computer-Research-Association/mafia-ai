@@ -53,7 +53,7 @@ class PPO:
             obs_is_batch = True
 
         with torch.no_grad():
-            state_tensor = torch.FloatTensor(obs)
+            state_tensor = torch.FloatTensor(obs).to(next(self.policy.parameters()).device)
 
             # Add dimensions for batch/seq if needed
             if self.is_recurrent:
@@ -123,13 +123,28 @@ class PPO:
             if mask is not None: mask = [mask]
             
         for i in range(batch_size):
+            # Extract slice of hidden state for this slot if available
+            slot_hidden = None
+            if hidden_state is not None:
+                if isinstance(hidden_state, tuple): # LSTM
+                    h, c = hidden_state
+                    # Slicing (Layers, Batch, Dim) -> (Layers, 1, Dim)
+                    # Use clone to detach from graph but keep value? No, just value storage.
+                    # We detach because buffer storage is for restarting BPTT, not backpropping through previous batch.
+                    slot_h = h[:, i:i+1, :].detach().clone()
+                    slot_c = c[:, i:i+1, :].detach().clone()
+                    slot_hidden = (slot_h, slot_c)
+                else: # GRU
+                    slot_hidden = hidden_state[:, i:i+1, :].detach().clone()
+
             self.buffer.insert(
                 slot_idx=i,
                 state=obs[i],
                 action=actions_list[i],
                 logprob=logprobs_list[i],
                 mask=mask[i] if mask is not None else None,
-                value=values_list[i]
+                value=values_list[i],
+                hidden_state=slot_hidden
             )
 
         return action.tolist(), new_hidden
@@ -190,7 +205,9 @@ class PPO:
             return
 
         if self.is_recurrent:
-            self._update_recurrent_opt(flat_states, flat_actions, flat_logprobs, flat_returns, flat_advantages, flat_masks)
+            # Retrieve initial hidden states for each slot
+            initial_hiddens = self.buffer.initial_hidden_states
+            self._update_recurrent_opt(flat_states, flat_actions, flat_logprobs, flat_returns, flat_advantages, flat_masks, initial_hiddens)
         else:
             self._update_mlp_opt(flat_states, flat_actions, flat_logprobs, flat_returns, flat_advantages, flat_masks)
 
@@ -199,16 +216,18 @@ class PPO:
         self.buffer.clear()
 
     def _update_mlp_opt(self, states, actions, logprobs, returns, advantages, masks):
+        device = next(self.policy.parameters()).device
+        
         # Flatten all slots
-        b_states = torch.cat(states)
-        b_actions = torch.cat(actions)
-        b_logprobs = torch.cat(logprobs)
-        b_returns = torch.cat(returns)
-        b_advantages = torch.cat(advantages)
+        b_states = torch.cat(states).to(device)
+        b_actions = torch.cat(actions).to(device)
+        b_logprobs = torch.cat(logprobs).to(device)
+        b_returns = torch.cat(returns).to(device)
+        b_advantages = torch.cat(advantages).to(device)
         
         b_masks = None
         if masks:
-            b_masks = torch.cat(masks)
+            b_masks = torch.cat(masks).to(device)
 
         # Normalize advantages
         if b_advantages.numel() > 1:
@@ -252,17 +271,27 @@ class PPO:
             loss.mean().backward()
             self.optimizer.step()
 
-    def _update_recurrent_opt(self, states, actions, logprobs, returns, advantages, masks):
+    def _update_recurrent_opt(self, states, actions, logprobs, returns, advantages, masks, initial_hiddens=None):
+        device = next(self.policy.parameters()).device
+        
         # states is list of (Seq, Dim) tensors
         # Iterate over trajectories
         for i in range(len(states)):
-            seq_states = states[i] # (Seq, Dim)
-            seq_actions = actions[i]
-            seq_logprobs = logprobs[i]
-            seq_returns = returns[i]
-            seq_advantages = advantages[i]
-            seq_masks = masks[i] if masks else None
+            seq_states = states[i].to(device) # (Seq, Dim)
+            seq_actions = actions[i].to(device)
+            seq_logprobs = logprobs[i].to(device)
+            seq_returns = returns[i].to(device)
+            seq_advantages = advantages[i].to(device)
+            seq_masks = masks[i].to(device) if masks else None
             
+            # Get initial hidden state for this slot
+            start_hidden = initial_hiddens[i] if initial_hiddens else None
+            if start_hidden is not None:
+                if isinstance(start_hidden, tuple):
+                    start_hidden = (start_hidden[0].to(device), start_hidden[1].to(device))
+                else:
+                    start_hidden = start_hidden.to(device)
+
             if seq_advantages.numel() > 1:
                  seq_advantages = (seq_advantages - seq_advantages.mean()) / (seq_advantages.std() + 1e-7)
 
@@ -270,7 +299,8 @@ class PPO:
                 # Forward (Batch=1, Seq, Dim)
                 states_input = seq_states.unsqueeze(0)
                 
-                logits_tuple, state_values, _ = self.policy(states_input, None)
+                # Pass start_hidden (which is detached snapshot)
+                logits_tuple, state_values, _ = self.policy(states_input, start_hidden)
                 target_logits, role_logits = logits_tuple
                 
                 target_logits = target_logits.squeeze(0) 
