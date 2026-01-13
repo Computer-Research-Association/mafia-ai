@@ -68,6 +68,13 @@ class AgentConfigWidget(QGroupBox):
 
         rl_layout.addLayout(model_load_layout)
 
+        # 초기화 버튼
+        self.btn_clear_model = QPushButton("❌")
+        self.btn_clear_model.setFixedWidth(30)
+        self.btn_clear_model.setToolTip("모델 선택 해제")
+        self.btn_clear_model.clicked.connect(self._clear_model_file)
+        model_load_layout.addWidget(self.btn_clear_model)
+
         # [알고리즘 선택]
         rl_layout.addWidget(QLabel("Algorithm:"))
         self.algo_combo = QComboBox()
@@ -105,6 +112,9 @@ class AgentConfigWidget(QGroupBox):
         )
         if file_path:
             self.load_model_path_input.setText(file_path)
+
+    def _clear_model_file(self):
+        self.load_model_path_input.clear()
 
     def _on_type_changed(self, text):
         self._toggle_rl_area(text)
