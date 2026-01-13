@@ -169,7 +169,7 @@ class MafiaGame:
             self.history.append(event)
 
         # 토론 종료 조건 확인
-        if pass_count == alive_count * 0.5:
+        if pass_count >= alive_count * 0.5:
             return True
 
         self.discussion_round += 1
