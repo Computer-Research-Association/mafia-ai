@@ -75,46 +75,68 @@ class AgentConfigWidget(QGroupBox):
         self.btn_clear_model.clicked.connect(self._clear_model_file)
         model_load_layout.addWidget(self.btn_clear_model)
 
-        # [알고리즘 선택]
-        rl_layout.addWidget(QLabel("Algorithm:"))
+        # 모델 선택시 숨겨지는 컨테이너
+        self.param_container = QWidget()
+        self.param_layout = QVBoxLayout(self.param_container)
+        self.param_layout.setContentsMargins(0, 0, 0, 0)  # 여백 정리
+
+        # [알고리즘]
+        self.param_layout.addWidget(QLabel("Algorithm:"))
         self.algo_combo = QComboBox()
         self.algo_combo.addItems(["PPO", "REINFORCE"])
-        rl_layout.addWidget(self.algo_combo)
+        self.param_layout.addWidget(self.algo_combo)
 
-        # [백본 선택]
-        rl_layout.addWidget(QLabel("Backbone:"))
+        # [백본]
+        self.param_layout.addWidget(QLabel("Backbone:"))
         self.backbone_combo = QComboBox()
         self.backbone_combo.addItems(["MLP", "LSTM", "GRU"])
-        rl_layout.addWidget(self.backbone_combo)
+        self.param_layout.addWidget(self.backbone_combo)
 
-        # [RNN 레이어 수]
-        rl_layout.addWidget(QLabel("RNN Layers:"))
+        # [레이어]
+        self.param_layout.addWidget(QLabel("RNN Layers:"))
         self.num_layers_spin = QSpinBox()
         self.num_layers_spin.setRange(1, 4)
         self.num_layers_spin.setValue(2)
-        rl_layout.addWidget(self.num_layers_spin)
+        self.param_layout.addWidget(self.num_layers_spin)
 
+        # 파라미터 컨테이너를 RL 영역에 추가
+        rl_layout.addWidget(self.param_container)
+
+        # [중요 해결] rl_config_area를 메인 레이아웃에 추가해야 새 창이 안 뜹니다!
         self.layout.addWidget(self.rl_config_area)
-
-        # 초기 상태 설정: 타입에 따라 RL 영역 표시 여부 결정
-        self.type_combo.currentTextChanged.connect(self._on_type_changed)
-        self._toggle_rl_area(self.type_combo.currentText())
 
         self.layout.addStretch()
 
+        # 초기 상태 설정
+        self.type_combo.currentTextChanged.connect(self._on_type_changed)
+        self._toggle_rl_area(self.type_combo.currentText())
+
     def _select_model_file(self):
-        """모델 파일(.pt) 선택 다이얼로그 열기"""
+        """모델 파일(.pt) 선택 시 파라미터 숨김 처리"""
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             "학습된 모델 파일 선택",
-            "./models",  # 기본 시작 경로
+            "./models",
             "Model Files (*.pt);;All Files (*)",
         )
         if file_path:
             self.load_model_path_input.setText(file_path)
+            # [핵심 기능] 파일이 선택되면 파라미터 설정창 숨기기
+            self.param_container.setVisible(False)
+
+    def _clear_model_file(self):
+        """모델 선택 해제 시 파라미터 다시 보이기"""
+        self.load_model_path_input.clear()
+        # [핵심 기능] 파일이 해제되면 파라미터 설정창 보이기
+        self.param_container.setVisible(True)
+
+    def _on_type_changed(self, text):
+        self._toggle_rl_area(text)
+        self.typeChanged.emit()
 
     def _clear_model_file(self):
         self.load_model_path_input.clear()
+        self.param_container.setVisible(True)
 
     def _on_type_changed(self, text):
         self._toggle_rl_area(text)
