@@ -8,6 +8,7 @@ class RolloutBuffer:
         self.rewards = []
         self.is_terminals = []
         self.hidden_states = []
+        self.masks = []
     
     def clear(self):
         del self.actions[:]
@@ -16,6 +17,7 @@ class RolloutBuffer:
         del self.rewards[:]
         del self.is_terminals[:]
         del self.hidden_states[:]
+        del self.masks[:]
 
     def get_episodes(self):
         """
@@ -36,6 +38,7 @@ class RolloutBuffer:
                     "logprobs": self.logprobs[start_idx : i+1],
                     "rewards": self.rewards[start_idx : i+1],
                     "is_terminals": self.is_terminals[start_idx : i+1],
+                    "masks": self.masks[start_idx : i+1] if self.masks else []
                 }
                 episodes.append(episode_data)
                 start_idx = i + 1
@@ -48,6 +51,7 @@ class RolloutBuffer:
                 "logprobs": self.logprobs[start_idx:],
                 "rewards": self.rewards[start_idx:],
                 "is_terminals": self.is_terminals[start_idx:],
+                "masks": self.masks[start_idx:] if self.masks else []
             }
              episodes.append(episode_data)
 
