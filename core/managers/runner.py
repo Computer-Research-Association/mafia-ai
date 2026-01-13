@@ -3,6 +3,7 @@ import os
 from typing import Dict, Any, Optional
 import threading
 import torch
+import asyncio
 from tqdm import tqdm
 
 from config import Role, config
@@ -42,19 +43,17 @@ def train(
     # === IL Dataset Setup ===
     expert_loader = None
     log_dir_path = Path(config.paths.LOG_DIR)
-    
+
     try:
         expert_files = list(log_dir_path.rglob("train_set.jsonl"))
         if expert_files:
             expert_file = max(expert_files, key=os.path.getmtime)
             print(f"[IL] Found expert data: {expert_file}")
-            
+
             dataset = ExpertDataset(str(expert_file))
             if len(dataset) > 0:
                 expert_loader = DataLoader(
-                    dataset, 
-                    batch_size=config.train.BATCH_SIZE, 
-                    shuffle=True
+                    dataset, batch_size=config.train.BATCH_SIZE, shuffle=True
                 )
                 print(f"[IL] DataLoader ready with {len(dataset)} samples.")
         else:
@@ -322,96 +321,161 @@ def test(
     # tqdm으로 전체 에피소드 루프
     pbar = tqdm(total=num_episodes, desc="Collecting Data", unit="ep")
 
-    while completed_episodes < num_episodes:
-        if stop_event and stop_event.is_set():
-            break
+    # 비동기 이벤트 루프 생성
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
 
-        # --- [1. 행동 결정] ---
-        actions = {}
-        for agent_id_str in env.agents:
-            p_id = int(agent_id_str.split("_")[1])
-            full_obs = obs[agent_id_str]
-            obs_vec = full_obs["observation"]
-            agent = all_agents[p_id]
+    try:
+        while completed_episodes < num_episodes:
+            if stop_event and stop_event.is_set():
+                break
 
-            action_obj = None
-            action_vector = [0, 0]
+            # 비동기 액션 수집 (기존 for loop 대체)
+            actions = loop.run_until_complete(
+                _collect_actions_async(
+                    env, all_agents, obs, data_manager, completed_episodes
+                )
+            )
 
-            try:
-                # RL Agent
-                if hasattr(agent, "select_action_vector"):
-                    action_vector = agent.select_action_vector(full_obs)
-                    actions[p_id] = action_vector
+            # 환경 진행 (기존과 동일)
+            env_actions = {f"player_{pid}": act for pid, act in actions.items()}
+            next_obs, rewards, terminations, truncations, infos = env.step(env_actions)
+            done = not env.agents
 
-                # LLM / Rule / Heuristic
-                elif hasattr(agent, "get_action"):
-                    game_status = env.get_game_status(p_id)
-                    action_obj = agent.get_action(game_status)
-                    action_vector = action_obj.to_multi_discrete()
-                    actions[p_id] = action_obj
+            process_logs(infos)
+            obs = next_obs
 
-                # 데이터 수집 (Runner 주도)
+            # 종료 체크 (기존과 동일)
+            if done:
+                completed_episodes += 1
+                winner = env.game.winner
+                if winner:
+                    win_counts[winner] += 1
+
                 if data_manager:
-                    current_ep_id = completed_episodes + 1
-                    action_mask = full_obs.get("action_mask")
-                    data_manager.record_turn(
-                        current_ep_id,
-                        p_id,
-                        obs_vec,
-                        action_vector,
-                        action_mask=action_mask,
+                    data_manager.flush_episode(
+                        completed_episodes, winner_role=winner, players=env.game.players
                     )
 
-            except Exception as e:
-                # 에러 발생 시 건너뜀 (데이터 오염 방지)
-                pass
+                if logger:
+                    is_win = winner == Role.MAFIA
+                    logger.log_metrics(
+                        completed_episodes, total_reward=0, is_win=is_win
+                    )
+                    logger.set_episode(completed_episodes + 1)
 
-        # --- [2. 환경 진행] ---
-        env_actions = {f"player_{pid}": act for pid, act in actions.items()}
-        next_obs, rewards, terminations, truncations, infos = env.step(env_actions)
-        done = not env.agents
-
-        # --- [3. 로그 저장 (Runner 중앙 관리)] ---
-        process_logs(infos)  # Log events occurring during step
-
-        obs = next_obs
-
-        # --- [4. 종료 체크] ---
-        if done:
-            completed_episodes += 1
-
-            winner = env.game.winner
-            if winner:
-                win_counts[winner] += 1
-
-            # 데이터 파일 저장 (Flush)
-            if data_manager:
-                data_manager.flush_episode(
-                    completed_episodes, winner_role=winner, players=env.game.players
+                pbar.update(1)
+                win_rate = (
+                    (win_counts[Role.MAFIA] / completed_episodes) * 100
+                    if completed_episodes > 0
+                    else 0.0
                 )
+                pbar.set_postfix(mafia_win_rate=f"{win_rate:.1f}%")
 
-            # 로그 메트릭 기록
-            if logger:
-                is_win = winner == Role.MAFIA
-                logger.log_metrics(completed_episodes, total_reward=0, is_win=is_win)
-                # 다음 에피소드 번호 세팅 (중요: Day 0 로그가 섞이지 않게 함)
-                logger.set_episode(completed_episodes + 1)
+                if completed_episodes < num_episodes:
+                    obs, infos = env.reset()
+                    process_logs(infos)
 
-            pbar.update(1)
-            win_rate = (
-                (win_counts[Role.MAFIA] / completed_episodes) * 100
-                if completed_episodes > 0
-                else 0.0
-            )
-            pbar.set_postfix(mafia_win_rate=f"{win_rate:.1f}%")
-
-            # [중요] 목표를 아직 못 채웠을 때만 리셋 (불필요한 Day 0 로그 방지)
-            if completed_episodes < num_episodes:
-                obs, infos = env.reset()
-                process_logs(infos)  # Capture new episode's start logs
+    finally:
+        # 루프 정리 (추가된 부분)
+        loop.close()
 
     pbar.close()
     print(f"\n=== Test/Collection Finished ===")
     print(f"Results: {win_counts}")
     if data_manager:
         print(f"Expert Data Saved: {data_manager.save_path}")
+
+
+async def _collect_actions_async(env, all_agents, obs, data_manager, episode_id):
+    """
+    모든 에이전트의 액션을 병렬로 수집
+
+    핵심: asyncio.to_thread()로 동기 함수를 논블로킹 실행
+    - LLM Agent: get_action() → 스레드풀에서 실행 (병렬)
+    - RL Agent: select_action_vector() → 스레드풀에서 실행 (빠름)
+    - RBA Agent: get_action() → 스레드풀에서 실행 (빠름)
+
+    Args:
+        env: 게임 환경
+        all_agents: {player_id: agent} 딕셔너리
+        obs: 현재 observation
+        data_manager: ExpertDataManager 인스턴스
+        episode_id: 현재 에피소드 번호
+
+    Returns:
+        {player_id: action} 딕셔너리
+    """
+
+    async def get_single_action(agent_id_str):
+        """단일 에이전트의 액션 수집"""
+        p_id = int(agent_id_str.split("_")[1])
+        full_obs = obs[agent_id_str]
+        obs_vec = full_obs["observation"]
+        agent = all_agents[p_id]
+
+        action_obj = None
+        action_vector = [0, 0]
+
+        try:
+            # Case 1: LLM/RBA Agent
+            if hasattr(agent, "get_action"):
+                game_status = env.get_game_status(p_id)
+                action_obj = await asyncio.to_thread(agent.get_action, game_status)
+                action_vector = action_obj.to_multi_discrete()
+
+            # Case 2: RL Agent
+            elif hasattr(agent, "select_action_vector"):
+                action_vector = await asyncio.to_thread(
+                    agent.select_action_vector, full_obs
+                )
+
+            else:
+                # Case 3: 알 수 없는 타입 (Fallback)
+                print(f"[Warning] Player {p_id}: Unknown agent type, using PASS action")
+                from core.engine.state import GameAction
+
+                action_obj = GameAction(target_id=-1, claim_role=None)
+                action_vector = [0, 0]
+
+            # 데이터 수집
+            if data_manager:
+                action_mask = full_obs.get("action_mask")
+                data_manager.record_turn(
+                    episode_id + 1,
+                    p_id,
+                    obs_vec,
+                    action_vector,
+                    action_mask=action_mask,
+                )
+
+            return (p_id, action_obj if action_obj else action_vector)
+
+        except Exception as e:
+            print(f"[Error] Player {p_id} action collection failed: {e}")
+            import traceback
+
+            traceback.print_exc()
+
+            # 에러 발생 시 PASS 액션 반환
+            from core.engine.state import GameAction
+
+            return (p_id, GameAction(target_id=-1, claim_role=None))
+
+    # 모든 에이전트를 병렬로 실행
+    tasks = [get_single_action(agent_id) for agent_id in env.agents]
+
+    # 모든 태스크가 완료될 때까지 대기
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    # 결과 조합
+    actions = {}
+    for result in results:
+        if isinstance(result, Exception):
+            print(f"[Error] Action gathering exception: {result}")
+            continue
+
+        pid, action = result
+        actions[pid] = action
+
+    return actions
