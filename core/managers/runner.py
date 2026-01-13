@@ -338,17 +338,17 @@ def test(
             action_vector = [0, 0]
 
             try:
+                # RL Agent
+                if hasattr(agent, "select_action_vector"):
+                    action_vector = agent.select_action_vector(full_obs)
+                    actions[p_id] = action_vector
+
                 # LLM / Rule / Heuristic
-                if hasattr(agent, "get_action"):
+                elif hasattr(agent, "get_action"):
                     game_status = env.get_game_status(p_id)
                     action_obj = agent.get_action(game_status)
                     action_vector = action_obj.to_multi_discrete()
                     actions[p_id] = action_obj
-
-                # RL Agent
-                elif hasattr(agent, "select_action_vector"):
-                    action_vector = agent.select_action_vector(full_obs)
-                    actions[p_id] = action_vector
 
                 # 데이터 수집 (Runner 주도)
                 if data_manager:
