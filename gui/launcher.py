@@ -83,7 +83,33 @@ class Launcher(QWidget):
         self.ep_spin = QSpinBox()
         self.ep_spin.setRange(1, 10000)
         self.ep_spin.setValue(1000)
+        self.ep_spin.setSingleStep(100)
         ep_layout.addWidget(self.ep_spin)
+        ep_group.setLayout(ep_layout)
+        layout.addWidget(ep_group)
+
+        # 체크 박스 선택 단위 설정
+        step_layout = QHBoxLayout()
+        step_label = QLabel("증감 단위: ")
+        step_layout.addWidget(step_label)
+        self.step_btn_group = QButtonGroup(self)
+
+        steps = [1, 10, 100, 1000, 10000]
+        for val in steps:
+            rb = QRadioButton(f"{val}")
+            self.step_btn_group.addButton(rb)
+            step_layout.addWidget(rb)
+
+            rb.clicked.connect(
+                lambda checked, v=val: (
+                    self.ep_spin.setSingleStep(v),
+                    self.ep_spin.setValue(v),
+                )
+            )
+            if val == 100:
+                rb.setChecked(True)
+
+        ep_layout.addLayout(step_layout)
         ep_group.setLayout(ep_layout)
         layout.addWidget(ep_group)
 
