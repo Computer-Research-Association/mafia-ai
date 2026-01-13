@@ -48,12 +48,32 @@ class ExperimentManager:
             experiment_name=experiment_name, log_dir=log_dir, write_mode=True
         )
 
+    # [추가] 환경 내부의 에이전트(Body)에게 고정 역할을 붙여주는 헬퍼 함수
+    def _inject_fixed_roles(self, env):
+        if not self.player_configs:
+            return
+
+        for i, p_config in enumerate(self.player_configs):
+            # 1. 설정에서 역할 확인
+            role_str = p_config.get("role", "random").upper()
+
+            # 2. 고정 역할이라면 환경 내부 에이전트에게 주입
+            if role_str != "RANDOM" and role_str in Role.__members__:
+                role_enum = Role[role_str]
+
+                # env.game.players는 게임 엔진 안의 'EnvAgent'들입니다.
+                if i < len(env.game.players):
+                    env.game.players[i].fixed_role = role_enum
+
     def build_env(self) -> MafiaEnv:
         """
         메인 프로세스용 환경
         [수정] Runner가 로그를 중앙 관리하므로, Env 내부에는 logger를 주지 않습니다.
         """
-        return MafiaEnv()
+        env = MafiaEnv()
+        self._inject_fixed_roles(env)
+
+        return env
 
     def build_vec_env(self, num_envs: int = 8, num_cpus: int = 4):
         """
@@ -64,6 +84,8 @@ class ExperimentManager:
         # 1. 단일 환경 템플릿 생성
         # [수정] 리스트 대신 단일 인스턴스를 사용해 에러 해결
         env = MafiaEnv()
+
+        self._inject_fixed_roles(env)
 
         # 2. PettingZoo -> Gymnasium 변환
         env = ss.pettingzoo_env_to_vec_env_v1(env)
@@ -91,15 +113,26 @@ class ExperimentManager:
             return {}
 
         for i, p_config in enumerate(self.player_configs):
-            if p_config["type"] == "rl":
-                role_str = p_config.get("role", "citizen").upper()
-                role = Role[role_str] if role_str in Role.__members__ else Role.CITIZEN
+            # 1. 설정에서 역할 문자열 가져오기
+            role_str = p_config.get("role", "random").upper()
 
-                print(role)
+            # 2. 고정 역할 Enum 변환 (Random이면 None)
+            fixed_role_enum = None
+            if role_str != "RANDOM" and role_str in Role.__members__:
+                fixed_role_enum = Role[role_str]
+
+            # 3. [핵심 수정] 초기 역할(init_role)을 분기문 밖에서 미리 정의
+            if fixed_role_enum is not None:
+                init_role = fixed_role_enum
+            else:
+                init_role = Role.CITIZEN
+
+            if p_config["type"] == "rl":
+                init_role = fixed_role_enum if fixed_role_enum else Role.CITIZEN
 
                 agent = RLAgent(
                     player_id=i,
-                    role=role,
+                    role=init_role,
                     state_dim=state_dim,
                     action_dims=config.game.ACTION_DIMS,
                     algorithm=p_config["algo"],
@@ -125,18 +158,21 @@ class ExperimentManager:
                             f"[Experiment] Agent {i}: 경로에 파일이 없습니다 ({load_path})"
                         )
 
+                agent.fixed_role = fixed_role_enum
                 agents[i] = agent
 
             elif p_config["type"] == "llm":
                 # ... (LLM 에이전트 생성 코드는 그대로 둠)
                 agent = LLMAgent(player_id=i, logger=self.logger)
+                agent.fixed_role = fixed_role_enum
                 agents[i] = agent
 
             elif p_config["type"] == "rba":
                 role_str = p_config.get("role", "citizen").upper()
                 role = Role[role_str] if role_str in Role.__members__ else Role.CITIZEN
 
-                agent = RuleBaseAgent(player_id=i, role=role)
+                agent = RuleBaseAgent(player_id=i, role=init_role)
+                agent.fixed_role = fixed_role_enum
                 agents[i] = agent
             else:
                 pass

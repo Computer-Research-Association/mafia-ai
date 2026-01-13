@@ -48,9 +48,7 @@ class RuleBaseAgent(BaseAgent):
 
         # 1. 시민 & 의사: 특별한 행동 없음
         if self.role == Role.CITIZEN or self.role == Role.DOCTOR:
-            # 기존 로직: 그냥 지목만 함
-            if targets and random.random() < 0.8:
-                return GameAction(target_id=random.choice(targets))
+            pass
 
         # 2. 마피아
         if self.role == Role.MAFIA:
@@ -68,14 +66,6 @@ class RuleBaseAgent(BaseAgent):
                     and event.actor_id != self.id
                 ):
                     return GameAction(target_id=event.actor_id, claim_role=Role.MAFIA)
-
-            # 시민 모방
-            if targets and random.random() < 0.8:
-                return GameAction(target_id=random.choice(targets))
-
-            # 평소에는 시민과 똑같이 행동
-            if targets and random.random() < 0.8:
-                return GameAction(target_id=random.choice(targets))
 
         # 3. 경찰
         if self.role == Role.POLICE:
@@ -96,9 +86,6 @@ class RuleBaseAgent(BaseAgent):
                             target_id=event.target_id, claim_role=Role.POLICE
                         )
                     break  # 내 최근 조사가 마피아가 아니면 중단
-
-            if targets and random.random() < 0.8:
-                return GameAction(target_id=random.choice(targets))
 
         return GameAction(target_id=-1)
 
