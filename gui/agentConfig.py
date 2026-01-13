@@ -80,13 +80,6 @@ class AgentConfigWidget(QGroupBox):
         self.backbone_combo.addItems(["MLP", "LSTM", "GRU"])
         rl_layout.addWidget(self.backbone_combo)
 
-        # [은닉층 차원]
-        rl_layout.addWidget(QLabel("Hidden Dim:"))
-        self.hidden_dim_spin = QSpinBox()
-        self.hidden_dim_spin.setRange(32, 512)
-        self.hidden_dim_spin.setValue(128)
-        rl_layout.addWidget(self.hidden_dim_spin)
-
         # [RNN 레이어 수]
         rl_layout.addWidget(QLabel("RNN Layers:"))
         self.num_layers_spin = QSpinBox()
@@ -131,7 +124,6 @@ class AgentConfigWidget(QGroupBox):
         if config["type"] == "rl":
             config["algo"] = self.algo_combo.currentText().lower()
             config["backbone"] = self.backbone_combo.currentText().lower()
-            config["hidden_dim"] = self.hidden_dim_spin.value()
             config["num_layers"] = self.num_layers_spin.value()
 
             # 모델 로드 경로 포함
@@ -145,8 +137,7 @@ class AgentConfigWidget(QGroupBox):
         agent_type="LLM",
         role="Random",  # [추가] Role 설정 인자
         algo="PPO",
-        backbone="MLP", # Change default to MLP
-        hidden_dim=128,
+        backbone="MLP",  # Change default to MLP
         num_layers=2,
         load_model_path=None,  # [추가] 모델 경로 인자
     ):
@@ -163,7 +154,6 @@ class AgentConfigWidget(QGroupBox):
         if agent_type.upper() == "RL":
             self.algo_combo.setCurrentText(algo.upper())
             self.backbone_combo.setCurrentText(backbone.upper())
-            self.hidden_dim_spin.setValue(hidden_dim)
             self.num_layers_spin.setValue(num_layers)
 
             if load_model_path:
