@@ -112,7 +112,7 @@ class PPO:
         return action.tolist(), new_hidden
 
     def _compute_gae(self, rewards, values, is_terminals):
-        gae_lambda = 0.95
+        gae_lambda = getattr(self.config.train, "GAE_LAMBDA", 0.95)
         advantages = []
         gae = 0
         
@@ -268,7 +268,7 @@ class PPO:
                     mask_target = masks[:, :9]
                     mask_role = masks[:, 9:]
                     target_logits[mask_target == 0] = -1e9
-                    role_logits[role_mask == 0] = -1e9
+                    role_logits[mask_role == 0] = -1e9
 
                 dist_target = Categorical(logits=target_logits)
                 dist_role = Categorical(logits=role_logits)

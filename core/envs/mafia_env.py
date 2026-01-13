@@ -30,7 +30,7 @@ class EnvAgent(BaseAgent):
 class MafiaEnv(ParallelEnv):
     metadata = {"render_modes": ["human"], "name": "mafia_v1"}
 
-    def __init__(self, render_mode=None, player_configs: List[Dict] = None):
+    def __init__(self, render_mode=None, encoder_map: Dict[int, BaseEncoder] = None):
         self.possible_agents = [f"player_{i}" for i in range(config.game.PLAYER_COUNT)]
         self.agents = self.possible_agents[:]
         self.render_mode = render_mode
@@ -44,20 +44,8 @@ class MafiaEnv(ParallelEnv):
         self.internal_agents: Dict[int, Any] = {}
 
         # === [Encoder Setup] ===
-        self.encoder_map: Dict[int, BaseEncoder] = {}
-        if player_configs:
-            for i, p_config in enumerate(player_configs):
-                if p_config.get('type') == 'rl':
-                    bb = p_config.get('backbone', 'mlp').lower()
-                    if bb in ['rnn', 'lstm', 'gru']:
-                        self.encoder_map[i] = POMDPEncoder()
-                    else:
-                        self.encoder_map[i] = MDPEncoder()
-                else:
-                    self.encoder_map[i] = MDPEncoder()
-        else:
-            for i in range(config.game.PLAYER_COUNT):
-                self.encoder_map[i] = MDPEncoder()
+        # 직접 생성하지 않고 외부에서 주입받은 encoder_map 사용
+        self.encoder_map = encoder_map or {i: MDPEncoder() for i in range(config.game.PLAYER_COUNT)}
 
         # === [Multi-Discrete Action Space] ===
         # 형태: [Target, Role]
