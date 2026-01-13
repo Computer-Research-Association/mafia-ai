@@ -63,7 +63,7 @@ class RLAgent(BaseAgent):
         if self.algorithm == "ppo":
             self.learner = PPO(model=self.policy, config=config, is_recurrent=is_recurrent)
         elif self.algorithm == "reinforce":
-            self.learner = REINFORCE(policy=self.policy) # REINFORCE signature might need check, but assuming OK for now
+            self.learner = REINFORCE(model=self.policy, config=config, is_recurrent=is_recurrent)
         else:
             raise ValueError(f"Unknown algorithm: {algorithm}")
 

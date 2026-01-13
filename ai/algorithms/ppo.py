@@ -207,13 +207,15 @@ class PPO:
         if self.is_recurrent:
             # Retrieve initial hidden states for each slot
             initial_hiddens = self.buffer.initial_hidden_states
-            self._update_recurrent_opt(flat_states, flat_actions, flat_logprobs, flat_returns, flat_advantages, flat_masks, initial_hiddens)
+            metrics = self._update_recurrent_opt(flat_states, flat_actions, flat_logprobs, flat_returns, flat_advantages, flat_masks, initial_hiddens)
         else:
-            self._update_mlp_opt(flat_states, flat_actions, flat_logprobs, flat_returns, flat_advantages, flat_masks)
+            metrics = self._update_mlp_opt(flat_states, flat_actions, flat_logprobs, flat_returns, flat_advantages, flat_masks)
 
         # Updates done, sync policy_old
         self.policy_old.load_state_dict(self.policy.state_dict())
         self.buffer.clear()
+        
+        return metrics
 
     def _update_mlp_opt(self, states, actions, logprobs, returns, advantages, masks):
         device = next(self.policy.parameters()).device
@@ -232,6 +234,10 @@ class PPO:
         # Normalize advantages
         if b_advantages.numel() > 1:
              b_advantages = (b_advantages - b_advantages.mean()) / (b_advantages.std() + 1e-7)
+
+        total_loss = 0
+        total_entropy = 0
+        steps = 0
 
         # Optimize
         for _ in range(self.k_epochs):
@@ -270,12 +276,47 @@ class PPO:
             self.optimizer.zero_grad()
             loss.mean().backward()
             self.optimizer.step()
+            
+            total_loss += loss.mean().item()
+            total_entropy += dist_entropy.mean().item()
+            steps += 1
+            
+        return {
+            "loss": total_loss / steps if steps > 0 else 0,
+            "entropy": total_entropy / steps if steps > 0 else 0
+        }
 
     def _update_recurrent_opt(self, states, actions, logprobs, returns, advantages, masks, initial_hiddens=None):
         device = next(self.policy.parameters()).device
         
         # states is list of (Seq, Dim) tensors
         # Iterate over trajectories
+        for i in range(len(states)):
+            seq_states = states[i].to(device) # (Seq, Dim)
+            seq_actions = actions[i].to(device)
+            seq_logprobs = logprobs[i].to(device)
+            seq_returns = returns[i].to(device)
+            seq_advantages = advantages[i].to(device)
+            seq_masks = masks[i].to(device) if masks else None
+            
+            # Get initial hidden state for this slot
+            start_hidden = initial_hiddens[i] if initial_hiddens else None
+            if start_hidden is not None:
+                if isinstance(start_hidden, tuple):
+                    start_hidden = (start_hidden[0].to(device), start_hidden[1].to(device))
+                else:
+                    start_hidden = start_hidden.to(device)
+
+            if seq_advantages.numel() > 1:
+                 seq_advantages = (seq_advantages - seq_advantages.mean()) / (seq_advantages.std() + 1e-7)
+
+        total_loss = 0
+        total_entropy = 0
+        steps = 0
+
+        # Iterate over trajectories FIRST, then epochs? Or Epochs then Trajectories?
+        # Original code: Iterate trajectories, then for each trajectory do K epochs.
+        
         for i in range(len(states)):
             seq_states = states[i].to(device) # (Seq, Dim)
             seq_actions = actions[i].to(device)
@@ -332,3 +373,12 @@ class PPO:
                 self.optimizer.zero_grad()
                 loss.mean().backward()
                 self.optimizer.step()
+                
+                total_loss += loss.mean().item()
+                total_entropy += dist_entropy.mean().item()
+                steps += 1
+
+        return {
+            "loss": total_loss / steps if steps > 0 else 0,
+            "entropy": total_entropy / steps if steps > 0 else 0
+        }

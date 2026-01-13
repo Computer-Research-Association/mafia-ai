@@ -81,6 +81,10 @@ class REINFORCE:
     def update(self):
         episodes = self.buffer.get_episodes()
         
+        total_loss = 0
+        total_entropy = 0
+        steps = 0
+        
         for ep in episodes:
             # Returns Calculation
             R = 0
@@ -134,5 +138,14 @@ class REINFORCE:
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
             self.optimizer.step()
+            
+            total_loss += loss.item()
+            total_entropy += (dist_target.entropy() + dist_role.entropy()).mean().item()
+            steps += 1
         
         self.buffer.clear()
+        
+        return {
+            "loss": total_loss / steps if steps > 0 else 0,
+            "entropy": total_entropy / steps if steps > 0 else 0
+        }
