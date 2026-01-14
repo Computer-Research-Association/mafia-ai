@@ -92,13 +92,6 @@ class AgentConfigWidget(QGroupBox):
         self.backbone_combo.addItems(["MLP", "LSTM", "GRU"])
         self.param_layout.addWidget(self.backbone_combo)
 
-        # [레이어]
-        self.param_layout.addWidget(QLabel("RNN Layers:"))
-        self.num_layers_spin = QSpinBox()
-        self.num_layers_spin.setRange(1, 4)
-        self.num_layers_spin.setValue(2)
-        self.param_layout.addWidget(self.num_layers_spin)
-
         # 파라미터 컨테이너를 RL 영역에 추가
         rl_layout.addWidget(self.param_container)
 
@@ -149,18 +142,21 @@ class AgentConfigWidget(QGroupBox):
     def get_config(self):
         """현재 설정된 에이전트 정보를 딕셔너리로 반환"""
         config = {"type": self.type_combo.currentText().lower()}
-
-        # [수정] 역할(Role) 정보 포함 (RL/LLM 공통)
         config["role"] = self.role_combo.currentText().lower()
 
         if config["type"] == "rl":
-            config["algo"] = self.algo_combo.currentText().lower()
-            config["backbone"] = self.backbone_combo.currentText().lower()
-            config["num_layers"] = self.num_layers_spin.value()
-
-            # 모델 로드 경로 포함
+            # 모델 경로 가져오기
             path_text = self.load_model_path_input.text().strip()
             config["load_model_path"] = path_text if path_text else None
+
+            if config["load_model_path"]:
+                # 모델을 로드하는 경우:
+                config["algo"] = None
+                config["backbone"] = None
+            else:
+                # 모델 파일이 없는 경우
+                config["algo"] = self.algo_combo.currentText().lower()
+                config["backbone"] = self.backbone_combo.currentText().lower()
 
         return config
 
@@ -170,7 +166,6 @@ class AgentConfigWidget(QGroupBox):
         role="Random",  # [추가] Role 설정 인자
         algo="PPO",
         backbone="MLP",  # Change default to MLP
-        num_layers=2,
         load_model_path=None,  # [추가] 모델 경로 인자
     ):
         """외부에서 설정을 일괄 적용할 때 사용"""
@@ -186,7 +181,6 @@ class AgentConfigWidget(QGroupBox):
         if agent_type.upper() == "RL":
             self.algo_combo.setCurrentText(algo.upper())
             self.backbone_combo.setCurrentText(backbone.upper())
-            self.num_layers_spin.setValue(num_layers)
 
             if load_model_path:
                 self.load_model_path_input.setText(load_model_path)

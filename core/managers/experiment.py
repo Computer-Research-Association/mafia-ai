@@ -2,6 +2,7 @@ import gymnasium as gym
 import supersuit as ss
 import os
 import multiprocessing
+import torch
 
 from typing import Dict, Any, List
 from pathlib import Path
@@ -130,18 +131,39 @@ class ExperimentManager:
             if p_config["type"] == "rl":
                 init_role = fixed_role_enum if fixed_role_enum else Role.CITIZEN
 
+                # 기본값은 GUI
+                algo = p_config["algo"]
+                backbone = p_config["backbone"]
+                hidden_dim = p_config.get("hidden_dim", 128)
+                num_layers = p_config.get("num_layers", 2)
+
+                load_path = p_config.get("load_model_path")
+
+                if load_path and os.path.exists(load_path):
+                    checkpoint = torch.load(load_path, map_location="cpu")
+                    if "backbone" in checkpoint:
+                        backbone = checkpoint["backbone"]
+                        print(f"Agent {i}: backbone 설정 로드됨 ({backbone})")
+                    if "hidden_dim" in checkpoint:
+                        hidden_dim = checkpoint["hidden_dim"]
+                        print(f"Agent {i}: hidden 설정 로드됨 ({hidden_dim})")
+                    if "num_layers" in checkpoint:
+                        num_layers = checkpoint["num_layers"]
+                        print(f"Agent {i}: num_layers 설정 로드됨 ({num_layers})")
+                    # 알고리듬 정보 필요시 주석 해제
+                    # if "algorithm" in checkpoint:
+                    #     algo = checkpoint["algorithm"]
+
                 agent = RLAgent(
                     player_id=i,
                     role=init_role,
                     state_dim=state_dim,
                     action_dims=config.game.ACTION_DIMS,
-                    algorithm=p_config["algo"],
-                    backbone=p_config["backbone"],
-                    hidden_dim=p_config.get("hidden_dim", 128),
-                    num_layers=p_config.get("num_layers", 2),
+                    algorithm=algo,
+                    backbone=backbone,
+                    hidden_dim=hidden_dim,
+                    num_layers=num_layers,
                 )
-
-                load_path = p_config.get("load_model_path")
 
                 # 모델 경로
                 if load_path:
