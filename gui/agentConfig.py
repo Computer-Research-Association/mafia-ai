@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
     QFileDialog,
 )
 from PyQt6.QtCore import pyqtSignal
+from .tabs.safeComboBox import SafeComboBox
 
 
 class AgentConfigWidget(QGroupBox):
@@ -29,7 +30,7 @@ class AgentConfigWidget(QGroupBox):
 
         # [Type 설정]
         top_layout.addWidget(QLabel("Type:"))
-        self.type_combo = QComboBox()
+        self.type_combo = SafeComboBox()
         self.type_combo.addItems(["RL", "LLM", "RBA"])
         self.type_combo.setSizePolicy(
             self.type_combo.sizePolicy().horizontalPolicy(),
@@ -39,7 +40,7 @@ class AgentConfigWidget(QGroupBox):
 
         # [Role 설정] - 공통 영역으로 이동됨
         top_layout.addWidget(QLabel("Role:"))
-        self.role_combo = QComboBox()
+        self.role_combo = SafeComboBox()
         # Random을 기본값으로 사용하기 위해 맨 앞에 추가
         self.role_combo.addItems(["Random", "Citizen", "Police", "Doctor", "Mafia"])
         top_layout.addWidget(self.role_combo, stretch=1)
@@ -82,13 +83,13 @@ class AgentConfigWidget(QGroupBox):
 
         # [알고리즘]
         self.param_layout.addWidget(QLabel("Algorithm:"))
-        self.algo_combo = QComboBox()
+        self.algo_combo = SafeComboBox()
         self.algo_combo.addItems(["PPO", "REINFORCE"])
         self.param_layout.addWidget(self.algo_combo)
 
         # [백본]
         self.param_layout.addWidget(QLabel("Backbone:"))
-        self.backbone_combo = QComboBox()
+        self.backbone_combo = SafeComboBox()
         self.backbone_combo.addItems(["MLP", "LSTM", "GRU"])
         self.param_layout.addWidget(self.backbone_combo)
 
