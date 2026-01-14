@@ -48,6 +48,23 @@ class ExperimentManager:
             experiment_name=experiment_name, log_dir=log_dir, write_mode=True
         )
 
+    # [추가] 환경 내부의 에이전트(Body)에게 고정 역할을 붙여주는 헬퍼 함수
+    def _inject_fixed_roles(self, env):
+        if not self.player_configs:
+            return
+
+        for i, p_config in enumerate(self.player_configs):
+            # 1. 설정에서 역할 확인
+            role_str = p_config.get("role", "random").upper()
+
+            # 2. 고정 역할이라면 환경 내부 에이전트에게 주입
+            if role_str != "RANDOM" and role_str in Role.__members__:
+                role_enum = Role[role_str]
+
+                # env.game.players는 게임 엔진 안의 'EnvAgent'들입니다.
+                if i < len(env.game.players):
+                    env.game.players[i].fixed_role = role_enum
+
     def build_env(self) -> MafiaEnv:
         """
         메인 프로세스용 환경
@@ -59,8 +76,10 @@ class ExperimentManager:
             for i, p_cfg in enumerate(self.player_configs):
                 bb = p_cfg.get("backbone", "mlp").lower()
                 encoder_map[i] = POMDPEncoder() if bb in ["lstm", "gru", "rnn"] else MDPEncoder()
+        env = MafiaEnv(encoder_map=encoder_map)
+        self._inject_fixed_roles(env)
         
-        return MafiaEnv(encoder_map=encoder_map)
+        return env
 
     def build_vec_env(self, num_envs: int = 8, num_cpus: int = 4):
         """
@@ -77,6 +96,8 @@ class ExperimentManager:
                 encoder_map[i] = POMDPEncoder() if bb in ["lstm", "gru", "rnn"] else MDPEncoder()
 
         env = MafiaEnv(encoder_map=encoder_map)
+
+        self._inject_fixed_roles(env)
 
         # 2. PettingZoo -> Gymnasium 변환
         env = ss.pettingzoo_env_to_vec_env_v1(env)

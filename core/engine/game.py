@@ -32,21 +32,48 @@ class MafiaGame:
         self._last_votes = []  # 투표 결과 초기화
         self.police_research = [0 for _ in range(7)]  # 경찰 조사 결과 초기화
 
-        # 에이전트 상태 초기화 (필요 시)
-        # 외부에서 주입된 에이전트를 그대로 사용
+        # 1. 사용할 전체 역할 풀 복사
+        available_roles = config.game.DEFAULT_ROLES.copy()
 
-        roles = config.game.DEFAULT_ROLES.copy()
-        random.shuffle(roles)
-        for p, r in zip(self.players, roles):
-            p.role = r
-            p.vote_count = 0  # 투표 수 초기화
+        # [핵심] 플레이어 그룹 분리
+        fixed_group = []
+        random_group = []
+
+        for p in self.players:
+            # fixed_role이 있는지 확인 (없으면 None)
+            f_role = getattr(p, "fixed_role", None)
+
+            if f_role is not None:
+                fixed_group.append(p)
+            else:
+                random_group.append(p)
+
+        # 2. [그룹 1] 고정 역할 할당
+        for p in fixed_group:
+            p.role = p.fixed_role
+            if p.role in available_roles:
+                available_roles.remove(p.role)
+
+        # 3. [그룹 2] 나머지 인원 랜덤 할당
+        # 남은 카드를 섞어서 순서대로 배분
+        random.shuffle(available_roles)
+
+        for p in random_group:
+            if available_roles:
+                p.role = available_roles.pop()
+            else:
+                # 만약 카드가 모자르면 시민
+                p.role = Role.CITIZEN
+
+        # 4. 상태 초기화 및 시스템 메시지 기록
+        for p in self.players:
+            p.vote_count = 0
             p.alive = True
-            # GameEvent로 기록 (JSONL 저장용)
 
             event = GameEvent(
                 day=0,
                 phase=Phase.GAME_START,
-                event_type=EventType.SYSTEM_MESSAGE,  # 역할 공개 이벤트로 활용
+                event_type=EventType.SYSTEM_MESSAGE,
                 actor_id=-1,
                 target_id=p.id,
                 value=p.role,
@@ -95,6 +122,7 @@ class MafiaGame:
             self._process_night(actions)
             self.phase = Phase.DAY_DISCUSSION
             self.day += 1
+            self.discussion_round = 0
 
         is_over, is_win = self.check_game_over()
         if is_over:
@@ -168,7 +196,7 @@ class MafiaGame:
             self.history.append(event)
 
         # 토론 종료 조건 확인
-        if pass_count >= alive_count * 0.5:
+        if pass_count >= alive_count:
             return True
 
         self.discussion_round += 1

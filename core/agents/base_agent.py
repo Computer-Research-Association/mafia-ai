@@ -12,6 +12,8 @@ class BaseAgent(ABC):
         self.role = role
         self.alive = True
 
+        self.fixed_role = None
+
         # 게임 히스토리 추적
         self.vote_history = [0] * config.game.PLAYER_COUNT
         self.char_name = self.__class__.__name__

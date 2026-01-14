@@ -185,6 +185,17 @@ class LLMAgent(BaseAgent):
             )
         self.role = status.my_role
 
+        #  1. 게임 시작 단계: 행동 불필요
+        if status.phase == Phase.GAME_START:
+            return GameAction(
+                action_type=ActionType.PASS, target_id=-1, claim_role=None
+            )
+        # 2. 시민의 밤: 시민은 밤에 할 행동이 없음 -> 즉시 PASS
+        if status.phase == Phase.NIGHT and self.role == Role.CITIZEN:
+            return GameAction(
+                action_type=ActionType.PASS, target_id=-1, claim_role=None
+            )
+
         phase_name = status.phase.name
         role_name = self.role.name
 

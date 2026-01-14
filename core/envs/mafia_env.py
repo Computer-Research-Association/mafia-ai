@@ -39,7 +39,7 @@ class MafiaEnv(ParallelEnv):
         # MafiaGame expects a list of BaseAgent instances
         self.game_agents = [EnvAgent(i) for i in range(config.game.PLAYER_COUNT)]
         self.game = MafiaGame(agents=self.game_agents)
-        
+
         # Internal agents for environment internalization (RBA/LLM)
         self.internal_agents: Dict[int, Any] = {}
 
@@ -108,7 +108,9 @@ class MafiaEnv(ParallelEnv):
         infos = {}
 
         self.last_history_idx = 0
-        new_events = [e.model_dump() for e in self.game.history[self.last_history_idx:]]
+        new_events = [
+            e.model_dump() for e in self.game.history[self.last_history_idx :]
+        ]
         self.last_history_idx = len(self.game.history)
 
         for agent in self.agents:
@@ -121,36 +123,35 @@ class MafiaEnv(ParallelEnv):
                 "log_events": new_events,
                 "role": self.game.players[pid].role,
             }
-        
+
         return observations, infos
 
     def step(self, actions):
         # 환경 내재화: 액션이 없는 에이전트(RBA/LLM)의 액션 생성
         # 현재 생존한 모든 플레이어에 대해 확인
         current_alive_ids = [p.id for p in self.game.players if p.alive]
-        
+
         for pid in current_alive_ids:
             agent_name = self._id_to_agent(pid)
-            
+
             # 외부에서 액션이 주어지지 않았거나, 무의미한 액션([0,0])인 경우 내부 로직 실행
             should_act = False
-            
+
             if pid in self.internal_agents:
                 if agent_name not in actions:
                     should_act = True
                 else:
-                    # runner.py가 제로 벡터([0,0])를 보내는 경우에도 내부 에이전트가 행동하도록 처리
                     act = np.array(actions[agent_name])
-                    if np.sum(act) == 0:
+                    if np.all(act == -1):
                         should_act = True
-            
+
             if should_act:
                 status = self.game.get_game_status(pid)
                 internal_agent = self.internal_agents[pid]
-                
+
                 # 에이전트 로직 수행 (Role은 Reset 시 이미 동기화됨)
                 game_action = internal_agent.get_action(status)
-                
+
                 # 결과를 Multi-Discrete 벡터로 변환하여 actions에 추가
                 actions[agent_name] = game_action.to_multi_discrete()
 
@@ -176,7 +177,9 @@ class MafiaEnv(ParallelEnv):
         status, is_over, is_win = self.game.step_phase(engine_actions)
 
         # [REMOVED] event dumping logic for speed optimization
-        new_events = [e.model_dump() for e in self.game.history[self.last_history_idx:]]
+        new_events = [
+            e.model_dump() for e in self.game.history[self.last_history_idx :]
+        ]
         self.last_history_idx = len(self.game.history)
 
         # 상태 변화 추적
@@ -210,20 +213,20 @@ class MafiaEnv(ParallelEnv):
             )
             terminations[agent] = is_over
             truncations[agent] = False
-            
+
             agent_info = {
                 "day": status.day,
                 "phase": status.phase,
                 "role": self.game.players[pid].role,
                 "win": my_win,
-                "log_events": new_events,    
+                "log_events": new_events,
             }
-            
+
             if is_over:
                 agent_info["episode_metrics"] = episode_metrics
 
             infos[agent] = agent_info
-        
+
         if is_over:
             self.agents = []
 
@@ -233,13 +236,13 @@ class MafiaEnv(ParallelEnv):
         """게임 종료 시 통계 지표 계산"""
         metrics = {}
         game = self.game
-        
+
         # 1. Game Duration & Winner
         metrics["Game/Duration"] = game.day
-        
+
         mafia_won = False
         citizen_won = False
-        
+
         last_event = game.history[-1] if game.history else None
         if last_event and last_event.phase == Phase.GAME_END:
             citizen_won_game = last_event.value
@@ -247,14 +250,18 @@ class MafiaEnv(ParallelEnv):
                 citizen_won = True
             else:
                 mafia_won = True
-                
+
         metrics["Game/Mafia_Win"] = 1.0 if mafia_won else 0.0
         metrics["Game/Citizen_Win"] = 1.0 if citizen_won else 0.0
 
         # Citizen Survival Rate
         initial_citizens = sum(1 for p in game.players if p.role != Role.MAFIA)
-        current_citizens = sum(1 for p in game.players if p.role != Role.MAFIA and p.alive)
-        metrics["Game/Citizen_Survival_Rate"] = current_citizens / initial_citizens if initial_citizens > 0 else 0.0
+        current_citizens = sum(
+            1 for p in game.players if p.role != Role.MAFIA and p.alive
+        )
+        metrics["Game/Citizen_Survival_Rate"] = (
+            current_citizens / initial_citizens if initial_citizens > 0 else 0.0
+        )
 
         # Action Stats
         # Action Counter
@@ -263,32 +270,36 @@ class MafiaEnv(ParallelEnv):
         doctor_save_success = 0
         doctor_self_heal = 0
         doctor_total_protects = 0
-        
+
         police_investigations = 0
         police_finds = 0
-        
+
         # Vote Counter
         vote_total = 0
         vote_abstain = 0
         mafia_betrayal = 0
         citizen_correct_vote = 0
-        
+
         mafia_votes = 0
         citizen_votes = 0
-        
+
         # Execution Counter
         execution_total = 0
         mafia_executed = 0
         citizen_sacrificed = 0
-        
+
         # Night Interactions
         night_events = [e for e in game.history if e.phase == Phase.NIGHT]
-        
+
         for d in range(1, game.day + 1):
             day_night_events = [e for e in night_events if e.day == d]
-            kill_event = next((e for e in day_night_events if e.event_type == EventType.KILL), None)
-            protect_event = next((e for e in day_night_events if e.event_type == EventType.PROTECT), None)
-            
+            kill_event = next(
+                (e for e in day_night_events if e.event_type == EventType.KILL), None
+            )
+            protect_event = next(
+                (e for e in day_night_events if e.event_type == EventType.PROTECT), None
+            )
+
             if protect_event:
                 doctor_total_protects += 1
                 if protect_event.actor_id == protect_event.target_id:
@@ -297,11 +308,11 @@ class MafiaEnv(ParallelEnv):
             if kill_event:
                 mafia_kill_attempts += 1
                 is_saved = False
-                
+
                 if protect_event and kill_event.target_id == protect_event.target_id:
                     is_saved = True
                     doctor_save_success += 1
-                
+
                 if not is_saved:
                     mafia_kill_success += 1
 
@@ -311,11 +322,11 @@ class MafiaEnv(ParallelEnv):
                 police_investigations += 1
                 if event.value == Role.MAFIA:
                     police_finds += 1
-            
+
             elif event.event_type == EventType.VOTE:
                 vote_total += 1
                 actor = game.players[event.actor_id]
-                
+
                 if actor.role == Role.MAFIA:
                     mafia_votes += 1
                 else:
@@ -327,10 +338,10 @@ class MafiaEnv(ParallelEnv):
                     target = game.players[event.target_id]
                     if actor.role == Role.MAFIA and target.role == Role.MAFIA:
                         mafia_betrayal += 1
-                    
+
                     if actor.role != Role.MAFIA and target.role == Role.MAFIA:
                         citizen_correct_vote += 1
-            
+
             elif event.event_type == EventType.EXECUTE:
                 if event.target_id != -1:
                     execution_total += 1
@@ -339,24 +350,47 @@ class MafiaEnv(ParallelEnv):
                         mafia_executed += 1
                     else:
                         citizen_sacrificed += 1
-                        
-        metrics["Vote/Abstain_Rate"] = vote_abstain / vote_total if vote_total > 0 else 0.0
-        metrics["Vote/Mafia_Betrayal_Rate"] = mafia_betrayal / mafia_votes if mafia_votes > 0 else 0.0
-        metrics["Vote/Citizen_Accuracy_Rate"] = citizen_correct_vote / citizen_votes if citizen_votes > 0 else 0.0
-        
-        metrics["Action/Doctor_Save_Rate"] = doctor_save_success / mafia_kill_attempts if mafia_kill_attempts > 0 else 0.0
-        metrics["Action/Doctor_Self_Heal_Rate"] = doctor_self_heal / doctor_total_protects if doctor_total_protects > 0 else 0.0
-        
-        metrics["Action/Police_Find_Rate"] = police_finds / police_investigations if police_investigations > 0 else 0.0
-        metrics["Action/Mafia_Kill_Success_Rate"] = mafia_kill_success / mafia_kill_attempts if mafia_kill_attempts > 0 else 0.0
-        
-        metrics["Game/Execution_Frequency"] = execution_total / game.day if game.day > 0 else 0.0
-        
-        metrics["Vote/Mafia_Lynch_Rate"] = mafia_executed / execution_total if execution_total > 0 else 0.0
-        metrics["Vote/Citizen_Sacrifice_Rate"] = citizen_sacrificed / execution_total if execution_total > 0 else 0.0
+
+        metrics["Vote/Abstain_Rate"] = (
+            vote_abstain / vote_total if vote_total > 0 else 0.0
+        )
+        metrics["Vote/Mafia_Betrayal_Rate"] = (
+            mafia_betrayal / mafia_votes if mafia_votes > 0 else 0.0
+        )
+        metrics["Vote/Citizen_Accuracy_Rate"] = (
+            citizen_correct_vote / citizen_votes if citizen_votes > 0 else 0.0
+        )
+
+        metrics["Action/Doctor_Save_Rate"] = (
+            doctor_save_success / mafia_kill_attempts
+            if mafia_kill_attempts > 0
+            else 0.0
+        )
+        metrics["Action/Doctor_Self_Heal_Rate"] = (
+            doctor_self_heal / doctor_total_protects
+            if doctor_total_protects > 0
+            else 0.0
+        )
+
+        metrics["Action/Police_Find_Rate"] = (
+            police_finds / police_investigations if police_investigations > 0 else 0.0
+        )
+        metrics["Action/Mafia_Kill_Success_Rate"] = (
+            mafia_kill_success / mafia_kill_attempts if mafia_kill_attempts > 0 else 0.0
+        )
+
+        metrics["Game/Execution_Frequency"] = (
+            execution_total / game.day if game.day > 0 else 0.0
+        )
+
+        metrics["Vote/Mafia_Lynch_Rate"] = (
+            mafia_executed / execution_total if execution_total > 0 else 0.0
+        )
+        metrics["Vote/Citizen_Sacrifice_Rate"] = (
+            citizen_sacrificed / execution_total if execution_total > 0 else 0.0
+        )
 
         return metrics
-
 
     def render(self):
         """게임 상태 렌더링"""

@@ -11,6 +11,13 @@ class RuleBaseAgent(BaseAgent):
         self.investigated_players: Set[int] = set()  # 경찰 조사 리스트
         self.known_mafia: Set[int] = set()  # 알아낸 마피아 목록
         self.suspects: Set[int] = set()  # 의심스러운 플레이어 리스트
+        self.doctor_find_police = -1  # 의사가 찾은 경찰 ID
+
+    def reset(self):
+        self.investigated_players.clear()
+        self.known_mafia.clear()
+        self.suspects.clear()
+        self.doctor_find_police = -1
 
     def get_action(self, status):
         self.role = status.my_role
@@ -41,9 +48,7 @@ class RuleBaseAgent(BaseAgent):
 
         # 1. 시민 & 의사: 특별한 행동 없음
         if self.role == Role.CITIZEN or self.role == Role.DOCTOR:
-            # 기존 로직: 그냥 지목만 함
-            if targets and random.random() < 0.8:
-                return GameAction(target_id=random.choice(targets))
+            pass
 
         # 2. 마피아
         if self.role == Role.MAFIA:
@@ -60,15 +65,7 @@ class RuleBaseAgent(BaseAgent):
                     and event.target_id == self.id
                     and event.actor_id != self.id
                 ):
-                    return GameAction(target_id=event.actor_id, claim_role=Role.POLICE)
-
-            # 시민 모방
-            if targets and random.random() < 0.8:
-                return GameAction(target_id=random.choice(targets))
-
-            # 평소에는 시민과 똑같이 행동
-            if targets and random.random() < 0.8:
-                return GameAction(target_id=random.choice(targets))
+                    return GameAction(target_id=event.actor_id, claim_role=Role.MAFIA)
 
         # 3. 경찰
         if self.role == Role.POLICE:
@@ -78,8 +75,17 @@ class RuleBaseAgent(BaseAgent):
                 target = alive_mafia[0]
                 return GameAction(target_id=target, claim_role=Role.MAFIA)
 
-            if targets and random.random() < 0.8:
-                return GameAction(target_id=random.choice(targets))
+            for event in reversed(status.action_history):
+                if (
+                    event.event_type == EventType.POLICE_RESULT
+                    and event.actor_id == self.id
+                ):
+                    if event.value == Role.MAFIA and event.target_id in targets:
+                        # known_mafia에 아직 없더라도 발견 즉시 주장
+                        return GameAction(
+                            target_id=event.target_id, claim_role=Role.POLICE
+                        )
+                    break  # 내 최근 조사가 마피아가 아니면 중단
 
         return GameAction(target_id=-1)
 
@@ -106,8 +112,11 @@ class RuleBaseAgent(BaseAgent):
             # 맞경
             if len(police_claims) >= 2:
                 claimants = [pid for pid in police_claims.keys() if pid in targets]
+                first_police_id = claimants[0]  # 1. 가장 먼저 주장한 경찰
+                target_of_first = police_claims[first_police_id]
+                self.doctor_find_police = first_police_id
                 if claimants:
-                    return GameAction(target_id=random.choice(claimants))
+                    return GameAction(target_id=target_of_first)
 
             # 경찰이 1명
             elif len(police_claims) == 1:
@@ -115,28 +124,21 @@ class RuleBaseAgent(BaseAgent):
                 if police_target != -1 and police_target in targets:
                     return GameAction(target_id=police_target)
 
-            # 소신 투표
-            valid_suspects = [s for s in self.suspects if s in targets]
-            if valid_suspects:
-                return GameAction(target_id=random.choice(valid_suspects))
-
-            return GameAction(target_id=random.choice(targets))
+            return GameAction(target_id=-1)
 
         # [2] 마피아
         elif self.role == Role.MAFIA:
             # 나(self.id)를 제외한 경찰 주장자 목록
             enemy_claimants = [
-                pid for pid in police_claims.keys() if pid in targets and pid != self.id
+                pid
+                for pid in police_claims.keys()
+                if pid in targets and (pid != self.id and pid not in self.known_mafia)
             ]
 
             if enemy_claimants:
                 return GameAction(target_id=random.choice(enemy_claimants))
 
-            # 경찰 없으면 의심자나 아무나 투표
-            valid_suspects = [s for s in self.suspects if s in targets]
-            if valid_suspects:
-                return GameAction(target_id=random.choice(valid_suspects))
-            return GameAction(target_id=random.choice(targets))
+            return GameAction(target_id=-1)
 
         # [3] 경찰
         elif self.role == Role.POLICE:
@@ -151,12 +153,6 @@ class RuleBaseAgent(BaseAgent):
             ]
             if fake_police:
                 return GameAction(target_id=fake_police[0])
-
-            # 의심자 투표
-            valid_suspects = [s for s in self.suspects if s in targets]
-            if valid_suspects:
-                return GameAction(target_id=random.choice(valid_suspects))
-            return GameAction(target_id=random.choice(targets))
 
         return GameAction(target_id=-1)
 
@@ -195,13 +191,19 @@ class RuleBaseAgent(BaseAgent):
 
         # 2. 마피아: 시민 중 무작위 살해
         if self.role == Role.MAFIA:
-            if not targets:
+            safe_targets = self.known_mafia | {self.id}
+            mafia_kill_candidates = [t for t in targets if t not in safe_targets]
+
+            if not mafia_kill_candidates:
                 return GameAction(target_id=-1)
 
-            return GameAction(target_id=random.choice(targets))
+            return GameAction(target_id=random.choice(mafia_kill_candidates))
 
         # 3. 의사: 자신 보호
         if self.role == Role.DOCTOR:
+            if self.doctor_find_police != -1 and self.doctor_find_police in targets:
+                return GameAction(target_id=self.doctor_find_police)
+
             return GameAction(target_id=self.id)
 
         # 4. 경찰: 의심스러운 플레이어 중 무작위 조사
@@ -246,19 +248,23 @@ class RuleBaseAgent(BaseAgent):
 
                 self.suspects.add(event.actor_id)
 
-        # 2. [경찰] 조사 결과 확인 및 마피아 판별
-        if self.role == Role.POLICE:
+        # 2. 정보 수집 (경찰 및 마피아)
+        if self.role == Role.POLICE or self.role == Role.MAFIA:
             for event in status.action_history:
-                if (
-                    event.event_type == EventType.POLICE_RESULT
-                    and event.actor_id == self.id
-                ):
+                if event.event_type == EventType.POLICE_RESULT:
 
-                    target = event.target_id
-                    if target is not None:
-                        # 조사한 사람 추가
-                        self.investigated_players.add(target)
+                    # 신뢰할 수 있는 정보인지 확인
+                    # 경찰: 내가 직접 조사한 결과 (actor_id == self.id)
+                    # 마피아: 시스템이 알려준 동료 정보 (actor_id == -1)
+                    is_reliable = (
+                        self.role == Role.POLICE and event.actor_id == self.id
+                    ) or (self.role == Role.MAFIA and event.actor_id == -1)
 
-                        # 마피아 판단
-                        if event.value == Role.MAFIA:
-                            self.known_mafia.add(target)
+                    if is_reliable:
+                        target = event.target_id
+                        if target is not None:
+                            self.investigated_players.add(target)
+
+                            # 경찰에겐 범인, 마피아에겐 동료
+                            if event.value == Role.MAFIA:
+                                self.known_mafia.add(target)
