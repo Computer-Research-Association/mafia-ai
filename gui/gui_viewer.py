@@ -48,7 +48,6 @@ class MafiaLogViewerWindow(QMainWindow):
         self.log_viewer_tab.select_live(log_path)
 
     def closeEvent(self, event):
-        print("로그 뷰어 창 종료 중... 텐서보드를 정리합니다.")
         if hasattr(self, "log_viewer_tab") and self.log_viewer_tab:
             self.log_viewer_tab.shutdown_tensorboard()
 

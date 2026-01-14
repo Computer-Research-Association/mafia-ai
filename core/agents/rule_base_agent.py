@@ -115,13 +115,19 @@ class RuleBaseAgent(BaseAgent):
                 first_police_id = claimants[0]  # 1. 가장 먼저 주장한 경찰
                 target_of_first = police_claims[first_police_id]
                 self.doctor_find_police = first_police_id
-                if claimants:
+
+                if target_of_first is not None and target_of_first != -1:
                     return GameAction(target_id=target_of_first)
 
             # 경찰이 1명
             elif len(police_claims) == 1:
                 police_target = list(police_claims.values())[0]
-                if police_target != -1 and police_target in targets:
+
+                if (
+                    police_target is not None
+                    and police_target != -1
+                    and police_target in targets
+                ):
                     return GameAction(target_id=police_target)
 
             return GameAction(target_id=-1)
