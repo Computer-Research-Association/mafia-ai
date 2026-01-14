@@ -78,7 +78,7 @@ class REINFORCE:
         
         return action.tolist(), new_hidden
 
-    def update(self):
+    def update(self, expert_loader=None):
         episodes = self.buffer.get_episodes()
         
         total_loss = 0

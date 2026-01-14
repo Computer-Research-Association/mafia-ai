@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import numpy as np
 from torch.distributions import Categorical
 
 from ai.models.actor_critic import DynamicActorCritic
@@ -149,7 +150,7 @@ class PPO:
 
         return action.tolist(), new_hidden
 
-    def update(self):
+    def update(self, expert_loader=None):
         # Flattened data components
         flat_states = []
         flat_actions = []
@@ -197,7 +198,9 @@ class PPO:
             flat_advantages.append(torch.tensor(advantages, dtype=torch.float32))
             
             if self.buffer.masks[i]:
-                 flat_masks.append(torch.stack(self.buffer.masks[i]))
+                 # Numpy list -> Numpy Array -> Tensor conversion
+                 mask_seq = np.array(self.buffer.masks[i])
+                 flat_masks.append(torch.tensor(mask_seq, dtype=torch.float32))
             else:
                  pass # Handle later
 
@@ -207,9 +210,18 @@ class PPO:
         if self.is_recurrent:
             # Retrieve initial hidden states for each slot
             initial_hiddens = self.buffer.initial_hidden_states
-            metrics = self._update_recurrent_opt(flat_states, flat_actions, flat_logprobs, flat_returns, flat_advantages, flat_masks, initial_hiddens)
+            metrics = self._update_recurrent_opt(
+                flat_states, flat_actions, flat_logprobs, 
+                flat_returns, flat_advantages, flat_masks, 
+                initial_hiddens,
+                expert_loader=expert_loader
+            )
         else:
-            metrics = self._update_mlp_opt(flat_states, flat_actions, flat_logprobs, flat_returns, flat_advantages, flat_masks)
+            metrics = self._update_mlp_opt(
+                flat_states, flat_actions, flat_logprobs, 
+                flat_returns, flat_advantages, flat_masks,
+                expert_loader=expert_loader
+            )
 
         # Updates done, sync policy_old
         self.policy_old.load_state_dict(self.policy.state_dict())
@@ -217,7 +229,7 @@ class PPO:
         
         return metrics
 
-    def _update_mlp_opt(self, states, actions, logprobs, returns, advantages, masks):
+    def _update_mlp_opt(self, states, actions, logprobs, returns, advantages, masks, expert_loader=None):
         device = next(self.policy.parameters()).device
         
         # Flatten all slots
@@ -286,7 +298,7 @@ class PPO:
             "entropy": total_entropy / steps if steps > 0 else 0
         }
 
-    def _update_recurrent_opt(self, states, actions, logprobs, returns, advantages, masks, initial_hiddens=None):
+    def _update_recurrent_opt(self, states, actions, logprobs, returns, advantages, masks, initial_hiddens=None, expert_loader=None):
         device = next(self.policy.parameters()).device
         
         # states is list of (Seq, Dim) tensors
