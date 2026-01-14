@@ -301,54 +301,46 @@ class PPO:
     def _update_recurrent_opt(self, states, actions, logprobs, returns, advantages, masks, initial_hiddens=None, expert_loader=None):
         device = next(self.policy.parameters()).device
         
-        # states is list of (Seq, Dim) tensors
-        # Iterate over trajectories
-        for i in range(len(states)):
-            seq_states = states[i].to(device) # (Seq, Dim)
-            seq_actions = actions[i].to(device)
-            seq_logprobs = logprobs[i].to(device)
-            seq_returns = returns[i].to(device)
-            seq_advantages = advantages[i].to(device)
-            seq_masks = masks[i].to(device) if masks else None
-            
-            # Get initial hidden state for this slot
-            start_hidden = initial_hiddens[i] if initial_hiddens else None
-            if start_hidden is not None:
-                if isinstance(start_hidden, tuple):
-                    start_hidden = (start_hidden[0].to(device), start_hidden[1].to(device))
-                else:
-                    start_hidden = start_hidden.to(device)
-
-            if seq_advantages.numel() > 1:
-                 seq_advantages = (seq_advantages - seq_advantages.mean()) / (seq_advantages.std() + 1e-7)
-
+        # 1. Global Advantage Normalization
+        # Move all advantages to device for calculation
+        advantages = [adv.to(device) for adv in advantages]
+        all_advantages = torch.cat(advantages)
+        
+        if all_advantages.numel() > 1:
+            adv_mean = all_advantages.mean()
+            adv_std = all_advantages.std() + 1e-7
+            # Normalize list elements
+            advantages = [(adv - adv_mean) / adv_std for adv in advantages]
+        
         total_loss = 0
         total_entropy = 0
         steps = 0
 
-        # Iterate over trajectories FIRST, then epochs? Or Epochs then Trajectories?
-        # Original code: Iterate trajectories, then for each trajectory do K epochs.
-        
-        for i in range(len(states)):
-            seq_states = states[i].to(device) # (Seq, Dim)
-            seq_actions = actions[i].to(device)
-            seq_logprobs = logprobs[i].to(device)
-            seq_returns = returns[i].to(device)
-            seq_advantages = advantages[i].to(device)
-            seq_masks = masks[i].to(device) if masks else None
+        # Create indices for shuffling
+        num_trajectories = len(states)
+        indices = np.arange(num_trajectories)
+
+        # 2. Dataset-level Epochs (Standard PPO Loop)
+        for _ in range(self.k_epochs):
+            # Shuffle trajectories for each epoch to break correlation
+            np.random.shuffle(indices)
             
-            # Get initial hidden state for this slot
-            start_hidden = initial_hiddens[i] if initial_hiddens else None
-            if start_hidden is not None:
-                if isinstance(start_hidden, tuple):
-                    start_hidden = (start_hidden[0].to(device), start_hidden[1].to(device))
-                else:
-                    start_hidden = start_hidden.to(device)
+            for i in indices:
+                seq_states = states[i].to(device) # (Seq, Dim)
+                seq_actions = actions[i].to(device)
+                seq_logprobs = logprobs[i].to(device)
+                seq_returns = returns[i].to(device)
+                seq_advantages = advantages[i] # Already on device and normalized
+                seq_masks = masks[i].to(device) if masks else None
+                
+                # Get initial hidden state for this slot
+                start_hidden = initial_hiddens[i] if initial_hiddens else None
+                if start_hidden is not None:
+                    if isinstance(start_hidden, tuple):
+                        start_hidden = (start_hidden[0].to(device), start_hidden[1].to(device))
+                    else:
+                        start_hidden = start_hidden.to(device)
 
-            if seq_advantages.numel() > 1:
-                 seq_advantages = (seq_advantages - seq_advantages.mean()) / (seq_advantages.std() + 1e-7)
-
-            for _ in range(self.k_epochs):
                 # Forward (Batch=1, Seq, Dim)
                 states_input = seq_states.unsqueeze(0)
                 
