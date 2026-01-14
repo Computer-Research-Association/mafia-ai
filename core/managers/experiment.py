@@ -143,16 +143,12 @@ class ExperimentManager:
                     checkpoint = torch.load(load_path, map_location="cpu")
                     if "backbone" in checkpoint:
                         backbone = checkpoint["backbone"]
-                        print(f"Agent {i}: backbone 설정 로드됨 ({backbone})")
                     if "hidden_dim" in checkpoint:
                         hidden_dim = checkpoint["hidden_dim"]
-                        print(f"Agent {i}: hidden 설정 로드됨 ({hidden_dim})")
                     if "num_layers" in checkpoint:
                         num_layers = checkpoint["num_layers"]
-                        print(f"Agent {i}: num_layers 설정 로드됨 ({num_layers})")
                     if "algorithm" in checkpoint:
                         algo = checkpoint["algorithm"]
-                        print(f"Agent {i}: algorithm 설정 로드됨 ({algo})")
 
                 agent = RLAgent(
                     player_id=i,
