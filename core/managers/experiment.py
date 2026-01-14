@@ -20,6 +20,7 @@ def make_env_for_worker():
 from core.envs.mafia_env import MafiaEnv
 from core.envs.encoders import MDPEncoder, POMDPEncoder
 from core.agents import AgentBuilder
+from core.agents.rl_agent import RLAgent
 from core.managers.logger import LogManager
 from config import Role, config
 

@@ -185,9 +185,11 @@ class POMDPEncoder(BaseEncoder):
     Encoder for RNN backbone.
     Generates a slim vector (54 dim) containing only current event and status.
     Maps are excluded to rely on RNN memory.
+    ** Modified for consistency: Padded to 286 dim to match MDPEncoder **
     """
     def __init__(self):
-        self._dim = 54  # 46 (Base) + 8 (Alive)
+        self._dim = 286  # 54 -> 286 (Padding)
+        self._real_dim = 54
 
     @property
     def observation_dim(self) -> int:
@@ -261,7 +263,7 @@ class POMDPEncoder(BaseEncoder):
         alive_vec = np.array([1.0 if p.alive else 0.0 for p in game.players], dtype=np.float32)
 
         # Concatenate
-        obs = np.concatenate(
+        raw_obs = np.concatenate(
             [
                 id_vec,       # 8
                 role_vec,     # 4
@@ -274,4 +276,9 @@ class POMDPEncoder(BaseEncoder):
                 alive_vec     # 8
             ]
         )
+        
+        # Zero Padding to match MDPEncoder (286)
+        obs = np.zeros(self._dim, dtype=np.float32)
+        obs[:self._real_dim] = raw_obs
+        
         return obs
