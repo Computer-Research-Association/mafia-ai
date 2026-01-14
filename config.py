@@ -55,8 +55,10 @@ class GameSettings(BaseSettings):
     ]
     MAX_DISCUSSION_ROUNDS: int = 2
     
-    # Model & Env Dimensions
-    OBS_DIM: int = 286
+    # Observation Dimensions
+    MDP_OBS_DIM: int = 286    # MLP/MDP용 전체 차원 (패딩의 기준점)
+    POMDP_OBS_DIM: int = 54   # RNN/POMDP용 실제 유효 데이터 차원
+    
     ACTION_DIMS: List[int] = [9, 5]  # [Target(9), Role(5)]
 
 

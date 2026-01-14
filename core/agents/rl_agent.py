@@ -6,9 +6,9 @@ from typing import List, Optional, Tuple, Dict, Any
 from torch.distributions import Categorical
 
 from core.agents.base_agent import BaseAgent
-from ai.model import DynamicActorCritic
-from ai.ppo import PPO
-from ai.reinforce import REINFORCE
+from ai.models.actor_critic import DynamicActorCritic
+from ai.algorithms.ppo import PPO
+from ai.algorithms.reinforce import REINFORCE
 from config import config, Role
 from core.engine.state import GameStatus, GameEvent, GameAction
 
@@ -56,11 +56,14 @@ class RLAgent(BaseAgent):
             hidden_dim=hidden_dim,
             num_layers=num_layers,
         )
+        
+        # Check recurrence
+        is_recurrent = self.backbone in ["lstm", "gru", "rnn"]
 
         if self.algorithm == "ppo":
-            self.learner = PPO(policy=self.policy)
+            self.learner = PPO(model=self.policy, config=config, is_recurrent=is_recurrent)
         elif self.algorithm == "reinforce":
-            self.learner = REINFORCE(policy=self.policy)
+            self.learner = REINFORCE(model=self.policy, config=config, is_recurrent=is_recurrent)
         else:
             raise ValueError(f"Unknown algorithm: {algorithm}")
 
@@ -68,13 +71,28 @@ class RLAgent(BaseAgent):
         self.current_action = None  # 현재 액션 저장
 
     def reset_hidden(self, batch_size: int = 1):
-        """에피소드 시작 시 은닉 상태 초기화 (RNN Only)"""
+        """에피소드 시작 시 은닉 상태 초기화 (RNN Only) & 버퍼 리사이즈"""
+        # 버퍼 리사이즈 (배치 크기가 변경될 수 있으므로 안전하게)
+        if hasattr(self.learner, "buffer"):
+            self.learner.buffer.resize(batch_size)
+
         if self.backbone in ["lstm", "gru"]:
             # 전달받은 batch_size를 정책 모델에 전달
             self.hidden_state = self.policy.init_hidden(batch_size=batch_size)
         else:
             # MLP 등
             self.hidden_state = None
+
+    def reset_hidden_by_slot(self, slot_idx: int):
+        """특정 슬롯의 은닉 상태만 초기화"""
+        if self.hidden_state is not None:
+            if isinstance(self.hidden_state, tuple):
+                # LSTM: (h, c)
+                self.hidden_state[0][:, slot_idx, :].fill_(0)
+                self.hidden_state[1][:, slot_idx, :].fill_(0)
+            else:
+                # GRU: h
+                self.hidden_state[:, slot_idx, :].fill_(0)
 
     def set_action(self, action: GameAction):
         """env.step()에서 호출되어 액션 설정"""
@@ -133,14 +151,13 @@ class RLAgent(BaseAgent):
 
         return action_vector
 
-    def store_reward(self, reward: float, is_terminal: bool = False):
+    def store_reward(self, reward: float, is_terminal: bool = False, slot_idx: int = 0):
         """보상 저장: 알고리즘별 버퍼 위치 확인"""
         if hasattr(self.learner, "buffer"):
-            # PPO의 경우 buffer 객체 내의 리스트 사용
-            self.learner.buffer.rewards.append(reward)
-            self.learner.buffer.is_terminals.append(is_terminal)
+            # PPO: 슬롯별 저장
+            self.learner.buffer.insert_reward(slot_idx, reward, is_terminal)
         else:
-            # REINFORCE 등 buffer가 없는 경우 직접 저장
+            # REINFORCE 등: 단순 저장 (배치 미지원 가정 또는 추후 수정 필요)
             self.learner.rewards.append(reward)
 
     def update(self, expert_loader=None):

@@ -168,7 +168,7 @@ def train(
             # 학습용 버퍼 저장
             for i, idx in enumerate(indices):
                 is_done = p_terms[i] or p_truncs[i]
-                agent.store_reward(p_rewards[i], is_done)
+                agent.store_reward(p_rewards[i], is_done, slot_idx=i)
 
         obs = next_obs
 
@@ -180,6 +180,13 @@ def train(
 
         if num_finished_now > 0:
             finished_slot_indices = np.where(dones)[0]
+            
+            # Reset hidden states for finished games (RNN support)
+            for finished_slot in finished_slot_indices:
+                for agent in rl_agents.values():
+                    if hasattr(agent, "reset_hidden_by_slot"):
+                        agent.reset_hidden_by_slot(finished_slot)
+
             for slot_idx in finished_slot_indices:
                 slot_episode_ids[slot_idx] = next_global_episode_id
                 next_global_episode_id += 1
