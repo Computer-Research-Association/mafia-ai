@@ -38,7 +38,8 @@ class MDPEncoder(BaseEncoder):
     Generates a dense vector (286 dim) including cumulative maps (Vote, Attack, Vouch).
     """
     def __init__(self):
-        self._dim = 286
+        # MDP는 자기 자신의 차원을 그대로 사용 (286)
+        self._dim = config.game.MDP_OBS_DIM
 
     @property
     def observation_dim(self) -> int:
@@ -188,8 +189,10 @@ class POMDPEncoder(BaseEncoder):
     ** Modified for consistency: Padded to 286 dim to match MDPEncoder **
     """
     def __init__(self):
-        self._dim = 286  # 54 -> 286 (Padding)
-        self._real_dim = 54
+        # 환경 규격(Space)을 맞추기 위해 기준은 MDP_OBS_DIM(286)을 따름
+        self._dim = config.game.MDP_OBS_DIM
+        # 실제 데이터 인코딩 크기는 POMDP_OBS_DIM(54)을 사용
+        self._real_dim = config.game.POMDP_OBS_DIM
 
     @property
     def observation_dim(self) -> int:
@@ -277,8 +280,10 @@ class POMDPEncoder(BaseEncoder):
             ]
         )
         
-        # Zero Padding to match MDPEncoder (286)
+        # 286차원 제로 벡터 생성 (MDP_OBS_DIM 기준)
         obs = np.zeros(self._dim, dtype=np.float32)
+        
+        # 앞부분에 54차원 실제 데이터 삽입
         obs[:self._real_dim] = raw_obs
         
         return obs
