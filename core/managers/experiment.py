@@ -150,9 +150,9 @@ class ExperimentManager:
                     if "num_layers" in checkpoint:
                         num_layers = checkpoint["num_layers"]
                         print(f"Agent {i}: num_layers 설정 로드됨 ({num_layers})")
-                    # 알고리듬 정보 필요시 주석 해제
-                    # if "algorithm" in checkpoint:
-                    #     algo = checkpoint["algorithm"]
+                    if "algorithm" in checkpoint:
+                        algo = checkpoint["algorithm"]
+                        print(f"Agent {i}: algorithm 설정 로드됨 ({algo})")
 
                 agent = RLAgent(
                     player_id=i,

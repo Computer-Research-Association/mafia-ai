@@ -112,7 +112,7 @@ def train(
             break
 
         # --- [1. 행동 결정 (Batch Action)] ---
-        all_actions = np.zeros((env.num_envs, 2), dtype=int)
+        all_actions = np.full((env.num_envs, 2), -1, dtype=int)
 
         for pid in range(PLAYERS_PER_GAME):
             # PID별 인덱스 추출
@@ -429,17 +429,16 @@ async def _collect_actions_async(env, all_agents, obs, data_manager, episode_id)
         action_vector = [0, 0]
 
         try:
-            # Case 1: LLM/RBA Agent
-            if hasattr(agent, "get_action"):
-                game_status = env.get_game_status(p_id)
-                action_obj = await asyncio.to_thread(agent.get_action, game_status)
-                action_vector = action_obj.to_multi_discrete()
-
-            # Case 2: RL Agent
-            elif hasattr(agent, "select_action_vector"):
+            # Case 1: RL Agent
+            if hasattr(agent, "select_action_vector"):
                 action_vector = await asyncio.to_thread(
                     agent.select_action_vector, full_obs
                 )
+            # Case 2: LLM/RBA Agent
+            elif hasattr(agent, "get_action"):
+                game_status = env.get_game_status(p_id)
+                action_obj = await asyncio.to_thread(agent.get_action, game_status)
+                action_vector = action_obj.to_multi_discrete()
 
             else:
                 # Case 3: 알 수 없는 타입 (Fallback)
