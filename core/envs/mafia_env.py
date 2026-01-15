@@ -205,9 +205,10 @@ class MafiaEnv(ParallelEnv):
             else:
                 my_win = False
 
-            # Refactored Reward Assignment
-            # Manager now handles all rewards including game end bonus if extracted as signal
             rewards[agent] = interaction_rewards.get(pid, 0.0)
+
+            terminations[agent] = is_over
+            truncations[agent] = False
 
             agent_info = {
                 "day": status.day,
