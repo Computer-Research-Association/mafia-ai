@@ -20,6 +20,7 @@ from PyQt6.QtCore import pyqtSignal, Qt
 from argparse import Namespace
 from pathlib import Path
 from .agentConfig import AgentConfigWidget
+from .tabs.il_btn import ILButton
 
 
 class Launcher(QWidget):
