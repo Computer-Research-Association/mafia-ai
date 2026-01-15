@@ -19,12 +19,13 @@ from PyQt6.QtGui import QIcon
 from PyQt6.QtCore import pyqtSignal, Qt
 from argparse import Namespace
 from pathlib import Path
-from .widgets.agent_config_widget import AgentConfigWidget
-from .widgets.il_btn import ILButton
+from ..widgets.agent_config_widget import AgentConfigWidget
+from ..widgets.il_btn import ILButton
 from gui.utils.style_loader import StyleLoader
+from gui.pages.analytics_window import AnalyticsWindow
 
 
-class Launcher(QWidget):
+class DashBoard(QWidget):
     start_simulation_signal = pyqtSignal(object)
     stop_simulation_signal = pyqtSignal()
 
@@ -292,9 +293,7 @@ class Launcher(QWidget):
 
     def open_log_viewer(self):
         """로그 뷰어 창 열기 (PyQt6 윈도우)"""
-        from gui.gui_viewer import MafiaLogViewerWindow
-
-        self.log_window = MafiaLogViewerWindow()
+        self.log_window = AnalyticsWindow()
         self.log_window.show()
 
     def on_click_start(self):

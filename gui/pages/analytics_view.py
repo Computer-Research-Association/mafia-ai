@@ -17,7 +17,7 @@ from gui.widgets.log_right import LogRight
 from gui.utils.log_event import LogEvent
 
 
-class LogViewer(QWidget):
+class AnalyticsView(QWidget):
     def __init__(self, parent):
         super().__init__(parent)
         self.current_log_dir: Optional[Path] = None

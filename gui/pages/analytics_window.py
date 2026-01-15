@@ -3,12 +3,12 @@ from PyQt6.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget, QTa
 from PyQt6.QtGui import QFont
 from PyQt6.QtGui import QIcon
 
-from .pages.log_viewer import LogViewer
+from .analytics_view import AnalyticsView
 from pathlib import Path
 from gui.utils.style_loader import StyleLoader
 
 
-class MafiaLogViewerWindow(QMainWindow):
+class AnalyticsWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Mafia AI 게임 로그 뷰어")
@@ -29,22 +29,22 @@ class MafiaLogViewerWindow(QMainWindow):
         self.tab_widget = QTabWidget()
         layout.addWidget(self.tab_widget)
 
-        self.log_viewer_tab = LogViewer(self)
-        self.tab_widget.addTab(self.log_viewer_tab, "로그 뷰어")
+        self.analytics_view = AnalyticsView(self)
+        self.tab_widget.addTab(self.analytics_view, "로그 뷰어")
 
     def show_live(self, log_path):
-        self.tab_widget.setCurrentWidget(self.log_viewer_tab)
-        self.log_viewer_tab.select_live(log_path)
+        self.tab_widget.setCurrentWidget(self.analytics_view)
+        self.analytics_view.select_live(log_path)
 
     def closeEvent(self, event):
-        if hasattr(self, "log_viewer_tab") and self.log_viewer_tab:
-            self.log_viewer_tab.shutdown_tensorboard()
+        if hasattr(self, "analytics_view") and self.analytics_view:
+            self.analytics_view.shutdown_tensorboard()
 
         event.accept()
 
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    window = MafiaLogViewerWindow()
+    window = AnalyticsWindow()
     window.show()
     sys.exit(app.exec())
