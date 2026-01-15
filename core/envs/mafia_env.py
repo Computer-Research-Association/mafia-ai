@@ -14,6 +14,7 @@ from core.agents.rule_base_agent import RuleBaseAgent
 from core.agents.llm_agent import LLMAgent
 from config import config, Role, Phase, EventType, ActionType
 from core.engine.state import GameStatus, GameAction, PlayerStatus, GameEvent
+from core.envs.encoders import MDPEncoder, POMDPEncoder, BaseEncoder
 
 
 class EnvAgent(BaseAgent):
@@ -29,7 +30,7 @@ class EnvAgent(BaseAgent):
 class MafiaEnv(ParallelEnv):
     metadata = {"render_modes": ["human"], "name": "mafia_v1"}
 
-    def __init__(self, render_mode=None):
+    def __init__(self, render_mode=None, encoder_map: Dict[int, BaseEncoder] = None):
         self.possible_agents = [f"player_{i}" for i in range(config.game.PLAYER_COUNT)]
         self.agents = self.possible_agents[:]
         self.render_mode = render_mode
@@ -42,6 +43,10 @@ class MafiaEnv(ParallelEnv):
         # Internal agents for environment internalization (RBA/LLM)
         self.internal_agents: Dict[int, Any] = {}
 
+        # === [Encoder Setup] ===
+        # 직접 생성하지 않고 외부에서 주입받은 encoder_map 사용
+        self.encoder_map = encoder_map or {i: MDPEncoder() for i in range(config.game.PLAYER_COUNT)}
+
         # === [Multi-Discrete Action Space] ===
         # 형태: [Target, Role]
         # - Target: 0=None, 1~8=Player 0~7 (9개)
@@ -51,11 +56,13 @@ class MafiaEnv(ParallelEnv):
             for agent in self.possible_agents
         }
 
-        # Observation Space: 78차원 슬림화
-        # 자기 정보(12) + 게임 상황(4) + 주관적 신뢰도(32) + 직전 사건(30)
-        obs_dim = config.game.OBS_DIM
-        self.observation_spaces = {
-            agent: spaces.Dict(
+        # Observation Space: Dynamic based on Encoder
+        self.observation_spaces = {}
+        for agent in self.possible_agents:
+            pid = self._agent_to_id(agent)
+            obs_dim = self.encoder_map[pid].observation_dim
+            
+            self.observation_spaces[agent] = spaces.Dict(
                 {
                     "observation": spaces.Box(
                         low=-1, high=1, shape=(obs_dim,), dtype=np.float32
@@ -65,8 +72,6 @@ class MafiaEnv(ParallelEnv):
                     ),
                 }
             )
-            for agent in self.possible_agents
-        }
 
         # 상태 추적 변수 (보상 계산용)
         self.last_executed_player = None
@@ -612,160 +617,9 @@ class MafiaEnv(ParallelEnv):
         self, agent_id: int, target_event: Optional[GameEvent] = None
     ) -> np.ndarray:
         """
-        286차원 관측 벡터 생성 (Maps 포함)
-        - Base (46): Self, Game, LastEvent
-        - Maps (240): Vote(8x8), Attack(8x8), Vouch(8x8) -> 누적 & 정규화
-          * 실제로는 8x8=64 * 3 = 192.
-          * 부족한 차원은 Padding 또는 추가 정보로 채움 (Alive, Claims 등)
-          * 여기서는 User 요청에 따라 Maps 추가 + 누적 로직 구현
+        Delegate observation encoding to the assigned strategy (Encoder).
         """
-        status = self.game.get_game_status(agent_id)
-        agent = self.game.players[agent_id]
-
-        # === [Maps Generation] ===
-        # 1. Vote Map (누가 누구에게 투표했나)
-        vote_map = np.zeros((8, 8), dtype=np.float32)
-        # 2. Attack Map (누가 누구를 공격/조사했나 - Kill, Police)
-        attack_map = np.zeros((8, 8), dtype=np.float32)
-        # 3. Vouch Map (누가 누구를 보호/변호했나 - Protect, Claim, Heal)
-        vouch_map = np.zeros((8, 8), dtype=np.float32)
-
-        # 4. Role Claim Map (누가 무슨 직업을 주장했나) - 8x5=40 (보너스 정보)
-        claim_map = np.zeros((8, 5), dtype=np.float32)
-
-        # 5. Alive Map (생존 여부) - 8 (보너스 정보)
-        alive_vec = np.array(
-            [1.0 if p.alive else 0.0 for p in self.game.players], dtype=np.float32
-        )
-
-        # History Traversal (Cumulative)
-        for event in status.action_history:
-            actor = event.actor_id
-            target = event.target_id
-
-            # Skip invalid actor/target indices (0~7 only)
-            if actor < 0 or actor >= 8:
-                continue
-
-            # Role Claim Update (Last claim overwrites usually, but history is good)
-            if event.event_type == EventType.CLAIM and isinstance(event.value, Role):
-                claim_map[actor][int(event.value)] = 1.0
-
-            if target is None or target < 0 or target >= 8:
-                continue
-
-            # Cumulative Updates
-            if event.event_type == EventType.VOTE:
-                vote_map[actor][target] += 1.0
-            elif event.event_type in [EventType.KILL, EventType.POLICE_RESULT]:
-                attack_map[actor][target] += 1.0
-            elif event.event_type in [EventType.PROTECT]:
-                vouch_map[actor][target] += 1.0
-
-            # Claim target (e.g. Cop checks X is Mafia?) - Simplify to Vouch for now or ignore
-            # if event.event_type == EventType.CLAIM: ...
-
-        # Normalization (Max Scaling)
-        if np.max(vote_map) > 0:
-            vote_map /= np.max(vote_map)
-        if np.max(attack_map) > 0:
-            attack_map /= np.max(attack_map)
-        if np.max(vouch_map) > 0:
-            vouch_map /= np.max(vouch_map)
-
-        # 1. 자기 정보 (12)
-        # ID One-hot (8)
-        id_vec = np.zeros(8, dtype=np.float32)
-        id_vec[agent_id] = 1.0
-
-        # Role One-hot (4)
-        role_vec = np.zeros(4, dtype=np.float32)
-        role_vec[int(status.my_role)] = 1.0
-
-        # 2. 게임 상황 (4)
-        # Day (1)
-        day_vec = np.array([status.day / float(config.game.MAX_DAYS)], dtype=np.float32)
-
-        # Phase One-hot (3)
-        phase_vec = np.zeros(3, dtype=np.float32)
-        if status.phase == Phase.DAY_DISCUSSION:
-            phase_vec[0] = 1.0
-        elif status.phase == Phase.DAY_VOTE:
-            phase_vec[1] = 1.0
-        else:  # Execute or Night
-            phase_vec[2] = 1.0
-
-        # 3. 직전 사건 (30)
-        # target_event가 있으면 그것을 사용, 없으면 history의 마지막 사용
-        last_event = target_event
-        if last_event is None and status.action_history:
-            last_event = status.action_history[-1]
-
-        if last_event:
-            # Actor ID (9): Player 0~7 + System(-1) -> Index 8
-            actor_vec = np.zeros(9, dtype=np.float32)
-            if last_event.actor_id == -1:
-                actor_vec[8] = 1.0
-            else:
-                actor_vec[last_event.actor_id] = 1.0
-
-            # Target ID (9): Player 0~7 + None -> Index 8
-            target_vec = np.zeros(9, dtype=np.float32)
-            if last_event.target_id is None or last_event.target_id == -1:
-                target_vec[8] = 1.0
-            else:
-                target_vec[last_event.target_id] = 1.0
-
-            # Value/Role (5): Role 0~3 + None -> Index 4
-            value_vec = np.zeros(5, dtype=np.float32)
-            if last_event.value is None:
-                value_vec[4] = 1.0
-            elif isinstance(last_event.value, Role):
-                value_vec[int(last_event.value)] = 1.0
-            else:
-                value_vec[4] = 1.0
-
-            # Event Type (7)
-            type_vec = np.zeros(7, dtype=np.float32)
-            try:
-                t_idx = int(last_event.event_type) - 1
-                if 0 <= t_idx < 7:
-                    type_vec[t_idx] = 1.0
-            except:
-                pass
-
-        else:
-            # 이벤트 없음 (초기 상태)
-            actor_vec = np.zeros(9, dtype=np.float32)
-            actor_vec[8] = 1.0  # System
-            target_vec = np.zeros(9, dtype=np.float32)
-            target_vec[8] = 1.0  # None
-            value_vec = np.zeros(5, dtype=np.float32)
-            value_vec[4] = 1.0  # None
-            type_vec = np.zeros(7, dtype=np.float32)  # None type?
-
-        # Concatenate all
-        obs = np.concatenate(
-            [
-                id_vec,  # 8
-                role_vec,  # 4
-                day_vec,  # 1
-                phase_vec,  # 3
-                actor_vec,  # 9
-                target_vec,  # 9
-                value_vec,  # 5
-                type_vec,  # 7
-                # === Added Maps ===
-                vote_map.flatten(),  # 64
-                attack_map.flatten(),  # 64
-                vouch_map.flatten(),  # 64
-                claim_map.flatten(),  # 40 (Bonus)
-                alive_vec,  # 8  (Bonus)
-            ]
-        )
-        # Total Sum: 46 + 192 + 40 + 8 = 286. Exactly matches!
-
-        return obs
+        return self.encoder_map[agent_id].encode(self.game, agent_id)
 
     def _get_action_mask(self, agent_id):
         """

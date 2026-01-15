@@ -224,21 +224,32 @@ class LLMAgent(BaseAgent):
                 candidate_id = max(vote_counts, key=vote_counts.get)
 
             # 2. LLM의 의도(agree_execution)를 target_id로 변환
-            agree = int(action_dict.get("agree_execution", -1))
+            # If agree_execution key is missing, default to -1 (No/Disagree)
+            agree_val = action_dict.get("agree_execution", -1)
+            try:
+                agree = int(agree_val)
+            except (ValueError, TypeError):
+                agree = -1
 
             if agree == 1 and candidate_id != -1:
                 action_dict["target_id"] = candidate_id
             else:
                 action_dict["target_id"] = -1
 
-        # 일반 타겟 파싱
-        raw_target = action_dict.get("target_id")
+        # 일반 타겟 파싱 (Safely)
+        raw_target = action_dict.get("target_id", -1)
+        if raw_target is None: raw_target = -1
+        
         if isinstance(raw_target, str) and raw_target.isdigit():
             action_dict["target_id"] = int(raw_target)
+        elif isinstance(raw_target, (int, float)):
+             action_dict["target_id"] = int(raw_target)
+        else:
+             action_dict["target_id"] = -1
 
         # 액션 유효성 검증 및 보정
         if status.phase in [Phase.NIGHT, Phase.DAY_VOTE]:
-            target_id = action_dict.get("target_id")
+            target_id = action_dict.get("target_id", -1)
             alive_players = [p.id for p in status.players if p.alive]
 
             # 1. 경찰일 경우 이미 조사한 대상 목록 만들기
