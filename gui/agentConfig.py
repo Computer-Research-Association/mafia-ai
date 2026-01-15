@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
     QFileDialog,
 )
 from PyQt6.QtCore import pyqtSignal
+from .tabs.safeComboBox import SafeComboBox
 
 
 class AgentConfigWidget(QGroupBox):
@@ -29,7 +30,7 @@ class AgentConfigWidget(QGroupBox):
 
         # [Type 설정]
         top_layout.addWidget(QLabel("Type:"))
-        self.type_combo = QComboBox()
+        self.type_combo = SafeComboBox()
         self.type_combo.addItems(["RL", "LLM", "RBA"])
         self.type_combo.setSizePolicy(
             self.type_combo.sizePolicy().horizontalPolicy(),
@@ -39,7 +40,7 @@ class AgentConfigWidget(QGroupBox):
 
         # [Role 설정] - 공통 영역으로 이동됨
         top_layout.addWidget(QLabel("Role:"))
-        self.role_combo = QComboBox()
+        self.role_combo = SafeComboBox()
         # Random을 기본값으로 사용하기 위해 맨 앞에 추가
         self.role_combo.addItems(["Random", "Citizen", "Police", "Doctor", "Mafia"])
         top_layout.addWidget(self.role_combo, stretch=1)
@@ -68,50 +69,68 @@ class AgentConfigWidget(QGroupBox):
 
         rl_layout.addLayout(model_load_layout)
 
-        # [알고리즘 선택]
-        rl_layout.addWidget(QLabel("Algorithm:"))
-        self.algo_combo = QComboBox()
+        # 초기화 버튼
+        self.btn_clear_model = QPushButton("❌")
+        self.btn_clear_model.setFixedWidth(30)
+        self.btn_clear_model.setToolTip("모델 선택 해제")
+        self.btn_clear_model.clicked.connect(self._clear_model_file)
+        model_load_layout.addWidget(self.btn_clear_model)
+
+        # 모델 선택시 숨겨지는 컨테이너
+        self.param_container = QWidget()
+        self.param_layout = QVBoxLayout(self.param_container)
+        self.param_layout.setContentsMargins(0, 0, 0, 0)  # 여백 정리
+
+        # [알고리즘]
+        self.param_layout.addWidget(QLabel("Algorithm:"))
+        self.algo_combo = SafeComboBox()
         self.algo_combo.addItems(["PPO", "REINFORCE"])
-        rl_layout.addWidget(self.algo_combo)
+        self.param_layout.addWidget(self.algo_combo)
 
-        # [백본 선택]
-        rl_layout.addWidget(QLabel("Backbone:"))
-        self.backbone_combo = QComboBox()
+        # [백본]
+        self.param_layout.addWidget(QLabel("Backbone:"))
+        self.backbone_combo = SafeComboBox()
         self.backbone_combo.addItems(["MLP", "LSTM", "GRU"])
-        rl_layout.addWidget(self.backbone_combo)
+        self.param_layout.addWidget(self.backbone_combo)
 
-        # [은닉층 차원]
-        rl_layout.addWidget(QLabel("Hidden Dim:"))
-        self.hidden_dim_spin = QSpinBox()
-        self.hidden_dim_spin.setRange(32, 512)
-        self.hidden_dim_spin.setValue(128)
-        rl_layout.addWidget(self.hidden_dim_spin)
+        # 파라미터 컨테이너를 RL 영역에 추가
+        rl_layout.addWidget(self.param_container)
 
-        # [RNN 레이어 수]
-        rl_layout.addWidget(QLabel("RNN Layers:"))
-        self.num_layers_spin = QSpinBox()
-        self.num_layers_spin.setRange(1, 4)
-        self.num_layers_spin.setValue(2)
-        rl_layout.addWidget(self.num_layers_spin)
-
+        # [중요 해결] rl_config_area를 메인 레이아웃에 추가해야 새 창이 안 뜹니다!
         self.layout.addWidget(self.rl_config_area)
-
-        # 초기 상태 설정: 타입에 따라 RL 영역 표시 여부 결정
-        self.type_combo.currentTextChanged.connect(self._on_type_changed)
-        self._toggle_rl_area(self.type_combo.currentText())
 
         self.layout.addStretch()
 
+        # 초기 상태 설정
+        self.type_combo.currentTextChanged.connect(self._on_type_changed)
+        self._toggle_rl_area(self.type_combo.currentText())
+
     def _select_model_file(self):
-        """모델 파일(.pt) 선택 다이얼로그 열기"""
+        """모델 파일(.pt) 선택 시 파라미터 숨김 처리"""
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             "학습된 모델 파일 선택",
-            "./models",  # 기본 시작 경로
+            "./models",
             "Model Files (*.pt);;All Files (*)",
         )
         if file_path:
             self.load_model_path_input.setText(file_path)
+            # [핵심 기능] 파일이 선택되면 파라미터 설정창 숨기기
+            self.param_container.setVisible(False)
+
+    def _clear_model_file(self):
+        """모델 선택 해제 시 파라미터 다시 보이기"""
+        self.load_model_path_input.clear()
+        # [핵심 기능] 파일이 해제되면 파라미터 설정창 보이기
+        self.param_container.setVisible(True)
+
+    def _on_type_changed(self, text):
+        self._toggle_rl_area(text)
+        self.typeChanged.emit()
+
+    def _clear_model_file(self):
+        self.load_model_path_input.clear()
+        self.param_container.setVisible(True)
 
     def _on_type_changed(self, text):
         self._toggle_rl_area(text)
@@ -124,19 +143,21 @@ class AgentConfigWidget(QGroupBox):
     def get_config(self):
         """현재 설정된 에이전트 정보를 딕셔너리로 반환"""
         config = {"type": self.type_combo.currentText().lower()}
-
-        # [수정] 역할(Role) 정보 포함 (RL/LLM 공통)
         config["role"] = self.role_combo.currentText().lower()
 
         if config["type"] == "rl":
-            config["algo"] = self.algo_combo.currentText().lower()
-            config["backbone"] = self.backbone_combo.currentText().lower()
-            config["hidden_dim"] = self.hidden_dim_spin.value()
-            config["num_layers"] = self.num_layers_spin.value()
-
-            # 모델 로드 경로 포함
+            # 모델 경로 가져오기
             path_text = self.load_model_path_input.text().strip()
             config["load_model_path"] = path_text if path_text else None
+
+            if config["load_model_path"]:
+                # 모델을 로드하는 경우:
+                config["algo"] = None
+                config["backbone"] = None
+            else:
+                # 모델 파일이 없는 경우
+                config["algo"] = self.algo_combo.currentText().lower()
+                config["backbone"] = self.backbone_combo.currentText().lower()
 
         return config
 
@@ -145,9 +166,7 @@ class AgentConfigWidget(QGroupBox):
         agent_type="LLM",
         role="Random",  # [추가] Role 설정 인자
         algo="PPO",
-        backbone="MLP", # Change default to MLP
-        hidden_dim=128,
-        num_layers=2,
+        backbone="MLP",  # Change default to MLP
         load_model_path=None,  # [추가] 모델 경로 인자
     ):
         """외부에서 설정을 일괄 적용할 때 사용"""
@@ -163,8 +182,6 @@ class AgentConfigWidget(QGroupBox):
         if agent_type.upper() == "RL":
             self.algo_combo.setCurrentText(algo.upper())
             self.backbone_combo.setCurrentText(backbone.upper())
-            self.hidden_dim_spin.setValue(hidden_dim)
-            self.num_layers_spin.setValue(num_layers)
 
             if load_model_path:
                 self.load_model_path_input.setText(load_model_path)

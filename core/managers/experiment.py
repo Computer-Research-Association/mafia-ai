@@ -2,6 +2,7 @@ import gymnasium as gym
 import supersuit as ss
 import os
 import multiprocessing
+import torch
 
 from typing import Dict, Any, List
 from pathlib import Path
