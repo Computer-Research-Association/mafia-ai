@@ -340,6 +340,7 @@ class Launcher(QWidget):
             episodes=self.ep_spin.value(),
             gui=True,
             paths=paths,
+            use_il=self.il_btn.is_enabled(),
         )
         self.start_simulation_signal.emit(args)
 
