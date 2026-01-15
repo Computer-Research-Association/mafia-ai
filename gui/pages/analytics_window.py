@@ -32,14 +32,9 @@ class AnalyticsWindow(QMainWindow):
         self.analytics_view = AnalyticsView(self)
         self.tab_widget.addTab(self.analytics_view, "로그 뷰어")
 
-    def show_live(self, log_path):
-        self.tab_widget.setCurrentWidget(self.analytics_view)
-        self.analytics_view.select_live(log_path)
-
     def closeEvent(self, event):
         if hasattr(self, "analytics_view") and self.analytics_view:
-            self.analytics_view.shutdown_tensorboard()
-
+            self.analytics_view.close()
         event.accept()
 
 
