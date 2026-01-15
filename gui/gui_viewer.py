@@ -5,18 +5,21 @@ from PyQt6.QtGui import QIcon
 
 from .tabs.log_viewer import LogViewer
 from pathlib import Path
+from gui.utils.style_loader import StyleLoader
 
 
 class MafiaLogViewerWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Mafia AI 게임 로그 뷰어")
-        icon_path = Path(__file__).parent / "assets" / "icon.jpg"
-        if icon_path.exists():
-            self.setWindowIcon(QIcon(str(icon_path)))
+        # Set window icon
+        icon_path = StyleLoader.get_icon_path("icon.jpg")
+        if icon_path:
+            self.setWindowIcon(QIcon(icon_path))
 
         self.resize(1100, 750)
-        self._load_stylesheet()  # 폰트 설정
+        # stylesheet
+        StyleLoader.load_stylesheet(self, "styles.qss")
         # 중앙 위젯, 레이아웃 설정
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -28,20 +31,6 @@ class MafiaLogViewerWindow(QMainWindow):
 
         self.log_viewer_tab = LogViewer(self)
         self.tab_widget.addTab(self.log_viewer_tab, "로그 뷰어")
-
-    def _load_stylesheet(self):
-        """styles.qss 파일을 읽어서 적용"""
-        try:
-            # 현재 파일(launcher.py)과 같은 폴더에 있는 styles.qss 경로 찾기
-            qss_path = Path(__file__).parent / "assets" / "styles.qss"
-
-            if qss_path.exists():
-                with open(qss_path, "r", encoding="utf-8") as f:
-                    self.setStyleSheet(f.read())
-            else:
-                print(f"Warning: Stylesheet file not found at {qss_path}")
-        except Exception as e:
-            print(f"Error loading stylesheet: {e}")
 
     def show_live(self, log_path):
         self.tab_widget.setCurrentWidget(self.log_viewer_tab)

@@ -21,6 +21,7 @@ from argparse import Namespace
 from pathlib import Path
 from .agentConfig import AgentConfigWidget
 from .tabs.il_btn import ILButton
+from gui.utils.style_loader import StyleLoader
 
 
 class Launcher(QWidget):
@@ -30,9 +31,10 @@ class Launcher(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Mafia AI Simulation")
-        icon_path = Path(__file__).parent / "assets" / "icon.jpg"
-        if icon_path.exists():
-            self.setWindowIcon(QIcon(str(icon_path)))
+        # Set window icon
+        icon_path = StyleLoader.get_icon_path("icon.jpg")
+        if icon_path:
+            self.setWindowIcon(QIcon(icon_path))
 
         self.resize(450, 600)
 
@@ -42,7 +44,7 @@ class Launcher(QWidget):
         self._init_ui()
 
     def _init_ui(self):
-        self._load_stylesheet()
+        StyleLoader.load_stylesheet(self, "styles.qss")
 
         self.main_layout = QHBoxLayout()
         self.main_layout.setContentsMargins(20, 20, 20, 20)
@@ -346,16 +348,3 @@ class Launcher(QWidget):
 
     def on_click_stop(self):
         self.stop_simulation_signal.emit()
-
-    def _load_stylesheet(self):
-        """styles.qss 파일을 읽어서 적용"""
-        try:
-            qss_path = Path(__file__).parent / "assets" / "styles.qss"
-
-            if qss_path.exists():
-                with open(qss_path, "r", encoding="utf-8") as f:
-                    self.setStyleSheet(f.read())
-            else:
-                print(f"Warning: Stylesheet file not found at {qss_path}")
-        except Exception as e:
-            print(f"Error loading stylesheet: {e}")
