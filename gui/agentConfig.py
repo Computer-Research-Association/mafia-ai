@@ -115,7 +115,19 @@ class AgentConfigWidget(QGroupBox):
         )
         if file_path:
             self.load_model_path_input.setText(file_path)
-            # [핵심 기능] 파일이 선택되면 파라미터 설정창 숨기기
+            try:
+                import torch
+
+                checkpoint = torch.load(file_path, map_location="cpu")
+                saved_algo = checkpoint.get("algorithm", "PPO")
+                saved_backbone = checkpoint.get("backbone", "MLP")
+                self.algo_combo.setCurrentText(saved_algo.upper())
+                self.backbone_combo.setCurrentText(saved_backbone.upper())
+
+            except Exception as e:
+                print(f"[GUI] Warning: Failed to read metadata from model: {e}")
+
+            # 파일이 선택되면 파라미터 설정창 숨기기
             self.param_container.setVisible(False)
 
     def _clear_model_file(self):
@@ -152,8 +164,8 @@ class AgentConfigWidget(QGroupBox):
 
             if config["load_model_path"]:
                 # 모델을 로드하는 경우:
-                config["algo"] = None
-                config["backbone"] = None
+                config["algo"] = self.algo_combo.currentText().lower()
+                config["backbone"] = self.backbone_combo.currentText().lower()
             else:
                 # 모델 파일이 없는 경우
                 config["algo"] = self.algo_combo.currentText().lower()
