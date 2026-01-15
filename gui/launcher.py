@@ -78,6 +78,13 @@ class Launcher(QWidget):
         self.mode_group.setLayout(mode_layout)
         layout.addWidget(self.mode_group)
 
+        # IL 버튼
+        self.il_btn = ILButton()
+        mode_layout.addWidget(self.il_btn)
+
+        self.mode_group.setLayout(mode_layout)
+        layout.addWidget(self.mode_group)
+
         # 2. 에피소드 수
         ep_group = QGroupBox("진행 에피소드 수")
         ep_layout = QVBoxLayout()
