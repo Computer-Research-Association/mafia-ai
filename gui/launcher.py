@@ -20,6 +20,7 @@ from PyQt6.QtCore import pyqtSignal, Qt
 from argparse import Namespace
 from pathlib import Path
 from .agentConfig import AgentConfigWidget
+from .tabs.il_btn import ILButton
 
 
 class Launcher(QWidget):
@@ -74,6 +75,13 @@ class Launcher(QWidget):
 
         mode_layout.addWidget(self.radio_train)
         mode_layout.addWidget(self.radio_test)
+        self.mode_group.setLayout(mode_layout)
+        layout.addWidget(self.mode_group)
+
+        # IL 버튼
+        self.il_btn = ILButton()
+        mode_layout.addWidget(self.il_btn)
+
         self.mode_group.setLayout(mode_layout)
         layout.addWidget(self.mode_group)
 
@@ -332,6 +340,7 @@ class Launcher(QWidget):
             episodes=self.ep_spin.value(),
             gui=True,
             paths=paths,
+            use_il=self.il_btn.is_enabled(),
         )
         self.start_simulation_signal.emit(args)
 

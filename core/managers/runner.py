@@ -43,23 +43,30 @@ def train(
     # === IL Dataset Setup ===
     expert_loader = None
     log_dir_path = Path(config.paths.LOG_DIR)
+    use_il = getattr(args, "use_il", False)  # IL 모드 사용 여부
 
-    try:
-        expert_files = list(log_dir_path.rglob("train_set.jsonl"))
-        if expert_files:
-            expert_file = max(expert_files, key=os.path.getmtime)
-            print(f"[IL] Found expert data: {expert_file}")
+    # IL 모드가 켜져 있으면 전문가 데이터 로더 설정
+    if use_il:
+        try:
+            expert_files = list(log_dir_path.rglob("train_set.jsonl"))
+            if expert_files:
+                expert_file = max(expert_files, key=os.path.getmtime)
+                print(f"[IL] Found expert data: {expert_file}")
 
-            dataset = ExpertDataset(str(expert_file))
-            if len(dataset) > 0:
-                expert_loader = DataLoader(
-                    dataset, batch_size=config.train.BATCH_SIZE, shuffle=True
-                )
-                print(f"[IL] DataLoader ready with {len(dataset)} samples.")
-        else:
-            print("[IL] No expert data 'train_set.jsonl' found in logs.")
-    except Exception as e:
-        print(f"[IL] Failed to setup expert loader: {e}")
+                dataset = ExpertDataset(str(expert_file))
+                if len(dataset) > 0:
+                    expert_loader = DataLoader(
+                        dataset, batch_size=config.train.BATCH_SIZE, shuffle=True
+                    )
+                    print(
+                        f"[IL] DataLoader ready with {len(dataset)} samples. (Mode: ON)"
+                    )
+            else:
+                print("[IL] No expert data 'train_set.jsonl' found in logs.")
+        except Exception as e:
+            print(f"[IL] Failed to setup expert loader: {e}")
+    else:
+        print("[IL] Imitation Learning is DISABLED (Switch OFF).")
 
     stats_manager = StatsManager()
     total_episodes = args.episodes
@@ -180,7 +187,7 @@ def train(
 
         if num_finished_now > 0:
             finished_slot_indices = np.where(dones)[0]
-            
+
             # Reset hidden states for finished games (RNN support)
             for finished_slot in finished_slot_indices:
                 for agent in rl_agents.values():
