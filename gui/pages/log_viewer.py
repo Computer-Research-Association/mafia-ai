@@ -12,9 +12,9 @@ from PyQt6.QtCore import Qt
 
 from core.engine.state import GameEvent
 from core.managers.logger import LogManager
-from .logLeft import LogLeft
-from .logRight import LogRight
-from .logEvent import LogEvent
+from gui.widgets.log_left import LogLeft
+from gui.widgets.log_right import LogRight
+from gui.utils.log_event import LogEvent
 
 
 class LogViewer(QWidget):
