@@ -30,7 +30,7 @@ class Launcher(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Mafia AI Simulation")
-        icon_path = Path(__file__).parent / "icon.jpg"
+        icon_path = Path(__file__).parent / "assets" / "icon.jpg"
         if icon_path.exists():
             self.setWindowIcon(QIcon(str(icon_path)))
 
@@ -350,8 +350,7 @@ class Launcher(QWidget):
     def _load_stylesheet(self):
         """styles.qss 파일을 읽어서 적용"""
         try:
-            # 현재 파일(launcher.py)과 같은 폴더에 있는 styles.qss 경로 찾기
-            qss_path = Path(__file__).parent / "styles.qss"
+            qss_path = Path(__file__).parent / "assets" / "styles.qss"
 
             if qss_path.exists():
                 with open(qss_path, "r", encoding="utf-8") as f:
