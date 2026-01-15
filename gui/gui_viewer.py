@@ -3,7 +3,7 @@ from PyQt6.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget, QTa
 from PyQt6.QtGui import QFont
 from PyQt6.QtGui import QIcon
 
-from .tabs.log_viewer import LogViewer
+from .pages.log_viewer import LogViewer
 from pathlib import Path
 from gui.utils.style_loader import StyleLoader
 

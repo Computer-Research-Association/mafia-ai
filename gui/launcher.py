@@ -19,8 +19,8 @@ from PyQt6.QtGui import QIcon
 from PyQt6.QtCore import pyqtSignal, Qt
 from argparse import Namespace
 from pathlib import Path
-from .agentConfig import AgentConfigWidget
-from .tabs.il_btn import ILButton
+from .widgets.agent_config_widget import AgentConfigWidget
+from .widgets.il_btn import ILButton
 from gui.utils.style_loader import StyleLoader
 
 

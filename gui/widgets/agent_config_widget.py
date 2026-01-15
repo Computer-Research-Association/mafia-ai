@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (
     QFileDialog,
 )
 from PyQt6.QtCore import pyqtSignal
-from .tabs.safeComboBox import SafeComboBox
+from .safe_combo_box import SafeComboBox
 
 
 class AgentConfigWidget(QGroupBox):
