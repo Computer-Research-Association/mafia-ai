@@ -11,7 +11,7 @@ LOSS_PENALTY = -1.0
 TIME_PENALTY_UNIT = -0.1
 DECEPTION_MULTIPLIER = 1.5
 REWARD_LAMBDA = 0.5
-INT_REWARD_SCALE = 20.0
+INT_REWARD_SCALE = 25.0
 
 # === [2. Reward Matrix Setup] ===
 # [내 역할][이벤트 타입][대상 역할] 구조의 3차원 행렬
