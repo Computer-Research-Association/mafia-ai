@@ -154,7 +154,7 @@ class DashBoard(QWidget):
         # 모델 저장 경로
         path_layout.addWidget(QLabel("모델 저장:"), 0, 0)
         self.model_path_input = QLineEdit()
-        self.model_path_input.setText("./models")
+        self.model_path_input.setText("./logs")
         self.model_path_input.setReadOnly(True)
         path_layout.addWidget(self.model_path_input, 0, 1)
 

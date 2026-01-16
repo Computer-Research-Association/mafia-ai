@@ -108,7 +108,7 @@ class AgentConfigWidget(QGroupBox):
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             "학습된 모델 파일 선택",
-            "./models",
+            "./logs",
             "Model Files (*.pt);;All Files (*)",
         )
         if file_path:

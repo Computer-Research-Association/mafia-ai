@@ -270,10 +270,12 @@ def train(
 
     # --- 학습 종료 및 저장 ---
     print("\n[System] Saving trained models...")
-    model_dir = getattr(config.paths, "MODEL_DIR", "./models")
-    os.makedirs(model_dir, exist_ok=True)
+    save_dir = logger.session_dir / "models"
+    save_dir.mkdir(parents=True, exist_ok=True)
+    os.makedirs(save_dir, exist_ok=True)
+
     for pid, agent in rl_agents.items():
-        save_path = os.path.join(model_dir, f"agent_{pid}_supersuit.pt")
+        save_path = os.path.join(save_dir, f"agent_{pid}_supersuit.pt")
         if hasattr(agent, "save"):
             agent.save(save_path)
             print(f"Saved: {save_path}")
