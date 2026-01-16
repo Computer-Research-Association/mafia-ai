@@ -14,7 +14,7 @@ class RuleBaseAgent(BaseAgent):
         self.known_mafia: Set[int] = set()
         self.mafia_teammates: Set[int] = set()
         self.investigated_players: Set[int] = set()
-        self.has_claimed_role: bool = False # 내가 직업을 밝혔는지 여부
+        self.has_claimed_role: bool = False
 
     def reset(self):
         self.suspicion_scores.clear()
@@ -87,10 +87,17 @@ class RuleBaseAgent(BaseAgent):
                         self.proven_citizens.add(event.target_id)
                         self.suspicion_scores[event.target_id] = 0.0
             
-            if event.event_type == EventType.EXECUTE and event.value == Role.MAFIA:
-                for prev in status.action_history:
-                    if prev.day == event.day and prev.event_type == EventType.VOTE and prev.target_id == event.target_id:
-                        self.suspicion_scores[prev.actor_id] -= 25.0
+            if event.event_type == EventType.EXECUTE:
+                if event.value == Role.MAFIA:
+                    for prev in status.action_history:
+                        if prev.day == event.day and prev.event_type == EventType.VOTE and prev.target_id == event.target_id:
+                            self.suspicion_scores[prev.actor_id] -= 25.0
+                elif event.value is not None:
+                    for prev in status.action_history:
+                        if prev.day == event.day and prev.event_type == EventType.VOTE and prev.target_id == event.target_id:
+                            self.suspicion_scores[prev.actor_id] += 20.0
+                        if prev.event_type == EventType.CLAIM and prev.target_id == event.target_id and prev.value == Role.MAFIA:
+                            self.suspicion_scores[prev.actor_id] += 50.0
 
     def _act_discussion(self, status: GameStatus, targets: List[int]) -> GameAction:
         if self.role == Role.POLICE:
@@ -105,6 +112,14 @@ class RuleBaseAgent(BaseAgent):
             if self.suspicion_scores.get(self.id, 0) > 60 and not self.has_claimed_role:
                 self.has_claimed_role = True
                 return GameAction(target_id=self.id, claim_role=Role.POLICE)
+            
+            if not self.has_claimed_role and status.day <= 2 and random.random() < 0.4:
+                potential_victims = [t for t in targets if t not in self.mafia_teammates]
+                if potential_victims:
+                    target = random.choice(potential_victims)
+                    self.has_claimed_role = True
+                    return GameAction(target_id=target, claim_role=Role.POLICE)
+
             if self.has_claimed_role:
                 potential = [t for t in targets if t not in self.mafia_teammates]
                 if potential: return GameAction(target_id=random.choice(potential), claim_role=Role.MAFIA)
@@ -149,14 +164,15 @@ class RuleBaseAgent(BaseAgent):
         if self.role == Role.MAFIA:
             pot = [t for t in targets if t not in self.mafia_teammates]
             if not pot: return GameAction(target_id=-1)
-            # 의사나 경찰 주장을 한 사람 우선 공격
             target = max(pot, key=lambda x: self.attention_scores.get(x, 0) - self.suspicion_scores.get(x, 0) + (20 if x in self.role_claims else 0) + random.uniform(-5, 5))
             return GameAction(target_id=target)
         if self.role == Role.DOCTOR:
-            # 경찰이라고 주장한 사람 최우선 보호
             for pid, r in self.role_claims.items():
                 if r == Role.POLICE and pid in targets: return GameAction(target_id=pid)
-            return GameAction(target_id=self.id if self.attention_scores.get(self.id, 0) > 20 else self.id)
+            
+            potentials = targets + [self.id]
+            best_target = max(potentials, key=lambda p: (self.attention_scores.get(p, 0) - self.suspicion_scores.get(p, 0) - (20.0 if p == self.id else 0)))
+            return GameAction(target_id=best_target)
         if self.role == Role.POLICE:
             un = [t for t in targets if t not in self.investigated_players]
             if not un: return GameAction(target_id=-1)
