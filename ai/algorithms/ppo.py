@@ -185,17 +185,19 @@ class PPO:
                 else:
                     delta = rewards[t] + self.gamma * values_ext[t+1] - values[t]
                     gae = delta + self.gamma * gae_lambda * gae
-                advantages.insert(0, gae)
+                advantages.append(gae)
+
+            advantages.reverse()
                 
             # Returns = Adv + Value
             returns = [a + v for a, v in zip(advantages, values)]
             
             # Store processed data
-            flat_states.append(torch.tensor(self.buffer.states[i], dtype=torch.float32))
+            flat_states.append(torch.tensor(np.array(self.buffer.states[i]), dtype=torch.float32))
             flat_actions.append(torch.stack(self.buffer.actions[i]))
             flat_logprobs.append(torch.stack(self.buffer.logprobs[i]))
-            flat_returns.append(torch.tensor(returns, dtype=torch.float32))
-            flat_advantages.append(torch.tensor(advantages, dtype=torch.float32))
+            flat_returns.append(torch.tensor(np.array(returns), dtype=torch.float32))
+            flat_advantages.append(torch.tensor(np.array(advantages), dtype=torch.float32))
             
             if self.buffer.masks[i]:
                  # Numpy list -> Numpy Array -> Tensor conversion
