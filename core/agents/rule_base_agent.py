@@ -7,7 +7,7 @@ from config import EventType, Role, Phase
 # [Tuning] 시민 단합력을 위한 상수 조정
 BASE_SUSPICION = 10.0
 BASE_ATTENTION = 10.0
-VOTE_THRESHOLD_BASE = 5.0  # 투표 기권 방지 (낮춤)
+VOTE_THRESHOLD_BASE = 5.0
 
 class RuleBaseAgent(BaseAgent):
     def __init__(self, player_id: int, role: Role):
@@ -72,10 +72,6 @@ class RuleBaseAgent(BaseAgent):
             self.player_stats[pid]["suspicion"] = BASE_SUSPICION
             self.player_stats[pid]["attention"] = BASE_ATTENTION
         
-        # [Fix] Reset Individual slightly but keep memory (Decay logic instead of hard reset)
-        # But for RBA simplicity, we recalculate base logic + memory persistence
-        # 여기서는 로직 단순화를 위해 매 턴 재계산하되, 이전 턴의 '확신'은 유지되어야 함.
-        # 편의상 재계산 로직을 유지하되 논리를 강화함.
         for pid in self.individual_suspicion:
             self.individual_suspicion[pid] = 10.0
             if self.role == Role.MAFIA and pid in self.known_mafia:
@@ -83,14 +79,18 @@ class RuleBaseAgent(BaseAgent):
 
         self.public_claims = []
         
-        # [Logic] 물리 법칙 (Role Capacity)
         dead_roles = {Role.POLICE: 0, Role.DOCTOR: 0}
         alive_claims = {Role.POLICE: [], Role.DOCTOR: []}
 
         # 3. Replay
         for event in status.action_history:
             actor = event.actor_id
-            target = event.target_id
+            target = event.target_id # [주의] 여기서 target이 None일 수 있음
+
+            # [FIX] target이 None이면 -1로 처리하거나 건너뛰기
+            # 유효한 타겟(플레이어 ID)이 아니면 통계 갱신 로직을 스킵해야 안전함
+            if target is None: 
+                target = -1
             
             # --- Dead Role Counting ---
             if event.event_type == EventType.EXECUTE and event.value:
@@ -98,6 +98,10 @@ class RuleBaseAgent(BaseAgent):
             
             # --- Claims ---
             if event.event_type == EventType.CLAIM and event.value is not None:
+                # actor나 target이 유효하지 않으면 스킵
+                if actor not in self.player_stats or (target != -1 and target not in self.player_stats):
+                    continue
+
                 if actor == target: # Self Claim
                     claimed_role = event.value
                     self.player_stats[actor]["claimed_role"] = claimed_role
@@ -105,17 +109,13 @@ class RuleBaseAgent(BaseAgent):
                     if claimed_role in alive_claims:
                         if actor not in alive_claims[claimed_role]: alive_claims[claimed_role].append(actor)
 
-                    # [Critical Logic] 정원 초과 체크
                     is_fake = False
                     if claimed_role in dead_roles and dead_roles[claimed_role] >= 1: is_fake = True
                     
-                    # [Critical Logic] 내 직업 사칭
                     if self.role == claimed_role and claimed_role != Role.CITIZEN and actor != self.id:
-                        self.individual_suspicion[actor] = 999.0 # 넌 죽었다
+                        self.individual_suspicion[actor] = 999.0 
                     
-                    # [Critical Logic] 물리적 모순 발견 시 전원 의심 (경찰이 2명? 둘 다 의심)
                     if len(alive_claims.get(claimed_role, [])) >= 2 and claimed_role != Role.CITIZEN:
-                        # 대립직은 둘 다 의심도를 대폭 높여서, 둘 중 하나를 투표하게 만듦
                         for claimer in alive_claims[claimed_role]:
                             self.player_stats[claimer]["suspicion"] += 100.0 
                             self.player_stats[claimer]["attention"] += 50.0
@@ -132,47 +132,48 @@ class RuleBaseAgent(BaseAgent):
                             for r in rivals: self.player_stats[r]["suspicion"] += 50
 
                 else: # Accusation
-                    res_str = 'MAFIA' if event.value == Role.MAFIA else 'CITIZEN'
-                    self.public_claims.append({
-                        "claimerId": actor, "targetId": target, 
-                        "role": self.player_stats[actor]["claimed_role"], 
-                        "result": res_str, "day": event.day
-                    })
-                    
-                    # [Trust Logic] 내가 믿는 사람(확신하는 시민/경찰)의 말은 전적으로 신뢰
-                    trust_score = 100 - self.individual_suspicion.get(actor, 50)
-                    if self.player_stats[actor]["is_confirmed"]: trust_score = 100
-                    
-                    if trust_score > 80: # 신뢰하는 사람의 말
-                        if event.value == Role.MAFIA:
-                            self.individual_suspicion[target] += 500.0 # 나도 같이 의심
-                        elif event.value == Role.CITIZEN:
-                            self.individual_suspicion[target] = 0.0
+                    # 타겟이 유효한 플레이어일 때만 처리
+                    if target != -1:
+                        res_str = 'MAFIA' if event.value == Role.MAFIA else 'CITIZEN'
+                        self.public_claims.append({
+                            "claimerId": actor, "targetId": target, 
+                            "role": self.player_stats[actor]["claimed_role"], 
+                            "result": res_str, "day": event.day
+                        })
+                        
+                        trust_score = 100 - self.individual_suspicion.get(actor, 50)
+                        if self.player_stats[actor]["is_confirmed"]: trust_score = 100
+                        
+                        if trust_score > 80: 
+                            if event.value == Role.MAFIA:
+                                self.individual_suspicion[target] += 500.0 
+                            elif event.value == Role.CITIZEN:
+                                self.individual_suspicion[target] = 0.0
 
-                    # Global Effect
-                    if event.value == Role.MAFIA:
-                        self.player_stats[target]["suspicion"] += 40
-                        self.player_stats[target]["attention"] += 20
-                    elif event.value == Role.CITIZEN:
-                        reduce = 1000 if self.player_stats[actor]["is_confirmed"] else 30
-                        self.player_stats[target]["suspicion"] = max(0, self.player_stats[target]["suspicion"] - reduce)
-                        if self.player_stats[actor]["is_confirmed"]:
-                            self.player_stats[target]["is_proven_citizen"] = True
+                        if event.value == Role.MAFIA:
+                            self.player_stats[target]["suspicion"] += 40
+                            self.player_stats[target]["attention"] += 20
+                        elif event.value == Role.CITIZEN:
+                            reduce = 1000 if self.player_stats[actor]["is_confirmed"] else 30
+                            # [FIX] 여기서 KeyError 발생했던 지점
+                            self.player_stats[target]["suspicion"] = max(0, self.player_stats[target]["suspicion"] - reduce)
+                            if self.player_stats[actor]["is_confirmed"]:
+                                self.player_stats[target]["is_proven_citizen"] = True
             
             # --- Execution & Feedback ---
             if event.event_type == EventType.EXECUTE:
+                 # target이 -1이거나 None이면 스킵
                  if event.value is None or target == -1: continue
                  
-                 # Remove from claims list
                  for r in alive_claims:
                      if target in alive_claims[r]: alive_claims[r].remove(target)
 
-                 if event.value != Role.MAFIA: # Innocent Died
+                 if event.value != Role.MAFIA: 
                      for c in self.public_claims:
                          if c["targetId"] == target and c["result"] == 'MAFIA':
-                             self.player_stats[c["claimerId"]]["suspicion"] += 80 # Penalty Up
+                             self.player_stats[c["claimerId"]]["suspicion"] += 80 
                              self.individual_suspicion[c["claimerId"]] = self.individual_suspicion.get(c["claimerId"], 10) + 80
-                 else: # Mafia Died
+                 else: 
                      for c in self.public_claims:
                          if c["targetId"] == target and c["result"] == 'MAFIA':
                              c_role = self.player_stats[c["claimerId"]]["claimed_role"]
@@ -184,7 +185,8 @@ class RuleBaseAgent(BaseAgent):
             # --- Internal Knowledge ---
             if event.event_type == EventType.POLICE_RESULT:
                 reliable = (self.role==Role.POLICE and actor==self.id) or (self.role==Role.MAFIA and actor==-1)
-                if reliable:
+                # target 유효성 체크
+                if reliable and target != -1:
                     is_mafia = (event.value == Role.MAFIA)
                     if is_mafia:
                         target_list = self.known_mafia if self.role==Role.MAFIA else self.known_mafia
@@ -213,7 +215,7 @@ class RuleBaseAgent(BaseAgent):
                 if gamble < 0.4: return self._do_claim(Role.POLICE)
                 elif gamble < 0.7: return self._do_claim(Role.DOCTOR)
                 else: return self._do_claim(Role.CITIZEN)
-            elif not self.claimed_role and random.random() < 0.15: # 사칭 더 적극적으로
+            elif not self.claimed_role and random.random() < 0.15: 
                 if status.day == 1: return self._do_claim(Role.POLICE)
                 elif random.random() < 0.6:
                     targets = [p for p in survivors if p.id not in self.known_mafia]
@@ -221,7 +223,6 @@ class RuleBaseAgent(BaseAgent):
 
         # 2. POLICE
         elif self.role == Role.POLICE:
-            # 내 직업 사칭하는 놈 있으면 바로 공격 (Counter)
             counter = [p for p in survivors if self.player_stats[p.id]["claimed_role"] == Role.POLICE]
             if counter:
                 self.is_hiding_role = False
@@ -241,7 +242,6 @@ class RuleBaseAgent(BaseAgent):
                 self.is_hiding_role = False
                 return self._do_claim(Role.DOCTOR)
             
-            # 누가 의사라고 사칭하면 나도 나감
             counter = [p for p in survivors if self.player_stats[p.id]["claimed_role"] == Role.DOCTOR]
             if counter and not self.claimed_role:
                 return self._do_claim(Role.DOCTOR)
@@ -251,7 +251,6 @@ class RuleBaseAgent(BaseAgent):
 
         # 4. CITIZEN
         elif self.role == Role.CITIZEN:
-             # 확신범이 있으면 적극적으로 발언
              if personal_target and max_personal_sus > 100:
                  if random.random() < 0.5:
                      return GameAction(target_id=personal_target.id, claim_role=Role.MAFIA)
@@ -272,20 +271,14 @@ class RuleBaseAgent(BaseAgent):
             cand_stat = self.player_stats[candidate.id]
             ind_sus = self.individual_suspicion.get(candidate.id, 10)
             
-            # [Ultimate Tuning] 확신이 들면(ind_sus > 90) 점수 뻥튀기
-            # 내가 아는 정보(논리)가 여론(Noise)보다 훨씬 중요함
             score = ind_sus * 5.0 + cand_stat["suspicion"] * 1.0 + cand_stat["attention"] * 0.5
-            
-            # 노이즈 사실상 제거 (동점 방지용 미세 노이즈만 남김)
             score += random.random() * 0.1
             
-            # 확정 시민/동료 보호
             is_safe = False
             if self.role == Role.MAFIA and candidate.id in self.known_mafia: is_safe = True
             if candidate.id in self.known_safe: is_safe = True
             
             if is_safe:
-                # 마피아의 꼬리 자르기 (Bus) 조건 강화: 의심이 너무 높으면 버림
                 if self.role == Role.MAFIA and cand_stat["suspicion"] > 150: score += 50
                 else: score = -9999.0
 
@@ -312,20 +305,15 @@ class RuleBaseAgent(BaseAgent):
         
         my_sus_on_target = self.individual_suspicion.get(target_id, 10)
         
-        # [Ultimate Logic] 찬성/반대 결정
-        # 1. 내가 확신하는 범인이면 무조건 찬성
         if my_sus_on_target > 90: return GameAction(target_id=target_id)
         
-        # 2. 내가 확신하는 시민이면 무조건 반대
         if my_sus_on_target < 5: return GameAction(target_id=-1)
         if target_id in self.known_safe: return GameAction(target_id=-1)
         if cand_stat["is_proven_citizen"]: return GameAction(target_id=-1)
         
-        # 3. 잘 모르겠으면 여론 따름 (suspicion이 높으면 찬성)
         chance = 0.5
         if cand_stat["suspicion"] > 50: chance += 0.4
         
-        # 대립직은 죽이는 게 이득 (Conflict Logic)
         target_role_claim = cand_stat["claimed_role"]
         if target_role_claim and target_role_claim != Role.CITIZEN:
              if any(self.player_stats[p.id]["claimed_role"] == target_role_claim for p in survivors if p.id != target_id):
@@ -333,7 +321,6 @@ class RuleBaseAgent(BaseAgent):
 
         agree = (chance > 0.5)
         
-        # Mafia Logic
         if self.role == Role.MAFIA:
             if target_id in self.known_mafia: agree = (cand_stat["suspicion"] > 150)
             else: agree = True
@@ -349,21 +336,16 @@ class RuleBaseAgent(BaseAgent):
                        if st["claimed_role"] == Role.DOCTOR and st["declared_self_heal"]]
             avoid = set(healers + self.known_mafia)
             
-            # [Smart Kill] 경찰 주장자 -> 확정 시민 -> 조용한 시민 순으로 사살
-            # 1. Police
             revealed_police = [p for p in targets if self.player_stats[p]["claimed_role"] == Role.POLICE and p not in avoid]
             if revealed_police: return GameAction(target_id=revealed_police[0])
             
-            # 2. Proven Citizen
             proven = [p for p in targets if self.player_stats[p]["is_proven_citizen"] and p not in avoid]
             if proven: return GameAction(target_id=proven[0])
 
-            # 3. Others (Random or Low Sus)
             candidates = [p for p in targets if p not in avoid]
             if candidates: return GameAction(target_id=random.choice(candidates))
             
         elif self.role == Role.DOCTOR:
-            # [Smart Heal] 경찰 -> 나 -> 확정 시민
             claimed_police = [p for p in targets if self.player_stats[p]["claimed_role"] == Role.POLICE]
             if claimed_police: return GameAction(target_id=claimed_police[0])
             
@@ -377,7 +359,6 @@ class RuleBaseAgent(BaseAgent):
         elif self.role == Role.POLICE:
             unknown = [t for t in targets if t not in self.investigated_log and t != self.id]
             if unknown:
-                # [Smart Investigate] 의심스러운 놈부터 조사 (검증)
                 unknown.sort(key=lambda x: self.player_stats[x]["suspicion"], reverse=True)
                 target = unknown[0]
                 self.investigated_log.append(target)
