@@ -3,15 +3,13 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QHBoxLayout,
     QLabel,
-    QComboBox,
-    QSpinBox,
     QGroupBox,
     QLineEdit,
     QPushButton,
     QFileDialog,
 )
 from PyQt6.QtCore import pyqtSignal
-from .tabs.safeComboBox import SafeComboBox
+from ...utils.safe_combo_box import SafeComboBox
 
 
 class AgentConfigWidget(QGroupBox):

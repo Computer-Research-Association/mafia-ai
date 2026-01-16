@@ -5,7 +5,7 @@ import threading
 from PyQt6.QtWidgets import QApplication
 from core.managers.runner import train, test
 from core.managers.experiment import ExperimentManager
-from gui.launcher import Launcher
+from gui.pages.dashboard import DashBoard
 
 STOP = threading.Event()  # 종료 신호
 
@@ -35,12 +35,12 @@ def run_simulation(args):
         if args.mode == "train":
             env = experiment.build_vec_env(num_envs=8, num_cpus=4)
             train(
-                env, 
-                rl_agents, 
-                agents, 
-                args, 
-                experiment.logger, 
-                stop_event=STOP, 
+                env,
+                rl_agents,
+                agents,
+                args,
+                experiment.logger,
+                stop_event=STOP,
             )
 
         elif args.mode == "test":
@@ -54,7 +54,7 @@ def run_simulation(args):
 
 def start_gui():
     app = QApplication(sys.argv)
-    launcher = Launcher()
+    launcher = DashBoard()
 
     def on_simulation_start(args):
         STOP.clear()

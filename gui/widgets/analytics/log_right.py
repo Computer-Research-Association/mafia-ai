@@ -16,7 +16,7 @@ from PyQt6.QtCore import pyqtSignal, QTimer
 from core.engine.state import GameEvent
 from config import Phase, EventType
 from core.managers.logger import LogManager
-from .logEvent import LogEvent
+from gui.utils.log_event import LogEvent
 
 
 class LogRight(QWidget):

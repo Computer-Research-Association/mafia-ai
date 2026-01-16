@@ -9,7 +9,6 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
-    QFileDialog,
     QTreeView,
     QHeaderView,
     QMenu,
