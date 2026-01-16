@@ -8,6 +8,7 @@ from tqdm import tqdm
 
 from config import Role, config
 from core.managers.stats import StatsManager
+from collections import defaultdict
 from core.managers.logger import LogManager
 from core.managers.expert import ExpertDataManager, ExpertDataset
 from pathlib import Path
@@ -310,6 +311,8 @@ def test(
     else:
         print("  - [Data Collection OFF] No logger provided.")
 
+    stats_manager = StatsManager()
+
     # Helper function to process logs from infos
     def process_logs(info_dict):
         if not logger or not info_dict:
@@ -334,6 +337,8 @@ def test(
         if hasattr(agent, "reset_hidden"):
             agent.reset_hidden(batch_size=1)
     process_logs(infos)
+
+    current_episode_rewards = defaultdict(float)
 
     # Stats
     win_counts = {Role.CITIZEN: 0, Role.MAFIA: 0}
@@ -362,6 +367,9 @@ def test(
             next_obs, rewards, terminations, truncations, infos = env.step(env_actions)
             done = not env.agents
 
+            for agent_id, r in rewards.items():
+                current_episode_rewards[agent_id] += r
+
             process_logs(infos)
             obs = next_obs
 
@@ -378,11 +386,45 @@ def test(
                     )
 
                 if logger:
-                    is_win = winner == Role.MAFIA
-                    logger.log_metrics(
-                        completed_episodes, total_reward=0, is_win=is_win
+                    finished_infos = []
+                    finished_rewards = []
+
+                    rl_only_agents = {
+                        pid: agent
+                        for pid, agent in all_agents.items()
+                        if hasattr(agent, "select_action_vector")
+                    }
+
+                    for i in range(8):
+                        p_key = f"player_{i}"
+                        # Info
+                        info = infos.get(p_key, {})
+                        finished_infos.append(info)
+                        finished_rewards.append(current_episode_rewards.get(p_key, 0.0))
+
+                    metrics = stats_manager.calculate_stats(
+                        infos=finished_infos,
+                        rewards=finished_rewards,
+                        rl_agents=rl_only_agents,
+                        train_metrics={},
                     )
+
+                    filtered_metrics = {
+                        k: v for k, v in metrics.items() if "Reward" not in k
+                    }
+
+                    is_win = winner == Role.MAFIA
+
+                    logger.log_metrics(
+                        episode=completed_episodes,
+                        total_reward=0,
+                        is_win=is_win,
+                        **filtered_metrics,
+                    )
+
                     logger.set_episode(completed_episodes + 1)
+
+                current_episode_rewards.clear()
 
                 pbar.update(1)
                 win_rate = (
