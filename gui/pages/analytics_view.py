@@ -5,10 +5,9 @@ from typing import Optional
 from PyQt6.QtWidgets import QWidget, QHBoxLayout, QSplitter
 from PyQt6.QtCore import Qt
 
-from core.engine.state import GameEvent
 from core.managers.logger import LogManager
-from gui.widgets.log_left import LogLeft
-from gui.widgets.log_right import LogRight
+from gui.widgets.analytics.log_left import LogLeft
+from gui.widgets.analytics.log_right import LogRight
 from gui.utils.log_event import LogEvent
 from gui.services.tensorboard_manager import TensorBoardManager
 
