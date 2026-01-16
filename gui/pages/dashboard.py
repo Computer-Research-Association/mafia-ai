@@ -19,20 +19,23 @@ from PyQt6.QtGui import QIcon
 from PyQt6.QtCore import pyqtSignal, Qt
 from argparse import Namespace
 from pathlib import Path
-from .agentConfig import AgentConfigWidget
-from .tabs.il_btn import ILButton
+from ..widgets.dashboard.agent_config_widget import AgentConfigWidget
+from ..widgets.dashboard.il_btn import ILButton
+from gui.utils.style_loader import StyleLoader
+from gui.pages.analytics_window import AnalyticsWindow
 
 
-class Launcher(QWidget):
+class DashBoard(QWidget):
     start_simulation_signal = pyqtSignal(object)
     stop_simulation_signal = pyqtSignal()
 
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Mafia AI Simulation")
-        icon_path = Path(__file__).parent / "icon.jpg"
-        if icon_path.exists():
-            self.setWindowIcon(QIcon(str(icon_path)))
+        # Set window icon
+        icon_path = StyleLoader.get_icon_path("icon.jpg")
+        if icon_path:
+            self.setWindowIcon(QIcon(icon_path))
 
         self.resize(450, 600)
 
@@ -42,7 +45,7 @@ class Launcher(QWidget):
         self._init_ui()
 
     def _init_ui(self):
-        self._load_stylesheet()
+        StyleLoader.load_stylesheet(self, "styles.qss")
 
         self.main_layout = QHBoxLayout()
         self.main_layout.setContentsMargins(20, 20, 20, 20)
@@ -290,35 +293,8 @@ class Launcher(QWidget):
 
     def open_log_viewer(self):
         """로그 뷰어 창 열기 (PyQt6 윈도우)"""
-        # 이전에 만든 gui_viewer.py의 클래스를 import
-        try:
-            from gui.gui_viewer import MafiaLogViewerWindow
-
-            self.log_window = MafiaLogViewerWindow()
-            self.log_window.show()
-        except ImportError:
-            QMessageBox.warning(
-                self, "오류", "gui/gui_viewer.py 파일을 찾을 수 없습니다."
-            )
-
-    def open_log_live(self):
-        """로그 뷰어 창 열기 (PyQt6 윈도우)"""
-        # 이전에 만든 gui_viewer.py의 클래스를 import
-        try:
-            from gui.gui_viewer import MafiaLogViewerWindow
-
-            self.log_window = MafiaLogViewerWindow()
-            self.log_window.show()
-            self.log_window.raise_()
-            self.log_window.activateWindow()
-
-            base_path = self.log_path_input.text()
-
-            self.log_window.show_live(base_path)
-        except ImportError:
-            QMessageBox.warning(
-                self, "오류", "gui/gui_viewer.py 파일을 찾을 수 없습니다."
-            )
+        self.log_window = AnalyticsWindow()
+        self.log_window.show()
 
     def on_click_start(self):
         """시뮬레이션 시작 버튼 클릭 - 개별 에이전트 설정 수집"""
@@ -346,17 +322,3 @@ class Launcher(QWidget):
 
     def on_click_stop(self):
         self.stop_simulation_signal.emit()
-
-    def _load_stylesheet(self):
-        """styles.qss 파일을 읽어서 적용"""
-        try:
-            # 현재 파일(launcher.py)과 같은 폴더에 있는 styles.qss 경로 찾기
-            qss_path = Path(__file__).parent / "styles.qss"
-
-            if qss_path.exists():
-                with open(qss_path, "r", encoding="utf-8") as f:
-                    self.setStyleSheet(f.read())
-            else:
-                print(f"Warning: Stylesheet file not found at {qss_path}")
-        except Exception as e:
-            print(f"Error loading stylesheet: {e}")
