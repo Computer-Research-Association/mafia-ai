@@ -76,7 +76,7 @@ class LogLeft(QWidget):
         self._init_default_logs_path()
 
     def _init_default_logs_path(self):
-        project_root = Path(__file__).parent.parent.parent.resolve()
+        project_root = Path(__file__).parent.parent.parent.parent.resolve()
         default_logs = project_root / "logs"
 
         if not default_logs.exists():
