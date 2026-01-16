@@ -1,276 +1,186 @@
 import random
-from typing import List, Set
+from typing import List, Set, Dict
 from core.agents.base_agent import BaseAgent
 from core.engine.state import GameStatus, GameAction
 from config import EventType, Role, Phase
 
-
 class RuleBaseAgent(BaseAgent):
     def __init__(self, player_id: int, role: Role):
         super().__init__(player_id, role)
-        self.investigated_players: Set[int] = set()  # 경찰 조사 리스트
-        self.known_mafia: Set[int] = set()  # 알아낸 마피아 목록
-        self.suspects: Set[int] = set()  # 의심스러운 플레이어 리스트
-        self.doctor_find_police = -1  # 의사가 찾은 경찰 ID
+        self.suspicion_scores: Dict[int, float] = {}
+        self.attention_scores: Dict[int, float] = {}
+        self.role_claims: Dict[int, Role] = {}
+        self.proven_citizens: Set[int] = {self.id}
+        self.known_mafia: Set[int] = set()
+        self.mafia_teammates: Set[int] = set() # 마피아 팀원 전용 리스트
+        self.investigated_players: Set[int] = set()
 
     def reset(self):
-        self.investigated_players.clear()
+        self.suspicion_scores.clear()
+        self.attention_scores.clear()
+        self.role_claims.clear()
+        self.proven_citizens = {self.id}
         self.known_mafia.clear()
-        self.suspects.clear()
-        self.doctor_find_police = -1
+        self.mafia_teammates.clear()
+        self.investigated_players.clear()
 
-    def get_action(self, status):
+    def get_action(self, status: GameStatus) -> GameAction:
         self.role = status.my_role
-        # 의심도
         self._update_knowledge(status)
-
+        
         alive_others = [p.id for p in status.players if p.alive and p.id != self.id]
+        if not alive_others: return GameAction(target_id=-1)
 
         if status.phase == Phase.DAY_DISCUSSION:
             return self._act_discussion(status, alive_others)
-
         elif status.phase == Phase.DAY_VOTE:
             return self._act_vote(status, alive_others)
-
         elif status.phase == Phase.DAY_EXECUTE:
             return self._act_execute(status, alive_others)
-
         elif status.phase == Phase.NIGHT:
             return self._act_night(status, alive_others)
 
         return GameAction(target_id=-1)
 
+    def _update_knowledge(self, status: GameStatus):
+        # 매번 초기화하여 중복 점수 합산 방지
+        self.suspicion_scores = {p.id: 10.0 for p in status.players}
+        self.attention_scores = {p.id: 10.0 for p in status.players}
+        self.role_claims = {}
+        self.proven_citizens = {self.id}
+        self.known_mafia = set()
+        # 마피아 팀원 정보는 초기화하지 않음 (게임 시작 시 한 번 들어옴)
+
+        for event in status.action_history:
+            # 1. 역할 주장 및 대립 감지 (None/침묵 제외)
+            if event.event_type == EventType.CLAIM:
+                self.role_claims[event.actor_id] = event.value
+                self.attention_scores[event.actor_id] += 5.0
+                
+                # 침묵(None)이나 시민 주장은 대립에서 제외
+                if event.value is not None and event.value != Role.CITIZEN:
+                    rivals = [pid for pid, role in self.role_claims.items() 
+                              if role == event.value and pid != event.actor_id]
+                    if rivals:
+                        for r_id in rivals: self.suspicion_scores[r_id] += 20.0
+                        self.suspicion_scores[event.actor_id] += 20.0
+
+            # 2. 투표 기록 반영
+            if event.event_type == EventType.VOTE:
+                if event.target_id == self.id:
+                    self.suspicion_scores[event.actor_id] += 15.0
+
+            # 3. 확정 정보 처리 (마피아 팀킬 방지 로직 포함)
+            if event.event_type == EventType.POLICE_RESULT:
+                is_reliable = (self.role == Role.POLICE and event.actor_id == self.id) or \
+                              (self.role == Role.MAFIA and event.actor_id == -1)
+                
+                if is_reliable:
+                    if event.value == Role.MAFIA:
+                        if self.role == Role.MAFIA:
+                            # 마피아는 팀원을 별도 관리하고 공격 대상에서 절대 제외
+                            self.mafia_teammates.add(event.target_id)
+                            self.suspicion_scores[event.target_id] = 0.0
+                        else:
+                            self.known_mafia.add(event.target_id)
+                            self.suspicion_scores[event.target_id] = 100.0
+                    else:
+                        self.proven_citizens.add(event.target_id)
+                        self.suspicion_scores[event.target_id] = 0.0
+
     def _act_discussion(self, status: GameStatus, targets: List[int]) -> GameAction:
-        # 시민은 토론에서 특별한 행동을 하지 않음
-        # 마피아는 경찰이 나오면 경찰 주장
-        # 의사는 특별한 행동을 하지 않음
-        # 경찰은 마피아 맞추면 자신이 경찰이라고 주장 하며 마피아 조사
-
-        # 1. 시민 & 의사: 특별한 행동 없음
-        if self.role == Role.CITIZEN or self.role == Role.DOCTOR:
-            pass
-
-        # 2. 마피아
-        if self.role == Role.MAFIA:
-            # 맞경
-            for event in status.action_history:
-                if event.day == status.day and event.event_type == EventType.CLAIM:
-                    pass
-
-                if (
-                    event.day == status.day
-                    and event.phase == Phase.DAY_DISCUSSION
-                    and event.event_type == EventType.CLAIM
-                    and event.value == Role.MAFIA
-                    and event.target_id == self.id
-                    and event.actor_id != self.id
-                ):
-                    return GameAction(target_id=event.actor_id, claim_role=Role.MAFIA)
-
-        # 3. 경찰
         if self.role == Role.POLICE:
-            alive_mafia = [m for m in self.known_mafia if m in targets]
-
-            if alive_mafia:
-                target = alive_mafia[0]
-                return GameAction(target_id=target, claim_role=Role.MAFIA)
-
-            for event in reversed(status.action_history):
-                if (
-                    event.event_type == EventType.POLICE_RESULT
-                    and event.actor_id == self.id
-                ):
-                    if event.value == Role.MAFIA and event.target_id in targets:
-                        # known_mafia에 아직 없더라도 발견 즉시 주장
-                        return GameAction(
-                            target_id=event.target_id, claim_role=Role.POLICE
-                        )
-                    break  # 내 최근 조사가 마피아가 아니면 중단
+            for m_id in self.known_mafia:
+                if m_id in targets:
+                    # "저놈이 마피아다"라고 정확히 주장 (Role.MAFIA)
+                    return GameAction(target_id=m_id, claim_role=Role.MAFIA)
+        
+        if self.role == Role.MAFIA:
+            if self.suspicion_scores.get(self.id, 0) > 60:
+                # 위기 시 선량한 시민 한 명을 마피아로 몰기
+                potential = [t for t in targets if t not in self.mafia_teammates]
+                if potential:
+                    target = random.choice(potential)
+                    return GameAction(target_id=target, claim_role=Role.MAFIA)
 
         return GameAction(target_id=-1)
 
     def _act_vote(self, status: GameStatus, targets: List[int]) -> GameAction:
-        if not targets:
-            return GameAction(target_id=-1)
+        if not targets: return GameAction(target_id=-1)
 
-        # 1. 오늘 경찰이라고 주장한 사람들을 모두 수집
-        police_claims = {}
+        # 마피아는 팀원을 절대 투표하지 않음
+        valid_targets = [t for t in targets if t not in self.mafia_teammates] if self.role == Role.MAFIA else targets
+        if not valid_targets: return GameAction(target_id=-1)
 
-        for event in status.action_history:
-            if (
-                event.day == status.day
-                and event.phase == Phase.DAY_DISCUSSION
-                and event.event_type == EventType.CLAIM
-                and event.value == Role.MAFIA
-            ):
+        # 시민 팀은 확정 마피아 우선 투표
+        if self.role != Role.MAFIA:
+            for m_id in self.known_mafia:
+                if m_id in valid_targets: return GameAction(target_id=m_id)
 
-                # {경찰 주장자 ID : 그가 지목한 마피아 후보 ID}
-                police_claims[event.actor_id] = event.target_id
+        # 점수 계산 시 랜덤 노이즈 추가 (0/1번 몰표 방지)
+        best_target = -1
+        max_score = -9999.0
+        for tid in valid_targets:
+            score = self.suspicion_scores.get(tid, 10.0) * 1.5
+            score += self.attention_scores.get(tid, 10.0) * 0.5
+            score += random.uniform(-10, 30) # 랜덤 가중치
+            
+            if tid in self.proven_citizens: score -= 50.0 # 확정 시민 보호
 
-        # [1] 시민 & 의사
-        if self.role == Role.CITIZEN or self.role == Role.DOCTOR:
-            # 맞경
-            if len(police_claims) >= 2:
-                claimants = [pid for pid in police_claims.keys() if pid in targets]
-                first_police_id = claimants[0]  # 1. 가장 먼저 주장한 경찰
-                target_of_first = police_claims[first_police_id]
-                self.doctor_find_police = first_police_id
+            if score > max_score:
+                max_score = score
+                best_target = tid
 
-                if target_of_first is not None and target_of_first != -1:
-                    return GameAction(target_id=target_of_first)
-
-            # 경찰이 1명
-            elif len(police_claims) == 1:
-                police_target = list(police_claims.values())[0]
-
-                if (
-                    police_target is not None
-                    and police_target != -1
-                    and police_target in targets
-                ):
-                    return GameAction(target_id=police_target)
-
-            return GameAction(target_id=-1)
-
-        # [2] 마피아
-        elif self.role == Role.MAFIA:
-            # 나(self.id)를 제외한 경찰 주장자 목록
-            enemy_claimants = [
-                pid
-                for pid in police_claims.keys()
-                if pid in targets and (pid != self.id and pid not in self.known_mafia)
-            ]
-
-            if enemy_claimants:
-                return GameAction(target_id=random.choice(enemy_claimants))
-
-            return GameAction(target_id=-1)
-
-        # [3] 경찰
-        elif self.role == Role.POLICE:
-            # 마피아
-            alive_mafia = [m for m in self.known_mafia if m in targets]
-            if alive_mafia:
-                return GameAction(target_id=alive_mafia[0])
-
-            # 맞경한 대상
-            fake_police = [
-                pid for pid in police_claims.keys() if pid in targets and pid != self.id
-            ]
-            if fake_police:
-                return GameAction(target_id=fake_police[0])
-
-        return GameAction(target_id=-1)
+        return GameAction(target_id=best_target)
 
     def _act_execute(self, status: GameStatus, targets: List[int]) -> GameAction:
-        # 무조건 찬성
-        # 1. 오늘 낮 투표 결과
+        # 투표 결과 기반 후보 추론
         vote_counts = {}
         for event in status.action_history:
-            if event.day == status.day and event.phase == Phase.DAY_VOTE:
-                if event.target_id != -1:
-                    vote_counts[event.target_id] = (
-                        vote_counts.get(event.target_id, 0) + 1
-                    )
+            if event.day == status.day and event.phase == Phase.DAY_VOTE and event.event_type == EventType.VOTE:
+                tid = event.target_id
+                if tid != -1: vote_counts[tid] = vote_counts.get(tid, 0) + 1
 
-        # 2. 최다 득표자(처형 후보) 찾기
-        if not vote_counts:
-            return GameAction(target_id=-1)
+        candidate_id = -1
+        if vote_counts:
+            max_votes = max(vote_counts.values())
+            top_targets = [tid for tid, count in vote_counts.items() if count == max_votes]
+            if len(top_targets) == 1: candidate_id = top_targets[0]
 
-        candidate = max(vote_counts, key=vote_counts.get)
+        if candidate_id != -1:
+            # 첫날 무지성 처형 방지 (상대적 의심도 체크)
+            target_sus = self.suspicion_scores.get(candidate_id, 10.0)
+            avg_sus = sum(self.suspicion_scores.values()) / len(self.suspicion_scores)
+            
+            chance = 0.55 + random.uniform(-0.15, 0.15)
+            if target_sus <= avg_sus: chance -= 0.1 # 근거 부족 시 찬성 확률 감소
+            if candidate_id in self.proven_citizens or candidate_id in self.mafia_teammates: chance = 0.0
 
-        # 3. 처형 후보에게 찬성표(지목) 행사
-        if candidate in targets:
-            return GameAction(target_id=candidate)
-
+            if chance > 0.5: return GameAction(target_id=candidate_id)
         return GameAction(target_id=-1)
 
     def _act_night(self, status: GameStatus, targets: List[int]) -> GameAction:
-        # 시민은 행동 없음
-        # 마피아는 시민 중 무작위 살해
-        # 의사는 의심스러운 플레이어 중 무작위 보호
-        # 경찰은 의심스러운 플레이어 중 무작위 조사
+        if self.role == Role.CITIZEN: return GameAction(target_id=-1)
 
-        # 1. 시민: 행동 없음
-        if self.role == Role.CITIZEN:
-            return GameAction(target_id=-1)
-
-        # 2. 마피아: 시민 중 무작위 살해
         if self.role == Role.MAFIA:
-            safe_targets = self.known_mafia | {self.id}
-            mafia_kill_candidates = [t for t in targets if t not in safe_targets]
+            # 팀원 제외 (팀킬 방지)
+            potential = [t for t in targets if t not in self.mafia_teammates]
+            if not potential: return GameAction(target_id=-1)
+            # 주목도는 높고 의심도는 낮은 시민 우선 타겟
+            target = max(potential, key=lambda x: self.attention_scores.get(x, 0) - self.suspicion_scores.get(x, 0) + random.uniform(-5, 5))
+            return GameAction(target_id=target)
 
-            if not mafia_kill_candidates:
-                return GameAction(target_id=-1)
-
-            return GameAction(target_id=random.choice(mafia_kill_candidates))
-
-        # 3. 의사: 자신 보호
         if self.role == Role.DOCTOR:
-            if self.doctor_find_police != -1 and self.doctor_find_police in targets:
-                return GameAction(target_id=self.doctor_find_police)
-
+            # 경찰 주장자 우선 보호
+            police_claims = [pid for pid, role in self.role_claims.items() if role == Role.POLICE and pid in targets]
+            if police_claims: return GameAction(target_id=police_claims[0])
             return GameAction(target_id=self.id)
 
-        # 4. 경찰: 의심스러운 플레이어 중 무작위 조사
         if self.role == Role.POLICE:
-            # 의심가는 사람 중 + 아직 조사 안 한 사람
-            priority_targets = [
-                t
-                for t in self.suspects
-                if t in targets and t not in self.investigated_players
-            ]
-
-            if priority_targets:
-                target = random.choice(priority_targets)
-                self.investigated_players.add(target)
-                return GameAction(target_id=target)
-
-            # 조사 안 한 나머지 생존자 중 랜덤
             unknowns = [t for t in targets if t not in self.investigated_players]
-
-            if unknowns:
-                target = random.choice(unknowns)
-            elif targets:
-                target = random.choice(targets)
-            else:
-                return GameAction(target_id=-1)
-
-            # 조사 목록 업데이트
+            if not unknowns: return GameAction(target_id=-1)
+            target = max(unknowns, key=lambda x: self.suspicion_scores.get(x, 10) + random.uniform(-5, 5))
             self.investigated_players.add(target)
             return GameAction(target_id=target)
 
         return GameAction(target_id=-1)
-
-    def _update_knowledge(self, status: GameStatus):
-        # 1. [공통] 나에게 투표한 사람을 의심 목록에 추가 (복수 심리)
-        for event in status.action_history:
-            # 누군가 투표(VOTE) 단계에서 나(self.id)를 찍었다면
-            if (
-                event.phase == Phase.DAY_VOTE
-                and event.target_id == self.id
-                and event.actor_id != self.id
-            ):
-
-                self.suspects.add(event.actor_id)
-
-        # 2. 정보 수집 (경찰 및 마피아)
-        if self.role == Role.POLICE or self.role == Role.MAFIA:
-            for event in status.action_history:
-                if event.event_type == EventType.POLICE_RESULT:
-
-                    # 신뢰할 수 있는 정보인지 확인
-                    # 경찰: 내가 직접 조사한 결과 (actor_id == self.id)
-                    # 마피아: 시스템이 알려준 동료 정보 (actor_id == -1)
-                    is_reliable = (
-                        self.role == Role.POLICE and event.actor_id == self.id
-                    ) or (self.role == Role.MAFIA and event.actor_id == -1)
-
-                    if is_reliable:
-                        target = event.target_id
-                        if target is not None:
-                            self.investigated_players.add(target)
-
-                            # 경찰에겐 범인, 마피아에겐 동료
-                            if event.value == Role.MAFIA:
-                                self.known_mafia.add(target)
