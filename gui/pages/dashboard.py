@@ -92,7 +92,7 @@ class DashBoard(QWidget):
         ep_group = QGroupBox("진행 에피소드 수")
         ep_layout = QVBoxLayout()
         self.ep_spin = QSpinBox()
-        self.ep_spin.setRange(1, 100000)
+        self.ep_spin.setRange(1, 10000)
         self.ep_spin.setValue(1000)
         self.ep_spin.setSingleStep(100)
         ep_layout.addWidget(self.ep_spin)
@@ -154,7 +154,7 @@ class DashBoard(QWidget):
         # 모델 저장 경로
         path_layout.addWidget(QLabel("모델 저장:"), 0, 0)
         self.model_path_input = QLineEdit()
-        self.model_path_input.setText("./models")
+        self.model_path_input.setText("./logs")
         self.model_path_input.setReadOnly(True)
         path_layout.addWidget(self.model_path_input, 0, 1)
 
