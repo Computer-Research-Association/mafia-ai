@@ -89,7 +89,7 @@ class Launcher(QWidget):
         ep_group = QGroupBox("진행 에피소드 수")
         ep_layout = QVBoxLayout()
         self.ep_spin = QSpinBox()
-        self.ep_spin.setRange(1, 10000)
+        self.ep_spin.setRange(1, 100000)
         self.ep_spin.setValue(1000)
         self.ep_spin.setSingleStep(100)
         ep_layout.addWidget(self.ep_spin)
