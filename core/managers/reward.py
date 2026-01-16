@@ -3,11 +3,15 @@ from collections import defaultdict
 from config import Role, EventType, Phase
 from core.engine.state import GameEvent
 
+import numpy as np
+
 # === [1. Reward Parameters] ===
-WIN_REWARD = 10.0
-LOSS_PENALTY = -10.0
+WIN_REWARD = 1.0
+LOSS_PENALTY = -1.0
 TIME_PENALTY_UNIT = -0.1
 DECEPTION_MULTIPLIER = 1.5
+REWARD_LAMBDA = 0.5
+INT_REWARD_SCALE = 20.0
 
 # === [2. Reward Matrix Setup] ===
 # [내 역할][이벤트 타입][대상 역할] 구조의 3차원 행렬
@@ -48,8 +52,9 @@ REWARD_MATRIX[Role.DOCTOR][EventType.PROTECT][Role.CITIZEN] = 0.5
 
 class RewardManager:
     def __init__(self):
-        # 기만 보너스 계산을 위한 플레이어별 마지막 주장(Claim) 기록
         self.last_claims: Dict[int, Role] = {}
+        self.cumulative_intermediate = defaultdict(float)
+        self.rewards = defaultdict(float)        
 
     def reset(self):
         """에피소드 초기화 시 호출"""
@@ -57,59 +62,76 @@ class RewardManager:
 
     def calculate(self, game, start_idx: int = 0) -> Dict[int, float]:
         """
-        게임 히스토리를 분석하여 모든 플레이어의 보상을 일괄 계산합니다.
+        게임 히스토리를 분석하여 중간 보상을 누적하고, 
+        게임 종료 시점에 최종 정규화된 보상을 계산합니다.
         """
-        rewards = defaultdict(float)
-        
-        # 1. 시간 페널티 적용 (생존자 대상)
+        # 이번 호출에서 반환할 보상 (최종 계산 전까지는 0)
+        step_rewards = defaultdict(float)
+        game_ended = False
+        citizen_win = False
+
+        # 1. 중간 보상 누적 (시간 페널티)
+        # 생존자 대상 시간 페널티를 중간 보상 합계(ΣR_int)에 누적
         daily_penalty = TIME_PENALTY_UNIT * game.day
         for p in game.players:
             if p.alive:
-                rewards[p.id] += daily_penalty
+                self.cumulative_intermediate[p.id] += daily_penalty
 
         # 2. 히스토리 기반 이벤트 분석
         new_events = game.history[start_idx:]
         
         for event in new_events:
-            # A. 게임 종료 처리 (Phase.GAME_END와 EventType.EXECUTE 값 충돌 방지)
+            # A. 게임 종료 이벤트 감지
             if event.phase == Phase.GAME_END:
+                game_ended = True
                 citizen_win = event.value
-                for p in game.players:
-                    is_citizen_team = (p.role != Role.MAFIA)
-                    # 승리 팀에게는 WIN_REWARD, 패배 팀에게는 LOSS_PENALTY 부여
-                    if citizen_win:
-                        rewards[p.id] += WIN_REWARD if is_citizen_team else LOSS_PENALTY
-                    else:
-                        rewards[p.id] += WIN_REWARD if not is_citizen_team else LOSS_PENALTY
                 continue
 
-            # B. 주장(Claim) 업데이트 (사칭 상태 추적)
+            # B. 주장(Claim) 업데이트 (기존 유지)
             if event.event_type == EventType.CLAIM and event.actor_id != -1:
                 if isinstance(event.value, Role):
                     self.last_claims[event.actor_id] = event.value
                 continue
 
-            # C. 상호작용 보상 계산 (Matrix Lookup)
+            # C. 상호작용 보상 누적 (ΣR_int에 합산)
             target_role = self._get_target_role(game, event.target_id)
             
             for p in game.players:
                 if not p.alive:
                     continue
                 
-                # 행렬에서 기본 보상 조회
                 base_reward = REWARD_MATRIX[p.role][event.event_type][target_role]
                 if base_reward == 0:
                     continue
 
-                # 마피아 기만 보너스 (경찰 사칭 중 득점 시 적용)
                 multiplier = 1.0
                 if p.role == Role.MAFIA and base_reward > 0:
                     if self.last_claims.get(p.id) == Role.POLICE:
                         multiplier = DECEPTION_MULTIPLIER
                 
-                rewards[p.id] += base_reward * multiplier
+                # 보상을 즉시 반환하지 않고 누적 변수에 저장
+                self.cumulative_intermediate[p.id] += base_reward * multiplier
 
-        return dict(rewards)
+        # 3. 최종 공식 적용 (게임이 종료되었을 때만 실행)
+        if game_ended:
+            for p in game.players:
+                # 3-1. 승패 보상 결정 (R_win)
+                is_citizen_team = (p.role != Role.MAFIA)
+                if citizen_win:
+                    r_win = WIN_REWARD if is_citizen_team else LOSS_PENALTY
+                else:
+                    r_win = WIN_REWARD if not is_citizen_team else LOSS_PENALTY
+
+                # 3-2. 공식 적용: R = λ * tanh(ΣR_int / k_int) + (1-λ) * R_win
+                r_int_sum = self.cumulative_intermediate[p.id]
+                r_int_norm = np.tanh(r_int_sum / INT_REWARD_SCALE)
+                
+                final_reward = (REWARD_LAMBDA * r_int_norm + 
+                                (1 - REWARD_LAMBDA) * r_win)
+                
+                step_rewards[p.id] = final_reward
+
+        return dict(step_rewards)
 
     def _get_target_role(self, game, target_id: Optional[int]) -> Optional[Role]:
         """타겟 ID의 유효성을 검사하고 실제 역할을 반환합니다."""
