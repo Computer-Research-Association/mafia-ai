@@ -275,30 +275,9 @@ class RuleBaseAgent(BaseAgent):
         return GameAction(target_id=-1)
 
     def _act_vote(self, status: GameStatus) -> GameAction:
-        if self.bayesian_engine and len(self.known_mafia) >= self.bayesian_engine.initial_mafia_count:
-            return GameAction(target_id=-1)
-
         alive_players = [p for p in status.players if p.alive]
-        if not alive_players or len(alive_players) <= 2: return GameAction(target_id=-1)
-
-        survivor_count = len(alive_players)
-        total_players = len(status.players)
-
-        # --- Urgency Calculation ---
-        progress = (total_players - survivor_count) / (total_players - 2) if (total_players - 2) > 0 else 0
-        day_factor = min((status.day - 1) / 4.0, 1.0) # Scale over first 5 days
-        urgency_factor = np.clip(0.6 * progress + 0.4 * day_factor, 0, 1)
-
-        # --- Abstain Logic ---
-        abstain_threshold = 1.5 + (0.8 * urgency_factor) # Range [1.5, 2.3]
-
-
-        # --- Temperature Annealing ---
-        total_players = len(status.players)
-        progress = (total_players - len(alive_players)) / (total_players - 2) if (total_players - 2) > 0 else 1
-        progress = np.clip(progress, 0, 1)
-        
-        current_temp = MIN_VOTE_TEMPERATURE + (INITIAL_VOTE_TEMPERATURE - MIN_VOTE_TEMPERATURE) * np.exp(-progress * VOTE_TEMP_DECAY_RATE)
+        if not alive_players or len(alive_players) <= 2:
+            return GameAction(target_id=-1)
 
         # --- Candidate Selection ---
         probabilities = self.bayesian_engine.get_mafia_probabilities()
@@ -307,21 +286,37 @@ class RuleBaseAgent(BaseAgent):
         
         alive_player_ids = [p.id for p in alive_players]
         for i in range(len(probabilities)):
-            if i not in alive_player_ids: mask[i] = 0
+            if i not in alive_player_ids:
+                mask[i] = 0
         for safe_id in self.known_safe:
-            if safe_id in alive_player_ids: mask[safe_id] = 0
+            if safe_id in alive_player_ids:
+                mask[safe_id] = 0
         if self.role == Role.MAFIA:
             for mafia_id in self.known_mafia:
-                if mafia_id in alive_player_ids: mask[mafia_id] = 0
+                if mafia_id in alive_player_ids:
+                    mask[mafia_id] = 0
         
         masked_probabilities = probabilities * mask
-        if np.sum(masked_probabilities) == 0: return GameAction(target_id=-1)
+        if np.sum(masked_probabilities) == 0:
+            return GameAction(target_id=-1)
+        
         normalized_probs = masked_probabilities / np.sum(masked_probabilities)
 
-        # --- Decision ---
+        # --- Entropy and Temperature Calculation ---
         entropy = calculate_entropy(normalized_probs)
-        if should_abstain(entropy, abstain_threshold): return GameAction(target_id=-1)
+        # Higher entropy (uncertainty) leads to higher temp (randomness)
+        # Lower entropy (certainty) leads to lower temp (decisiveness)
+        current_temp = np.clip(entropy * 0.6, MIN_VOTE_TEMPERATURE, INITIAL_VOTE_TEMPERATURE)
+
+        # --- State-based Abstention Logic ---
+        survivor_count = len(alive_players)
+        # In endgame (<= 4 players), force a vote to prevent stalemate.
+        if survivor_count > 4:
+            # In early/mid-game, allow abstention if uncertainty is high.
+            if should_abstain(entropy, ABSTAIN_ENTROPY_THRESHOLD):
+                return GameAction(target_id=-1)
         
+        # --- Final Decision ---
         target_id = softmax_selection(normalized_probs, temperature=current_temp)
         return GameAction(target_id=target_id)
 
