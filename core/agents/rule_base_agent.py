@@ -218,12 +218,7 @@ class RuleBaseAgent(BaseAgent):
         if not survivors:
             return GameAction(target_id=-1)
 
-        # --- Urgency Calculation ---
         survivor_count = len(survivors) + 1
-        total_players = len(status.players)
-        progress = (total_players - survivor_count) / (total_players - 2) if (total_players - 2) > 0 else 0
-        day_factor = min((status.day - 1) / 4.0, 1.0) # Scale over first 5 days
-        urgency_factor = np.clip(0.6 * progress + 0.4 * day_factor, 0, 1)
 
         probabilities = self.bayesian_engine.get_mafia_probabilities()
         public_probabilities = self.public_bayesian_engine.get_mafia_probabilities()
@@ -245,11 +240,16 @@ class RuleBaseAgent(BaseAgent):
             if probabilities[p.id] > max_personal_sus:
                 max_personal_sus, personal_target = probabilities[p.id], p.id
         
-        accusation_threshold = 0.6 - (0.3 * urgency_factor) # Range [0.6, 0.3]
+        accusation_threshold = 0.6
+        if survivor_count <= 4:
+            accusation_threshold = 0.3
 
         if personal_target != -1 and max_personal_sus > accusation_threshold:
-             if self.role == Role.MAFIA or random.random() < 0.5:
-                 return GameAction(target_id=personal_target, claim_role=Role.MAFIA)
+            if self.role == Role.MAFIA:
+                if random.random() < 0.7:
+                    return GameAction(target_id=personal_target, claim_role=Role.MAFIA)
+            else:
+                return GameAction(target_id=personal_target, claim_role=Role.MAFIA)
 
         if self.role == Role.POLICE:
             counter = [p for p in survivors if self.player_stats.get(p.id, {}).get("claimed_role") == Role.POLICE]
@@ -276,7 +276,9 @@ class RuleBaseAgent(BaseAgent):
 
     def _act_vote(self, status: GameStatus) -> GameAction:
         alive_players = [p for p in status.players if p.alive]
-        if not alive_players or len(alive_players) <= 2:
+        survivor_count = len(alive_players)
+
+        if not alive_players or survivor_count <= 2:
             return GameAction(target_id=-1)
 
         # --- Candidate Selection ---
@@ -301,24 +303,26 @@ class RuleBaseAgent(BaseAgent):
             return GameAction(target_id=-1)
         
         normalized_probs = masked_probabilities / np.sum(masked_probabilities)
-
-        # --- Entropy and Temperature Calculation ---
         entropy = calculate_entropy(normalized_probs)
-        # Higher entropy (uncertainty) leads to higher temp (randomness)
-        # Lower entropy (certainty) leads to lower temp (decisiveness)
-        current_temp = np.clip(entropy * 0.6, MIN_VOTE_TEMPERATURE, INITIAL_VOTE_TEMPERATURE)
 
-        # --- State-based Abstention Logic ---
-        survivor_count = len(alive_players)
-        # In endgame (<= 4 players), force a vote to prevent stalemate.
-        if survivor_count > 4:
-            # In early/mid-game, allow abstention if uncertainty is high.
+        # --- Endgame Logic (<= 4 survivors) ---
+        if survivor_count <= 4:
+            # Force a decisive, deterministic vote on the most suspicious person.
+            target_id = np.argmax(normalized_probs)
+            return GameAction(target_id=target_id)
+        
+        # --- Mid-game Logic (> 4 survivors) ---
+        else:
+            # Use entropy-aware temperature for probabilistic voting
+            current_temp = np.clip(entropy * 0.6, MIN_VOTE_TEMPERATURE, INITIAL_VOTE_TEMPERATURE)
+            
+            # Allow abstention if uncertainty is high
             if should_abstain(entropy, ABSTAIN_ENTROPY_THRESHOLD):
                 return GameAction(target_id=-1)
-        
-        # --- Final Decision ---
-        target_id = softmax_selection(normalized_probs, temperature=current_temp)
-        return GameAction(target_id=target_id)
+            
+            # Probabilistic vote
+            target_id = softmax_selection(normalized_probs, temperature=current_temp)
+            return GameAction(target_id=target_id)
 
     def _act_execute(self, status: GameStatus) -> GameAction:
         votes = {}
