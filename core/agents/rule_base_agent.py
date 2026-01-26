@@ -37,6 +37,9 @@ class RuleBaseAgent(BaseAgent):
         self.is_proven_citizen = False
         self.protected_target = -1
         
+        # For incremental updates
+        self.last_processed_event_idx = 0
+        
         # Initialization
         if self.role == Role.POLICE and random.random() < 0.8: self.is_hiding_role = True
         elif self.role == Role.DOCTOR and random.random() < 0.5: self.is_hiding_role = True
@@ -62,42 +65,50 @@ class RuleBaseAgent(BaseAgent):
 
     def _sync_state(self, status: GameStatus):
         num_players = len(status.players)
+        
         # 1. Initialize Bayesian Engine if it's the first time
         if self.bayesian_engine is None:
-            player_roles = [p.role.name.lower() if p.role else 'citizen' for p in status.players]
+            # Based on config.py, there are 2 mafias in an 8-player game.
+            mafia_count = 2
+            mafia_team_ids = []
+
+            # If agent is mafia, it needs to find its teammates from the history.
+            if self.role == Role.MAFIA:
+                mafia_team_ids.append(self.id) # Add self to team
+                for event in status.action_history:
+                    # Mafia learn about their team from special events where actor_id is -1
+                    if event.event_type == EventType.POLICE_RESULT and event.actor_id == -1 and event.value == Role.MAFIA:
+                        if event.target_id not in mafia_team_ids:
+                            mafia_team_ids.append(event.target_id)
+            
             self.bayesian_engine = BayesianInferenceEngine(
                 num_players=num_players,
                 agent_id=self.id,
                 agent_team=self.role.to_team(),
-                player_roles=player_roles,
-                known_mafia_ids=self.known_mafia
+                mafia_count=mafia_count,
+                mafia_team_ids=mafia_team_ids
             )
 
         # 2. Initialize player_stats if not present
         if not self.player_stats:
             for p in status.players:
-                self.player_stats[p.id] = {
-                    "claimed_role": None,
-                    "is_confirmed": False,
-                }
+                self.player_stats[p.id] = { "claimed_role": None, "is_confirmed": False }
 
         # 3. Replay history to update Bayesian posteriors and other stats
-        # Create a clean slate for stats that are rebuilt from history
         for p_id in self.player_stats:
             self.player_stats[p_id]["claimed_role"] = None
             self.player_stats[p_id]["is_confirmed"] = False
         self.public_claims = []
         
-        # Re-initialize engine to replay history. This is inefficient but matches the original agent's structure.
-        player_roles = [p.role.name.lower() if p.role else 'citizen' for p in status.players]
-        self.bayesian_engine.reset_and_replay(status.action_history, player_roles, self.known_mafia)
+        # Re-initialize engine to replay history.
+        mafia_count = 2 
+        mafia_team_ids = self.bayesian_engine.prior.nonzero()[0].tolist() if self.role == Role.MAFIA else []
+        self.bayesian_engine.reset_and_replay(mafia_count, mafia_team_ids)
 
         for event in status.action_history:
             actor = event.actor_id
             target = event.target_id
             
-            # --- Handle Definitive Information ---
-            # A player's role is revealed upon death
             if event.event_type == EventType.EXECUTE and event.value:
                 is_mafia = (event.value == Role.MAFIA)
                 self.bayesian_engine.set_player_probability(target, is_mafia=is_mafia)
@@ -106,13 +117,11 @@ class RuleBaseAgent(BaseAgent):
                 else:
                     if target not in self.known_safe: self.known_safe.append(target)
 
-                # Check if past accusations against this player were right or wrong
                 for claim in self.public_claims:
                     if claim["targetId"] == target:
                         event_type = RBAEventType.ACCUSATION_WAS_RIGHT if is_mafia else RBAEventType.ACCUSATION_WAS_WRONG
                         self.bayesian_engine.update(event_type, actor_id=claim["claimerId"])
 
-            # A police investigation reveals a role
             if event.event_type == EventType.POLICE_RESULT and event.actor_id == self.id:
                 is_mafia = (event.value == Role.MAFIA)
                 self.bayesian_engine.set_player_probability(target, is_mafia=is_mafia)
@@ -121,28 +130,18 @@ class RuleBaseAgent(BaseAgent):
                 else:
                     if target not in self.known_safe: self.known_safe.append(target)
 
-            # --- Handle Player Actions (Evidence) ---
             if event.event_type == EventType.VOTE and target is not None:
-                self.bayesian_engine.update(RBAEventType.PLAYER_VOTED, actor_id=actor)
-                self.bayesian_engine.update(RBAEventType.PLAYER_WAS_VOTED_FOR, actor_id=target)
+                if actor is not None: self.bayesian_engine.update(RBAEventType.PLAYER_VOTED, actor_id=actor)
+                if target is not None: self.bayesian_engine.update(RBAEventType.PLAYER_WAS_VOTED_FOR, actor_id=target)
 
-            # Handle claims and accusations
             if event.event_type == EventType.CLAIM and event.value is not None:
                 if actor not in self.player_stats: continue
                 self.player_stats[actor]["claimed_role"] = event.value
                 
-                # Accusation
                 if target is not None and target != actor:
-                    # Storing claim for later verification
                     self.public_claims.append({"claimerId": actor, "targetId": target, "day": event.day})
-                    
-                    # An accusation is evidence against the accuser (if they are wrong) and the target
-                    self.bayesian_engine.update(RBAEventType.PLAYER_ACCUSED, actor_id=actor)
-                    
-                    # The accusation also increases suspicion on the target, but less directly.
-                    # This is now handled by ACCUSATION_WAS_RIGHT/WRONG after the fact.
+                    if actor is not None: self.bayesian_engine.update(RBAEventType.PLAYER_ACCUSED, actor_id=actor)
 
-        # Sync our internal knowledge with the engine
         for p_id in self.known_mafia:
             self.bayesian_engine.set_player_probability(p_id, is_mafia=True)
         for p_id in self.known_safe:

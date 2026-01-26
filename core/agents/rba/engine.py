@@ -10,37 +10,36 @@ class BayesianInferenceEngine:
     Manages the probabilistic model for identifying Mafia members.
     P(M|E) propto P(E|M) * P(M)
     """
-    def __init__(self, num_players: int, agent_id: int, agent_team: str, player_roles: List[str], known_mafia_ids: List[int]):
+    def __init__(self, num_players: int, agent_id: int, agent_team: str, mafia_count: int, mafia_team_ids: List[int] = []):
         self.num_players = num_players
         self.agent_id = agent_id
         self.agent_team = agent_team
+        self.initial_mafia_count = mafia_count
+        self.remaining_mafia_count = float(mafia_count)
         
-        self.prior = self._initialize_prior(player_roles, known_mafia_ids)
+        self.prior = self._initialize_prior(mafia_count, mafia_team_ids)
         self.posterior = np.copy(self.prior)
 
-    def _initialize_prior(self, player_roles: List[str], known_mafia_ids: List[int]) -> np.ndarray:
+    def _initialize_prior(self, mafia_count: int, mafia_team_ids: List[int]) -> np.ndarray:
         """
         Initializes the prior probability distribution P(M) for each player being Mafia.
         - If this agent is Mafia, it knows its teammates.
         - If this agent is Town, it assumes an initial probability based on the number of Mafias.
         """
-        mafia_count = player_roles.count('mafia')
-        
         if self.agent_team == 'mafia':
+            # Mafia knows who other mafias are.
             prior = np.zeros(self.num_players)
-            for i in range(self.num_players):
-                if player_roles[i] == 'mafia':
-                    prior[i] = 1.0
+            for i in mafia_team_ids:
+                prior[i] = 1.0
         else: # Town roles
+            # Townies start with a uniform prior based on mafia count.
             initial_prob = mafia_count / self.num_players if self.num_players > 0 else 0
             prior = np.full(self.num_players, initial_prob)
-            # Town agents also know who the revealed mafias are
-            for mafia_id in known_mafia_ids:
-                prior[mafia_id] = 1.0
 
         # An agent knows its own role is not mafia (unless it is)
         prior[self.agent_id] = 1.0 if self.agent_team == 'mafia' else 0.0
         
+        # This initial normalization sets the stage.
         return self._normalize(prior)
 
     def update(self, event_type: RBAEventType, actor_id: int, target_id: Optional[int] = None):
@@ -74,6 +73,13 @@ class BayesianInferenceEngine:
         if player_id >= self.num_players:
             return
 
+        # If a new mafia is confirmed, decrement the remaining count.
+        was_known_mafia = self.posterior[player_id] == 1.0
+        if is_mafia and not was_known_mafia:
+            # This check is crucial to only decrement once per mafia.
+            if self.posterior[player_id] < 0.99: # Allow for floating point inaccuracies
+                 self.remaining_mafia_count -= 1
+
         # Set probability and ensure it's not altered during normalization
         self.posterior[player_id] = 1.0 if is_mafia else 0.0
         
@@ -89,42 +95,42 @@ class BayesianInferenceEngine:
 
     def _normalize(self, probabilities: np.ndarray) -> np.ndarray:
         """
-        Normalizes the array so that the sum of probabilities of uncertain players equals
-        the expected number of remaining mafias.
+        Normalizes the array so that the sum of probabilities equals the number of
+        remaining mafias.
         """
-        fixed_prob_sum = 0
-        fixed_indices = []
-
-        # An agent knows its own identity
-        fixed_indices.append(self.agent_id)
-        fixed_prob_sum += probabilities[self.agent_id]
+        # Players with known identities (0 or 1) are considered "fixed"
+        fixed_indices = np.where((probabilities == 0.0) | (probabilities == 1.0))[0]
+        fixed_prob_sum = np.sum(probabilities[fixed_indices])
         
-        # Identify players with known identities (0 or 1)
-        for i in range(self.num_players):
-            if i != self.agent_id and (probabilities[i] == 0.0 or probabilities[i] == 1.0):
-                fixed_indices.append(i)
-                fixed_prob_sum += probabilities[i]
+        # The sum of probabilities for uncertain players should be the remainder.
+        target_sum_for_uncertain = self.remaining_mafia_count - fixed_prob_sum
+        
+        # Clamp target sum to be non-negative.
+        if target_sum_for_uncertain < 0:
+            target_sum_for_uncertain = 0
 
-        # Calculate sum of probabilities for players with uncertain identities
-        uncertain_indices = [i for i in range(self.num_players) if i not in fixed_indices]
-        uncertain_sum = np.sum(probabilities[uncertain_indices])
+        uncertain_indices = np.where((probabilities > 0.0) & (probabilities < 1.0))[0]
+        
+        # Avoid division by zero if there are no uncertain players.
+        if len(uncertain_indices) == 0:
+            return probabilities
 
-        if uncertain_sum > 0:
-            # We can't know the true mafia count, so we just normalize the rest to sum to 1
-            # and then scale by a factor. A simple normalization to sum to 1 is a good start.
-            scale = 1.0 - fixed_prob_sum
-            if scale < 0: scale = 0 # Should not happen in a logical game
-            
-            probabilities[uncertain_indices] = (probabilities[uncertain_indices] / uncertain_sum) * scale
+        current_uncertain_sum = np.sum(probabilities[uncertain_indices])
+        
+        if current_uncertain_sum > 0:
+            scale_factor = target_sum_for_uncertain / current_uncertain_sum
+            probabilities[uncertain_indices] *= scale_factor
+        elif target_sum_for_uncertain > 0 and len(uncertain_indices) > 0:
+            # If current sum is 0, but should be > 0, distribute equally.
+            probabilities[uncertain_indices] = target_sum_for_uncertain / len(uncertain_indices)
 
-        # Final check to avoid floating point errors leading to negative probabilities
-        probabilities[probabilities < 0] = 0
+        # Final check to clamp probabilities between 0 and 1.
+        probabilities = np.clip(probabilities, 0, 1)
         return probabilities
 
-    def reset_and_replay(self, history: List, player_roles: List[str], known_mafia_ids: List[int]):
-        """Resets the engine and replays the history to rebuild the posterior."""
-        self.prior = self._initialize_prior(player_roles, known_mafia_ids)
+    def reset_and_replay(self, mafia_count: int, mafia_team_ids: List[int]):
+        """Resets the engine for a new round of history replay."""
+        self.initial_mafia_count = mafia_count
+        self.remaining_mafia_count = float(mafia_count)
+        self.prior = self._initialize_prior(mafia_count, mafia_team_ids)
         self.posterior = np.copy(self.prior)
-        # This is where you would loop through history and call self.update() and self.set_player_probability()
-        # For now, this is handled in the agent itself.
-        pass
