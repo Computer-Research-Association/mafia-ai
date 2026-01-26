@@ -111,7 +111,7 @@ class LogLeft(QWidget):
         if target_dir:
             self.log_selected.emit(target_dir)
 
-    def _show_tensorboard(self, index):
+    def _show_tensorboard(self):
         project_root = Path(__file__).parent.parent.parent.parent.resolve()
         tensorboard_root = project_root / "tensorboard"
         self.tensorboard_requested.emit(tensorboard_root)
@@ -123,12 +123,6 @@ class LogLeft(QWidget):
             return
 
         menu = QMenu()
-
-        tb_action = QAction("열기 (TensorBoard)", self)
-        tb_action.triggered.connect(lambda: self._show_tensorboard(index))
-        menu.addAction(tb_action)
-
-        menu.addSeparator()
 
         selection = self.tree.selectionModel().selectedRows(0)
 
