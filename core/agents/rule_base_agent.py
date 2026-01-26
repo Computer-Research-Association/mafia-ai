@@ -159,7 +159,7 @@ class RuleBaseAgent(BaseAgent):
         if confirmed_fake: 
             return self._pick_fair_deterministic(confirmed_fake, day, seed)
 
-        # 3. [확경 신뢰]
+        # 3. [확경 신뢰] - "확경" is abbreviation for "확정 경찰" (confirmed police)
         confirmed_players = self._get_confirmed_players(alive_players, context)
         police_claims = [pid for pid, role in context["claims"].items() if role == Role.POLICE and pid in alive_players]
         
