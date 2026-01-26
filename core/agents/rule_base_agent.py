@@ -1,23 +1,8 @@
 import random
 from typing import List, Dict, Optional
-import numpy as np
-from itertools import combinations
-
 from core.agents.base_agent import BaseAgent
 from core.engine.state import GameStatus, GameAction
 from config import EventType, Role, Phase
-
-# Import the Bayesian Inference components
-from core.agents.rba.engine import BayesianInferenceEngine
-from core.agents.rba.constants import (
-    RBAEventType, ABSTAIN_ENTROPY_THRESHOLD, 
-    INITIAL_VOTE_TEMPERATURE, MIN_VOTE_TEMPERATURE, VOTE_TEMP_DECAY_RATE
-)
-from core.agents.rba.strategies import calculate_entropy, should_abstain, softmax_selection
-
-# [Tuning] 시민 단합력을 위한 상수 조정
-BASE_SUSPICION = 10.0
-BASE_ATTENTION = 10.0
 
 class RuleBaseAgent(BaseAgent):
     def __init__(self, player_id: int, role: Role):
@@ -25,411 +10,181 @@ class RuleBaseAgent(BaseAgent):
         self.reset()
 
     def reset(self):
-        self.suspicion = BASE_SUSPICION
-        self.attention = BASE_ATTENTION
-        self.bayesian_engine: Optional[BayesianInferenceEngine] = None
-        self.public_bayesian_engine: Optional[BayesianInferenceEngine] = None
+        # 마피아는 게임 시작 시 위장 직업(경찰 or 의사)을 하나 정함
+        self.fake_role = random.choice([Role.POLICE, Role.DOCTOR]) if self.role == Role.MAFIA else None
         
-        self.known_mafia: List[int] = []
-        self.known_safe: List[int] = []
-        self.investigated_log: List[int] = []
-        
-        self.claimed_role: Optional[Role] = None
-        self.is_hiding_role = False
-        self.declared_self_heal = False
-        self.is_confirmed = False
-        self.is_proven_citizen = False
-        self.protected_target = -1
-        
-        self.last_processed_event_idx = 0
-        self.daily_votes = {}
-        
-        if self.role == Role.POLICE and random.random() < 0.8: self.is_hiding_role = True
-        elif self.role == Role.DOCTOR and random.random() < 0.5: self.is_hiding_role = True
-            
-        self.public_claims = []
-        self.last_night_healed_id = -1
-        self.player_stats = {}
+        # 게임 상태 추적용 변수들
+        self.claims: Dict[int, Role] = {}  # {player_id: claimed_role}
+        self.investigations: Dict[int, Role] = {} # {target_id: result_role} (경찰용)
+        self.known_roles: Dict[int, Role] = {} # {player_id: confirmed_role} (죽은 사람 or 경찰 정보)
+        self.my_claims_made = False
+        self.last_processed_idx = 0
 
     def get_action(self, status: GameStatus) -> GameAction:
         self.role = status.my_role
-        self.my_id = self.id
+        self.id = status.my_id
         self._sync_state(status)
+
+        # 죽은 자는 말이 없다
+        if not any(p.id == self.id and p.alive for p in status.players):
+            return GameAction(target_id=-1)
 
         alive_others = [p.id for p in status.players if p.alive and p.id != self.id]
         if not alive_others: return GameAction(target_id=-1)
 
         if status.phase == Phase.DAY_DISCUSSION: return self._act_discussion(status)
-        elif status.phase == Phase.DAY_VOTE: return self._act_vote(status)
-        elif status.phase == Phase.DAY_EXECUTE: return self._act_execute(status)
-        elif status.phase == Phase.NIGHT: return self._act_night(status, alive_others)
+        if status.phase == Phase.DAY_VOTE:       return self._act_vote(status)
+        if status.phase == Phase.DAY_EXECUTE:    return self._act_execute(status)
+        if status.phase == Phase.NIGHT:          return self._act_night(status, alive_others)
         
         return GameAction(target_id=-1)
 
     def _sync_state(self, status: GameStatus):
-        num_players = len(status.players)
-        mafia_count = 2
-        
-        if self.bayesian_engine is None:
-            mafia_team_ids = []
-            if self.role == Role.MAFIA:
-                mafia_team_ids.append(self.id)
-                for event in status.action_history:
-                    if event.event_type == EventType.POLICE_RESULT and event.actor_id == -1 and event.value == Role.MAFIA:
-                        if event.target_id not in mafia_team_ids:
-                            mafia_team_ids.append(event.target_id)
+        """게임 기록을 읽어 누가 뭘 주장했고, 누가 죽어서 정체가 뭔지 파악함"""
+        events = status.action_history[self.last_processed_idx:]
+        for event in events:
+            # 1. 직업 공개(Claim) 추적
+            if event.event_type == EventType.CLAIM and event.value:
+                self.claims[event.actor_id] = event.value
             
-            self.bayesian_engine = BayesianInferenceEngine(
-                num_players=num_players, agent_id=self.id, agent_team="mafia" if self.role == Role.MAFIA else "citizen",
-                mafia_count=mafia_count, mafia_team_ids=mafia_team_ids
-            )
-            if self.role == Role.MAFIA:
-                for member_id in mafia_team_ids:
-                    if member_id not in self.known_mafia:
-                        self.known_mafia.append(member_id)
-            self.public_bayesian_engine = BayesianInferenceEngine(
-                num_players=num_players, agent_id=self.id, agent_team='citizen',
-                mafia_count=mafia_count, mafia_team_ids=[]
-            )
-
-        if not self.player_stats:
-            for p in status.players:
-                self.player_stats[p.id] = { "claimed_role": None, "is_confirmed": False }
-
-        new_events = status.action_history[self.last_processed_event_idx:]
-        days_with_new_votes = set()
-
-        for event in new_events:
-            actor, target = event.actor_id, event.target_id
+            # 2. 처형/사망 결과로 정체 확정
+            if event.event_type == EventType.EXECUTE:
+                self.known_roles[event.target_id] = event.value # 죽은 자의 직업 공개
             
-            if event.event_type == EventType.EXECUTE and event.value:
-                is_mafia = (event.value == Role.MAFIA)
-                self.bayesian_engine.set_player_probability(target, is_mafia=is_mafia)
-                self.public_bayesian_engine.set_player_probability(target, is_mafia=is_mafia)
-                
-                if is_mafia:
-                    if target not in self.known_mafia: self.known_mafia.append(target)
-                else:
-                    if target not in self.known_safe: self.known_safe.append(target)
-
-                claims_against_target = [c for c in self.public_claims if c["targetId"] == target]
-                for claim in claims_against_target:
-                    event_type = RBAEventType.ACCUSATION_WAS_RIGHT if is_mafia else RBAEventType.ACCUSATION_WAS_WRONG
-                    self.bayesian_engine.update(event_type, actor_id=claim["claimerId"], status=status)
-                    self.public_bayesian_engine.update(event_type, actor_id=claim["claimerId"], status=status)
-
-                # Re-evaluate counter-claims based on execution result
-                executed_player_stats = self.player_stats.get(target)
-                if executed_player_stats and executed_player_stats.get("claimed_role"):
-                    claimed_role = executed_player_stats.get("claimed_role")
-                    if claimed_role in [Role.POLICE, Role.DOCTOR]:
-                        for p_id, stats in self.player_stats.items():
-                            if p_id != target and stats.get("claimed_role") == claimed_role:
-                                other_claimant_id = p_id
-                                if is_mafia:
-                                    self.bayesian_engine.set_player_probability(other_claimant_id, is_mafia=False)
-                                    self.public_bayesian_engine.set_player_probability(other_claimant_id, is_mafia=False)
-                                    if other_claimant_id not in self.known_safe:
-                                        self.known_safe.append(other_claimant_id)
-                                else:
-                                    self.bayesian_engine.update(RBAEventType.ROLE_COUNTERCLAIMED, actor_id=other_claimant_id, status=status)
-                                    self.public_bayesian_engine.update(RBAEventType.ROLE_COUNTERCLAIMED, actor_id=other_claimant_id, status=status)
-                                break
-
-
-            if event.event_type == EventType.VOTE and actor is not None and target is not None:
-                days_with_new_votes.add(event.day)
-                self.daily_votes.setdefault(event.day, {})[actor] = target
-                
-                self.bayesian_engine.update(RBAEventType.PLAYER_VOTED, actor_id=actor, status=status)
-                self.public_bayesian_engine.update(RBAEventType.PLAYER_VOTED, actor_id=actor, status=status)
-                self.bayesian_engine.update(RBAEventType.PLAYER_WAS_VOTED_FOR, actor_id=target, status=status)
-                self.public_bayesian_engine.update(RBAEventType.PLAYER_WAS_VOTED_FOR, actor_id=target, status=status)
-
-            if event.event_type == EventType.CLAIM and event.value is not None:
-                if actor is None or actor not in self.player_stats: continue
-
-                # Accusation claim ("Player X is Mafia")
-                if target is not None and target != actor:
-                    self.public_claims.append({"claimerId": actor, "targetId": target, "day": event.day})
-                    self.bayesian_engine.update(RBAEventType.PLAYER_ACCUSED, actor_id=target, status=status)
-                    self.public_bayesian_engine.update(RBAEventType.PLAYER_ACCUSED, actor_id=target, status=status)
-                
-                # Self-claim ("I am Role Y")
-                else:
-                    claimed_role = event.value
-                    claimer_id = actor
-
-                    # Check for counter-claims on unique roles
-                    existing_claimant_id = None
-                    if claimed_role in [Role.POLICE, Role.DOCTOR]:
-                        for p_id, stats in self.player_stats.items():
-                            if p_id != claimer_id and stats.get("claimed_role") == claimed_role:
-                                existing_claimant_id = p_id
-                                break
-                    
-                    # Update this player's claimed role *after* checking for contradiction
-                    self.player_stats[claimer_id]["claimed_role"] = claimed_role
-
-                    if existing_claimant_id is not None:
-                        # Counter-claim detected! Increase suspicion for both.
-                        self.bayesian_engine.update(RBAEventType.ROLE_COUNTERCLAIMED, actor_id=claimer_id, status=status)
-                        self.public_bayesian_engine.update(RBAEventType.ROLE_COUNTERCLAIMED, actor_id=claimer_id, status=status)
-                        self.bayesian_engine.update(RBAEventType.ROLE_COUNTERCLAIMED, actor_id=existing_claimant_id, status=status)
-                        self.public_bayesian_engine.update(RBAEventType.ROLE_COUNTERCLAIMED, actor_id=existing_claimant_id, status=status)
-                    else:
-                        # First time this role is claimed (or it's a non-unique role)
-                        self.bayesian_engine.update(RBAEventType.ROLE_CLAIMED, actor_id=claimer_id, status=status)
-                        self.public_bayesian_engine.update(RBAEventType.ROLE_CLAIMED, actor_id=claimer_id, status=status)
-
+            # 3. (경찰만) 자신의 조사 결과 저장
             if event.event_type == EventType.POLICE_RESULT and event.actor_id == self.id:
-                is_mafia = (event.value == Role.MAFIA)
-                self.bayesian_engine.set_player_probability(target, is_mafia=is_mafia)
-                if is_mafia:
-                    if target not in self.known_mafia: self.known_mafia.append(target)
-                else:
-                    if target not in self.known_safe: self.known_safe.append(target)
+                self.investigations[event.target_id] = event.value
+                # 내가 진짜 경찰이면, 내 조사 결과는 나에게 '확정' 정보임
+                if self.role == Role.POLICE:
+                    self.known_roles[event.target_id] = event.value
 
-        # --- Correlation Analysis from Voting Patterns ---
-        for day in days_with_new_votes:
-            voters_by_target = {}
-            for voter, target in self.daily_votes.get(day, {}).items():
-                if target is not None:
-                    voters_by_target.setdefault(target, []).append(voter)
-            
-            for target, voters in voters_by_target.items():
-                if len(voters) > 1:
-                    for p1, p2 in combinations(voters, 2):
-                        strength = 0.05
-                        self.bayesian_engine.update_correlation(p1, p2, strength)
-                        self.public_bayesian_engine.update_correlation(p1, p2, strength)
-
-        for p_id in self.known_mafia:
-            self.bayesian_engine.set_player_probability(p_id, is_mafia=True)
-            self.public_bayesian_engine.set_player_probability(p_id, is_mafia=True)
-        for p_id in self.known_safe:
-            self.bayesian_engine.set_player_probability(p_id, is_mafia=False)
-            self.public_bayesian_engine.set_player_probability(p_id, is_mafia=False)
-            
-        self.last_processed_event_idx = len(status.action_history)
+        self.last_processed_idx = len(status.action_history)
 
     def _act_discussion(self, status: GameStatus) -> GameAction:
-        survivors = [p for p in status.players if p.alive and p.id != self.id]
-        if not survivors:
-            return GameAction(target_id=-1)
+        """
+        [전략 1] 1일차 등 초반에 직업 공개 (마피아는 위장, 특직은 진실, 시민은 시민)
+        """
+        # 아직 직업 공개를 안 했다면?
+        if not self.my_claims_made:
+            claim_role = self.fake_role if self.role == Role.MAFIA else self.role
+            # 전략적 선택: 시민도 그냥 시민이라고 까버림 (침묵 방지)
+            self.my_claims_made = True
+            return GameAction(target_id=self.id, claim_role=claim_role)
 
-        survivor_count = len(survivors) + 1
-
-        probabilities = self.bayesian_engine.get_mafia_probabilities()
-        public_probabilities = self.public_bayesian_engine.get_mafia_probabilities()
-        my_public_mafia_prob = public_probabilities[self.id]
-
-        if not self.claimed_role and my_public_mafia_prob > 0.6:
-            if self.role == Role.MAFIA:
-                gamble = random.random()
-                if gamble < 0.5: return self._do_claim(Role.POLICE)
-                elif gamble < 0.85: return self._do_claim(Role.DOCTOR)
-                else: return self._do_claim(Role.CITIZEN)
-            else:
-                self.is_hiding_role = False
-                return self._do_claim(self.role)
-
-        personal_target, max_personal_sus = -1, -1
-        for p in survivors:
-            if self.role == Role.MAFIA and p.id in self.known_mafia: continue
-            if probabilities[p.id] > max_personal_sus:
-                max_personal_sus, personal_target = probabilities[p.id], p.id
+        # [전략 4] 경찰(또는 짭경)은 조사 결과가 있으면 발표
+        if self.role == Role.POLICE or (self.role == Role.MAFIA and self.fake_role == Role.POLICE):
+            # 마피아는 아무나 찍어서 마피아라고 거짓말하거나 시민이라고 거짓말 (여기선 단순하게 생략하거나 랜덤)
+            # 룰베이스 봇은 진짜 경찰 로직만 구현:
+            if self.role == Role.POLICE:
+                for target, result in self.investigations.items():
+                    # 아직 이 사실을 공표 안 했으면? (로그 뒤져봐야 하지만 편의상 매번 말해도 됨, 엔진이 중복제거 해주길 기대하거나)
+                    # 여기서는 가장 최근 조사 결과를 마피아인 경우에만 강력하게 주장
+                    if result == Role.MAFIA:
+                        return GameAction(target_id=target, claim_role=Role.MAFIA)
         
-        accusation_threshold = 0.6
-        if survivor_count <= 4:
-            accusation_threshold = 0.3
-
-        if personal_target != -1 and max_personal_sus > accusation_threshold:
-            if self.role == Role.MAFIA:
-                if random.random() < 0.7:
-                    return GameAction(target_id=personal_target, claim_role=Role.MAFIA)
-            else:
-                return GameAction(target_id=personal_target, claim_role=Role.MAFIA)
-
-        if self.role == Role.POLICE:
-            counter = [p for p in survivors if self.player_stats.get(p.id, {}).get("claimed_role") == Role.POLICE]
-            if counter:
-                self.is_hiding_role = False
-                return GameAction(target_id=counter[0].id, claim_role=Role.MAFIA)
-            
-            found_mafia = [m for m in self.known_mafia if m in [p.id for p in survivors]]
-            if found_mafia:
-                self.is_hiding_role = False
-                return GameAction(target_id=found_mafia[0], claim_role=Role.MAFIA)
-            
-            if not self.is_hiding_role and not self.claimed_role:
-                return self._do_claim(Role.POLICE)
-
-        elif self.role == Role.DOCTOR:
-            counter = [p for p in survivors if self.player_stats.get(p.id, {}).get("claimed_role") == Role.DOCTOR]
-            if counter and not self.claimed_role:
-                return self._do_claim(Role.DOCTOR)
-            if not self.is_hiding_role and not self.claimed_role:
-                 return self._do_claim(Role.DOCTOR)
-
-        # If no other specific action was chosen, make a probabilistic accusation.
-        # This prevents the agent from staying silent.
-        probabilities = self.bayesian_engine.get_mafia_probabilities()
-        mask = np.array([1 if p.alive and p.id != self.id else 0 for p in status.players])
-        
-        # Don't accuse known teammates or known safe players
-        if self.role == Role.MAFIA:
-            for m_id in self.known_mafia:
-                if m_id < len(mask): mask[m_id] = 0
-        for s_id in self.known_safe:
-            if s_id < len(mask): mask[s_id] = 0
-
-        masked_probs = probabilities * mask
-        if np.sum(masked_probs) > 0:
-            normalized_probs = masked_probs / np.sum(masked_probs)
-            # Lower temp for more decisive (but still probabilistic) action
-            target_id = softmax_selection(normalized_probs, temperature=0.8) 
-            return GameAction(target_id=target_id, claim_role=Role.MAFIA)
-
         return GameAction(target_id=-1)
 
     def _act_vote(self, status: GameStatus) -> GameAction:
-        alive_players = [p for p in status.players if p.alive]
-        survivor_count = len(alive_players)
+        """
+        [전략 2, 4, 5] 투표 로직의 핵심
+        """
+        alive_players = [p.id for p in status.players if p.alive]
+        
+        # 1. '맞경(Police Counter-claim)' 그룹 찾기
+        police_claims = [pid for pid, role in self.claims.items() if role == Role.POLICE and pid in alive_players]
+        
+        # 2. 확정된 마피아(죽은 경찰의 대립자 or 내 조사결과)가 있으면 1순위 척살
+        # 2-1. 어제 죽은 사람이 '진짜 경찰'이었다 -> 살아있는 맞경은 '마피아'다
+        dead_polices = [pid for pid, role in self.known_roles.items() if role == Role.POLICE]
+        for dead_cop in dead_polices:
+            # 죽은 경찰과 대립했던 살아있는 경찰 호소인 찾기
+            # (단순화: 경찰을 사칭했던 놈들 중 살아있는 놈은 이제 확정 마피아임)
+            # 주의: 과거의 모든 police_claims 기록을 뒤져야 함. self.claims는 누적됨.
+            rivals = [pid for pid, role in self.claims.items() if role == Role.POLICE and pid != dead_cop and pid in alive_players]
+            if rivals:
+                return GameAction(target_id=rivals[0]) # 그 놈 죽여
 
-        if not alive_players or survivor_count <= 2:
-            return GameAction(target_id=-1)
+        # 2-2. 내가 경찰인데 조사했더니 마피아더라 -> 죽여
+        if self.role == Role.POLICE:
+            for target, result in self.investigations.items():
+                if result == Role.MAFIA and target in alive_players:
+                    return GameAction(target_id=target)
 
-        # --- Candidate Selection ---
-        probabilities = self.bayesian_engine.get_mafia_probabilities()
-        mask = np.ones_like(probabilities)
-        mask[self.id] = 0
-        
-        alive_player_ids = [p.id for p in alive_players]
-        for i in range(len(probabilities)):
-            if i not in alive_player_ids:
-                mask[i] = 0
-        for safe_id in self.known_safe:
-            if safe_id in alive_player_ids:
-                mask[safe_id] = 0
-        if self.role == Role.MAFIA:
-            for mafia_id in self.known_mafia:
-                if mafia_id in alive_player_ids:
-                    mask[mafia_id] = 0
-        
-        masked_probabilities = probabilities * mask
-        if np.sum(masked_probabilities) == 0:
-            return GameAction(target_id=-1)
-        
-        normalized_probs = masked_probabilities / np.sum(masked_probabilities)
-        entropy = calculate_entropy(normalized_probs)
+        # 3. [전략 2] 1일차: 맞경 중 하나 죽이기 (무조건)
+        # 맞경이 2명 이상이면, 그냥 리스트의 첫 번째 놈을 다같이 찍어서 죽임 (합심)
+        if len(police_claims) >= 2:
+            # 마피아 팀은 진짜 경찰을 찍으려 노력하겠지만, 시민 룰베이스는 그냥 '첫번째 놈'을 찍자
+            # (어차피 내일 결과 보고 나머지 죽이면 되니까)
+            target = police_claims[0]
+            if target == self.id: # 나를 찍을 순 없으니
+                target = police_claims[1]
+            return GameAction(target_id=target)
 
-        # --- Endgame Logic (<= 4 survivors) ---
-        if survivor_count <= 4:
-            # Force a decisive, deterministic vote on the most suspicious person.
-            target_id = np.argmax(normalized_probs)
-            return GameAction(target_id=target_id)
-        
-        # --- Mid-game Logic (> 4 survivors) ---
-        else:
-            # Use entropy-aware temperature for probabilistic voting
-            entropy = calculate_entropy(normalized_probs)
-            current_temp = np.clip(entropy * 0.6, MIN_VOTE_TEMPERATURE, INITIAL_VOTE_TEMPERATURE)
-            
-            # Probabilistic vote without abstention
-            target_id = softmax_selection(normalized_probs, temperature=current_temp)
-            return GameAction(target_id=target_id)
+        # 4. 맞의(Doctor Counter-claim) 처리 (경찰 정리됐으면 의사 정리)
+        doctor_claims = [pid for pid, role in self.claims.items() if role == Role.DOCTOR and pid in alive_players]
+        if len(doctor_claims) >= 2:
+            target = doctor_claims[0]
+            if target == self.id: target = doctor_claims[1]
+            return GameAction(target_id=target)
+
+        # 5. 할 거 없으면? (확정 정보도 없고 대립도 없음)
+        # 그냥 아무나 찍지 말고 기권하거나 랜덤 (여기선 랜덤 투표로 진행시킴)
+        return GameAction(target_id=random.choice(alive_players))
 
     def _act_execute(self, status: GameStatus) -> GameAction:
+        """투표 결과가 나왔을 때 찬반 -> 무조건 찬성해서 죽여야 게임이 진행됨"""
+        # 현재 투표 1등 확인
         votes = {}
         for e in status.action_history:
             if e.day == status.day and e.phase == Phase.DAY_VOTE and e.event_type == EventType.VOTE:
-                 if e.target_id is not None and e.target_id != -1:
-                    votes[e.target_id] = votes.get(e.target_id, 0) + 1
+                if e.target_id not in [None, -1]: votes[e.target_id] = votes.get(e.target_id, 0) + 1
         
-        if not votes:
-            # Cannot abstain, must vote against something. Vote self.
-            return GameAction(target_id=self.id)
-
-        # The agent assumes the most-voted player is the candidate.
+        if not votes: return GameAction(target_id=self.id) # 투표 없으면 자투(반대)
+        
         target_id = max(votes, key=votes.get)
+        
+        # 내가 걸렸거나, 우리 편(마피아끼리)이 걸렸으면 반대
+        if target_id == self.id: return GameAction(target_id=self.id)
+        if self.role == Role.MAFIA and target_id in self.known_roles: # known_roles엔 마피아 팀원 정보가 없으므로 별도 로직 필요하지만 생략
+             pass 
 
-        # Disapprove if the target is self, a known safe player, or (if Mafia) a fellow Mafia member.
-        if target_id == self.id:
-            return GameAction(target_id=self.id)
-        if target_id in self.known_safe:
-            return GameAction(target_id=self.id)
-        if self.role == Role.MAFIA and target_id in self.known_mafia:
-            return GameAction(target_id=self.id)
-
-        mafia_prob = self.bayesian_engine.get_mafia_probabilities()[target_id]
-        survivor_count = sum(1 for p in status.players if p.alive)
-
-        # Endgame: high aggression. Higher chance to approve even with moderate suspicion.
-        if survivor_count <= 4:
-            approval_chance = np.clip(mafia_prob * 1.5, 0, 0.95)
-            if random.random() < approval_chance:
-                return GameAction(target_id=target_id)  # Approve
-            else:
-                return GameAction(target_id=self.id)  # Disapprove
-
-        # Mid-game: forced choice based on direct probability.
-        if random.random() < mafia_prob:
-            return GameAction(target_id=target_id)  # Approve
-        else:
-            return GameAction(target_id=self.id)  # Disapprove
+        # [전략] 시민은 무조건 찬성하여 '한 놈 보내고 확인'하는 전략 수행
+        return GameAction(target_id=target_id)
 
     def _act_night(self, status: GameStatus, targets: List[int]) -> GameAction:
-        alive_player_ids = [p.id for p in status.players if p.alive]
-        probabilities = self.bayesian_engine.get_mafia_probabilities()
-
+        """
+        [전략 3] 밤 행동 수칙
+        """
+        # 1. 마피아: 맞경/맞의가 '아닌' 애를 죽여서 혼란 유지 (혹은 그냥 경찰 죽이기)
         if self.role == Role.MAFIA:
-            candidates = {p_id: 1.0 for p_id in alive_player_ids if p_id != self.id and p_id not in self.known_mafia}
-            if not candidates: return GameAction(target_id=-1)
-            for p_id in candidates:
-                candidates[p_id] = 1.0 - probabilities[p_id]
-                claimed_role = self.player_stats.get(p_id, {}).get("claimed_role")
-                if claimed_role in [Role.POLICE, Role.DOCTOR]: candidates[p_id] *= 3.0
-            candidate_ids, weights = list(candidates.keys()), np.array(list(candidates.values()))
-            if np.sum(weights) <= 0: target_id = np.random.choice(candidate_ids)
-            else: target_id = candidate_ids[softmax_selection(weights, temperature=0.5)]
-            return GameAction(target_id=target_id)
+            # 경찰/의사라고 주장한 놈들 제외
+            special_claims = [pid for pid, role in self.claims.items() if role in [Role.POLICE, Role.DOCTOR]]
+            # 제외하고 남은 '그냥 시민'들 중에서 타겟 선정
+            valid_targets = [t for t in targets if t not in special_claims and t != self.id]
             
-        elif self.role == Role.DOCTOR:
-            candidates = {p_id: 1.0 for p_id in alive_player_ids}
-            for p_id in candidates:
-                candidates[p_id] = 1.0 - probabilities[p_id]
-            for p_id, st in self.player_stats.items():
-                if st.get("claimed_role") == Role.POLICE and p_id in candidates: candidates[p_id] *= 2.0
+            if not valid_targets: # 다 죽었으면 아무나
+                valid_targets = [t for t in targets if t != self.id]
             
-            uncertain_indices = [p.id for p in status.players if p.alive and 0 < probabilities[p.id] < 1]
-            entropy = calculate_entropy(probabilities[uncertain_indices]/np.sum(probabilities[uncertain_indices])) if uncertain_indices and np.sum(probabilities[uncertain_indices]) > 0 else 0
-            self_heal_boost = 1.0 + (entropy / (ABSTAIN_ENTROPY_THRESHOLD or 1.0))
-            if self.id in candidates: candidates[self.id] *= self_heal_boost
+            return GameAction(target_id=random.choice(valid_targets))
 
-            candidate_ids, weights = list(candidates.keys()), np.array(list(candidates.values()))
-            if np.sum(weights) <= 0: return GameAction(target_id=self.id)
-            target_id = candidate_ids[softmax_selection(weights, temperature=0.5)]
-            return GameAction(target_id=target_id)
-
-        elif self.role == Role.POLICE:
-            candidates = [p_id for p_id in alive_player_ids if p_id != self.id and p_id not in self.investigated_log]
-            if not candidates:
-                self.investigated_log = []
-                candidates = [p_id for p_id in alive_player_ids if p_id != self.id]
-                if not candidates: return GameAction(target_id=-1)
-
-            uncertainty = {}
-            for p_id in candidates:
-                p = np.clip(probabilities[p_id], 1e-9, 1 - 1e-9)
-                uncertainty[p_id] = -p * np.log2(p) - (1-p) * np.log2(1-p)
+        # 2. 경찰: 맞경 조사 1순위, 없으면 랜덤
+        if self.role == Role.POLICE:
+            police_claims = [pid for pid, role in self.claims.items() if role == Role.POLICE and pid != self.id and pid in targets]
+            if police_claims:
+                return GameAction(target_id=police_claims[0]) # 대립자 조사
             
-            target_id = max(uncertainty, key=uncertainty.get) if uncertainty else (random.choice(candidates) if candidates else -1)
-            if target_id != -1: self.investigated_log.append(target_id)
-            return GameAction(target_id=target_id)
-        
+            # 대립자 없으면, 아직 조사 안 한 사람 중 랜덤
+            uninvestigated = [t for t in targets if t not in self.investigations]
+            if uninvestigated:
+                return GameAction(target_id=random.choice(uninvestigated))
+            return GameAction(target_id=random.choice(targets))
+
+        # 3. 의사: 경찰 살리기 (없으면 나)
+        if self.role == Role.DOCTOR:
+            police_claims = [pid for pid, role in self.claims.items() if role == Role.POLICE and pid in targets]
+            if police_claims:
+                # 경찰이 2명이면? 도박 (반반) 혹은 그냥 첫번째
+                return GameAction(target_id=random.choice(police_claims))
+            return GameAction(target_id=self.id) # 경찰 없으면 자힐
+
         return GameAction(target_id=-1)
-
-    def _do_claim(self, role: Role) -> GameAction:
-        self.claimed_role = role
-        return GameAction(target_id=self.id, claim_role=role)
