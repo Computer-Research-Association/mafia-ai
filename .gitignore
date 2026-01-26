@@ -34,3 +34,5 @@ mafia_optuna.db
 
 # Jupyter Notebook
 .ipynb_checkpoints
+.gemini/
+gha-creds-*.json
