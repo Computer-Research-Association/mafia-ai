@@ -22,10 +22,14 @@ class RBAEventType(Enum):
     ACCUSATION_WAS_WRONG = "accusation_was_wrong" # A player's accusation of "Mafia" was proven false.
     ACCUSATION_WAS_RIGHT = "accusation_was_right" # A player's accusation of "Mafia" was proven true.
 
+    # Claim-based events
+    ROLE_CLAIMED = "role_claimed"            # A player claimed a role.
+    ROLE_COUNTERCLAIMED = "role_counterclaimed" # A player claimed a role already taken by another.
+
 # --- Decision Making Constants ---
 # The entropy threshold for abstaining. If the uncertainty (entropy) of the
 # probability distribution is higher than this, the agent will abstain from voting.
-ABSTAIN_ENTROPY_THRESHOLD = 0.8
+ABSTAIN_ENTROPY_THRESHOLD = 1.2
 
 # Softmax temperature for voting. Higher values lead to more random (exploratory) votes,
 # lower values lead to more deterministic (exploitative) votes.

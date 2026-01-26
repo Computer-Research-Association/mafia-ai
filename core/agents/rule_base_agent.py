@@ -80,9 +80,13 @@ class RuleBaseAgent(BaseAgent):
                             mafia_team_ids.append(event.target_id)
             
             self.bayesian_engine = BayesianInferenceEngine(
-                num_players=num_players, agent_id=self.id, agent_team=self.role.to_team(),
+                num_players=num_players, agent_id=self.id, agent_team="mafia" if self.role == Role.MAFIA else "citizen",
                 mafia_count=mafia_count, mafia_team_ids=mafia_team_ids
             )
+            if self.role == Role.MAFIA:
+                for member_id in mafia_team_ids:
+                    if member_id not in self.known_mafia:
+                        self.known_mafia.append(member_id)
             self.public_bayesian_engine = BayesianInferenceEngine(
                 num_players=num_players, agent_id=self.id, agent_team='citizen',
                 mafia_count=mafia_count, mafia_team_ids=[]
@@ -124,14 +128,40 @@ class RuleBaseAgent(BaseAgent):
                 self.public_bayesian_engine.update(RBAEventType.PLAYER_WAS_VOTED_FOR, actor_id=target, status=status)
 
             if event.event_type == EventType.CLAIM and event.value is not None:
-                if actor not in self.player_stats: continue
-                self.player_stats[actor]["claimed_role"] = event.value
-                
+                if actor is None or actor not in self.player_stats: continue
+
+                # Accusation claim ("Player X is Mafia")
                 if target is not None and target != actor:
                     self.public_claims.append({"claimerId": actor, "targetId": target, "day": event.day})
-                    if actor is not None:
-                        self.bayesian_engine.update(RBAEventType.PLAYER_ACCUSED, actor_id=actor, status=status)
-                        self.public_bayesian_engine.update(RBAEventType.PLAYER_ACCUSED, actor_id=actor, status=status)
+                    self.bayesian_engine.update(RBAEventType.PLAYER_ACCUSED, actor_id=target, status=status)
+                    self.public_bayesian_engine.update(RBAEventType.PLAYER_ACCUSED, actor_id=target, status=status)
+                
+                # Self-claim ("I am Role Y")
+                else:
+                    claimed_role = event.value
+                    claimer_id = actor
+
+                    # Check for counter-claims on unique roles
+                    existing_claimant_id = None
+                    if claimed_role in [Role.POLICE, Role.DOCTOR]:
+                        for p_id, stats in self.player_stats.items():
+                            if p_id != claimer_id and stats.get("claimed_role") == claimed_role:
+                                existing_claimant_id = p_id
+                                break
+                    
+                    # Update this player's claimed role *after* checking for contradiction
+                    self.player_stats[claimer_id]["claimed_role"] = claimed_role
+
+                    if existing_claimant_id is not None:
+                        # Counter-claim detected! Increase suspicion for both.
+                        self.bayesian_engine.update(RBAEventType.ROLE_COUNTERCLAIMED, actor_id=claimer_id, status=status)
+                        self.public_bayesian_engine.update(RBAEventType.ROLE_COUNTERCLAIMED, actor_id=claimer_id, status=status)
+                        self.bayesian_engine.update(RBAEventType.ROLE_COUNTERCLAIMED, actor_id=existing_claimant_id, status=status)
+                        self.public_bayesian_engine.update(RBAEventType.ROLE_COUNTERCLAIMED, actor_id=existing_claimant_id, status=status)
+                    else:
+                        # First time this role is claimed (or it's a non-unique role)
+                        self.bayesian_engine.update(RBAEventType.ROLE_CLAIMED, actor_id=claimer_id, status=status)
+                        self.public_bayesian_engine.update(RBAEventType.ROLE_CLAIMED, actor_id=claimer_id, status=status)
 
             if event.event_type == EventType.POLICE_RESULT and event.actor_id == self.id:
                 is_mafia = (event.value == Role.MAFIA)
@@ -189,7 +219,7 @@ class RuleBaseAgent(BaseAgent):
             if probabilities[p.id] > max_personal_sus:
                 max_personal_sus, personal_target = probabilities[p.id], p.id
         
-        if personal_target != -1 and max_personal_sus > 0.7:
+        if personal_target != -1 and max_personal_sus > 0.5:
              if self.role == Role.MAFIA or random.random() < 0.5:
                  return GameAction(target_id=personal_target, claim_role=Role.MAFIA)
 
@@ -217,6 +247,9 @@ class RuleBaseAgent(BaseAgent):
         return GameAction(target_id=-1)
 
     def _act_vote(self, status: GameStatus) -> GameAction:
+        if self.bayesian_engine and len(self.known_mafia) >= self.bayesian_engine.initial_mafia_count:
+            return GameAction(target_id=-1)
+
         alive_players = [p for p in status.players if p.alive]
         if not alive_players or len(alive_players) <= 2: return GameAction(target_id=-1)
 
