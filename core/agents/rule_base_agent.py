@@ -1,5 +1,5 @@
 import random
-from typing import List, Dict, Optional, Set
+from typing import List, Optional, Set
 from core.agents.base_agent import BaseAgent
 from core.engine.state import GameStatus, GameAction
 from config import EventType, Role, Phase
