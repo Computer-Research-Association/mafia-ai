@@ -63,7 +63,8 @@ class LogManager:
 
             self.writer = None
             if self.use_tensorboard:
-                tensorboard_dir = self.session_dir / "tensorboard"
+                tensorboard_root = Path("tensorboard")
+                tensorboard_dir = tensorboard_root / f"{experiment_name}_{timestamp}"
                 self.writer = SummaryWriter(log_dir=str(tensorboard_dir))
                 self._setup_tensorboard_layout()
                 print(f"  - TensorBoard: {tensorboard_dir}")
@@ -72,7 +73,7 @@ class LogManager:
         else:
             self.session_dir = None
             self.writer = None
-        
+
         # [Logger Setup]
         self.logger = logging.getLogger("MafiaLogger")
         self.logger.setLevel(logging.DEBUG)
@@ -82,13 +83,15 @@ class LogManager:
             # File Handler
             if self.session_dir:
                 log_file = self.session_dir / "system.log"
-                file_handler = logging.FileHandler(log_file, encoding='utf-8')
-                file_handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s'))
+                file_handler = logging.FileHandler(log_file, encoding="utf-8")
+                file_handler.setFormatter(
+                    logging.Formatter("%(asctime)s - %(message)s")
+                )
                 self.logger.addHandler(file_handler)
 
             # Console Handler
             stream_handler = logging.StreamHandler(sys.stdout)
-            stream_handler.setFormatter(logging.Formatter('%(message)s'))
+            stream_handler.setFormatter(logging.Formatter("%(message)s"))
             self.logger.addHandler(stream_handler)
 
     def _open_log_file(self, start_episode: int):
@@ -120,16 +123,13 @@ class LogManager:
                     f"Agent_{i}/Loss",
                     f"Agent_{i}/Entropy",
                     f"Agent_{i}/KL_Divergence",
-                    f"Agent_{i}/Clip_Fraction"
-                ]
+                    f"Agent_{i}/Clip_Fraction",
+                ],
             ]
             # 2. Performance Metrics (성과)
             individual_charts[f"Agent {i} - Performance"] = [
                 "Multiline",
-                [
-                    f"Agent_{i}/Reward",
-                    f"Agent_{i}/Win_Rate"
-                ]
+                [f"Agent_{i}/Reward", f"Agent_{i}/Win_Rate"],
             ]
 
         layout = {

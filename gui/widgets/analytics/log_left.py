@@ -33,14 +33,13 @@ class LogLeft(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         self.setLayout(layout)
 
-        # 1. 헤더
-        header_layout = QHBoxLayout()
-        header_layout.addWidget(QLabel("📂 로그 탐색기"))
-
-        # 2. 경로 변경 버튼
-        self.btn_change_root = QPushButton("다른 폴더 열기...")
-        self.btn_change_root.setStyleSheet("font-size: 11px; padding: 3px;")
-        layout.addWidget(self.btn_change_root)
+        self.btn_tb_all = QPushButton("📊 TensorBoard 실행")
+        self.btn_tb_all.setToolTip(
+            "모든 실험 기록이 저장된 통합 TensorBoard를 실행합니다."
+        )
+        self.btn_tb_all.setStyleSheet("font-size: 11px; padding: 3px;")
+        self.btn_tb_all.clicked.connect(self._show_tensorboard)
+        layout.addWidget(self.btn_tb_all)
 
         # 3. 모델 설정
         self.model = QFileSystemModel()
@@ -112,16 +111,11 @@ class LogLeft(QWidget):
         if target_dir:
             self.log_selected.emit(target_dir)
 
-    def _show_tensorboard(self, index):
-        file_path = Path(self.model.filePath(index))
-
-        tb_dir = file_path
-
-        if file_path.is_dir() and tb_dir.exists():
-            self.tensorboard_requested.emit(tb_dir)
-            print(f"[GUI] TensorBoard requested for: {tb_dir}")
-        else:
-            print(f"no tensorboard in folder (경로: {tb_dir})")
+    def _show_tensorboard(self):
+        project_root = Path(__file__).parent.parent.parent.parent.resolve()
+        tensorboard_root = project_root / "tensorboard"
+        self.tensorboard_requested.emit(tensorboard_root)
+        print(f"[GUI] Requesting TensorBoard for root: {tensorboard_root}")
 
     def _open_context_menu(self, position):
         index = self.tree.indexAt(position)
@@ -129,12 +123,6 @@ class LogLeft(QWidget):
             return
 
         menu = QMenu()
-
-        tb_action = QAction("열기 (TensorBoard)", self)
-        tb_action.triggered.connect(lambda: self._show_tensorboard(index))
-        menu.addAction(tb_action)
-
-        menu.addSeparator()
 
         selection = self.tree.selectionModel().selectedRows(0)
 
