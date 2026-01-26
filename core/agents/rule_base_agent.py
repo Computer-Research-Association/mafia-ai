@@ -230,7 +230,8 @@ class RuleBaseAgent(BaseAgent):
                 if e.target_id not in [None, -1]:
                     votes[e.target_id] = votes.get(e.target_id, 0) + 1
         
-        if not votes: return GameAction(target_id=self.id)
+        # If no valid votes exist, abstain from selecting an execution target.
+        if not votes: return GameAction(target_id=-1)
         
         target_id = max(votes, key=votes.get)
         if target_id == self.id or target_id == -1: return GameAction(target_id=self.id)
