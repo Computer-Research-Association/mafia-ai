@@ -271,7 +271,26 @@ class RuleBaseAgent(BaseAgent):
                 return self._do_claim(Role.DOCTOR)
             if not self.is_hiding_role and not self.claimed_role:
                  return self._do_claim(Role.DOCTOR)
+
+        # If no other specific action was chosen, make a probabilistic accusation.
+        # This prevents the agent from staying silent.
+        probabilities = self.bayesian_engine.get_mafia_probabilities()
+        mask = np.array([1 if p.alive and p.id != self.id else 0 for p in status.players])
         
+        # Don't accuse known teammates or known safe players
+        if self.role == Role.MAFIA:
+            for m_id in self.known_mafia:
+                if m_id < len(mask): mask[m_id] = 0
+        for s_id in self.known_safe:
+            if s_id < len(mask): mask[s_id] = 0
+
+        masked_probs = probabilities * mask
+        if np.sum(masked_probs) > 0:
+            normalized_probs = masked_probs / np.sum(masked_probs)
+            # Lower temp for more decisive (but still probabilistic) action
+            target_id = softmax_selection(normalized_probs, temperature=0.8) 
+            return GameAction(target_id=target_id, claim_role=Role.MAFIA)
+
         return GameAction(target_id=-1)
 
     def _act_vote(self, status: GameStatus) -> GameAction:
@@ -314,13 +333,10 @@ class RuleBaseAgent(BaseAgent):
         # --- Mid-game Logic (> 4 survivors) ---
         else:
             # Use entropy-aware temperature for probabilistic voting
+            entropy = calculate_entropy(normalized_probs)
             current_temp = np.clip(entropy * 0.6, MIN_VOTE_TEMPERATURE, INITIAL_VOTE_TEMPERATURE)
             
-            # Allow abstention if uncertainty is high
-            if should_abstain(entropy, ABSTAIN_ENTROPY_THRESHOLD):
-                return GameAction(target_id=-1)
-            
-            # Probabilistic vote
+            # Probabilistic vote without abstention
             target_id = softmax_selection(normalized_probs, temperature=current_temp)
             return GameAction(target_id=target_id)
 
@@ -331,14 +347,37 @@ class RuleBaseAgent(BaseAgent):
                  if e.target_id is not None and e.target_id != -1:
                     votes[e.target_id] = votes.get(e.target_id, 0) + 1
         
-        if not votes: return GameAction(target_id=-1)
+        if not votes:
+            # Cannot abstain, must vote against something. Vote self.
+            return GameAction(target_id=self.id)
+
+        # The agent assumes the most-voted player is the candidate.
         target_id = max(votes, key=votes.get)
-        if target_id == self.id: return GameAction(target_id=-1)
-        if self.role == Role.MAFIA and target_id in self.known_mafia: return GameAction(target_id=-1)
-        if target_id in self.known_safe: return GameAction(target_id=-1)
+
+        # Disapprove if the target is self, a known safe player, or (if Mafia) a fellow Mafia member.
+        if target_id == self.id:
+            return GameAction(target_id=self.id)
+        if target_id in self.known_safe:
+            return GameAction(target_id=self.id)
+        if self.role == Role.MAFIA and target_id in self.known_mafia:
+            return GameAction(target_id=self.id)
 
         mafia_prob = self.bayesian_engine.get_mafia_probabilities()[target_id]
-        return GameAction(target_id=target_id) if mafia_prob > 0.5 else GameAction(target_id=-1)
+        survivor_count = sum(1 for p in status.players if p.alive)
+
+        # Endgame: high aggression. Higher chance to approve even with moderate suspicion.
+        if survivor_count <= 4:
+            approval_chance = np.clip(mafia_prob * 1.5, 0, 0.95)
+            if random.random() < approval_chance:
+                return GameAction(target_id=target_id)  # Approve
+            else:
+                return GameAction(target_id=self.id)  # Disapprove
+
+        # Mid-game: forced choice based on direct probability.
+        if random.random() < mafia_prob:
+            return GameAction(target_id=target_id)  # Approve
+        else:
+            return GameAction(target_id=self.id)  # Disapprove
 
     def _act_night(self, status: GameStatus, targets: List[int]) -> GameAction:
         alive_player_ids = [p.id for p in status.players if p.alive]
