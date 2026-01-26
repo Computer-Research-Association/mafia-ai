@@ -69,3 +69,4 @@ class GameStatus(BaseModel):
     my_role: Role
     players: List[PlayerStatus]
     action_history: List[GameEvent]
+    random_seed: int = 0
