@@ -12,14 +12,14 @@ if TYPE_CHECKING:
 BASE_LIKELIHOODS = {
     RBAEventType.PLAYER_VOTED: 1.1,
     RBAEventType.PLAYER_WAS_VOTED_FOR: 1.0,
-    RBAEventType.PLAYER_ACCUSED: 1.5,
+    RBAEventType.PLAYER_ACCUSED: 2.0,
     RBAEventType.PLAYER_DEFENDED: 0.7,
     RBAEventType.HEAL_ATTEMPT: 0.5,
     RBAEventType.INVESTIGATE_ATTEMPT: 0.5,
     RBAEventType.ACCUSATION_WAS_WRONG: 2.0,
     RBAEventType.ACCUSATION_WAS_RIGHT: 0.1,
     RBAEventType.ROLE_CLAIMED: 0.8,
-    RBAEventType.ROLE_COUNTERCLAIMED: 3.0,
+    RBAEventType.ROLE_COUNTERCLAIMED: 4.0,
 }
 
 def get_contextual_likelihood(event_type: RBAEventType, day: int, survivor_count: int, actor_id: int, engine: 'BayesianInferenceEngine') -> float:

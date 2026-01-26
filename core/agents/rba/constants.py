@@ -29,7 +29,7 @@ class RBAEventType(Enum):
 # --- Decision Making Constants ---
 # The entropy threshold for abstaining. If the uncertainty (entropy) of the
 # probability distribution is higher than this, the agent will abstain from voting.
-ABSTAIN_ENTROPY_THRESHOLD = 1.2
+ABSTAIN_ENTROPY_THRESHOLD = 1.5
 
 # Softmax temperature for voting. Higher values lead to more random (exploratory) votes,
 # lower values lead to more deterministic (exploitative) votes.

@@ -102,8 +102,12 @@ class BayesianInferenceEngine:
     def _normalize(self, probabilities: np.ndarray) -> np.ndarray:
         """
         Normalizes the array so that the sum of probabilities equals the number of
-        remaining mafias.
+        remaining mafias. This version includes safeguards against numerical instability.
         """
+        # Safeguard against NaN/inf values from previous calculations
+        if not np.all(np.isfinite(probabilities)):
+            probabilities = np.nan_to_num(probabilities, nan=0.0, posinf=1.0, neginf=0.0)
+
         fixed_indices = np.where((probabilities == 0.0) | (probabilities == 1.0))[0]
         fixed_prob_sum = np.sum(probabilities[fixed_indices])
         
@@ -114,16 +118,19 @@ class BayesianInferenceEngine:
         uncertain_indices = np.where((probabilities > 0.0) & (probabilities < 1.0))[0]
         
         if len(uncertain_indices) == 0:
-            return probabilities
+            return np.clip(probabilities, 0, 1)
 
         current_uncertain_sum = np.sum(probabilities[uncertain_indices])
         
-        if current_uncertain_sum > 0:
+        # Avoid division by zero or very small numbers
+        if current_uncertain_sum > 1e-9:
             scale_factor = target_sum_for_uncertain / current_uncertain_sum
             probabilities[uncertain_indices] *= scale_factor
-        elif target_sum_for_uncertain > 0 and len(uncertain_indices) > 0:
+        elif target_sum_for_uncertain > 0:
+            # If current sum is zero but it should be positive, distribute evenly
             probabilities[uncertain_indices] = target_sum_for_uncertain / len(uncertain_indices)
 
+        # Final clipping to ensure all values are valid probabilities
         return np.clip(probabilities, 0, 1)
 
     def reset_and_replay(self, mafia_count: int, mafia_team_ids: List[int]):

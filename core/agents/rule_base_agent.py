@@ -118,6 +118,25 @@ class RuleBaseAgent(BaseAgent):
                     self.bayesian_engine.update(event_type, actor_id=claim["claimerId"], status=status)
                     self.public_bayesian_engine.update(event_type, actor_id=claim["claimerId"], status=status)
 
+                # Re-evaluate counter-claims based on execution result
+                executed_player_stats = self.player_stats.get(target)
+                if executed_player_stats and executed_player_stats.get("claimed_role"):
+                    claimed_role = executed_player_stats.get("claimed_role")
+                    if claimed_role in [Role.POLICE, Role.DOCTOR]:
+                        for p_id, stats in self.player_stats.items():
+                            if p_id != target and stats.get("claimed_role") == claimed_role:
+                                other_claimant_id = p_id
+                                if is_mafia:
+                                    self.bayesian_engine.set_player_probability(other_claimant_id, is_mafia=False)
+                                    self.public_bayesian_engine.set_player_probability(other_claimant_id, is_mafia=False)
+                                    if other_claimant_id not in self.known_safe:
+                                        self.known_safe.append(other_claimant_id)
+                                else:
+                                    self.bayesian_engine.update(RBAEventType.ROLE_COUNTERCLAIMED, actor_id=other_claimant_id, status=status)
+                                    self.public_bayesian_engine.update(RBAEventType.ROLE_COUNTERCLAIMED, actor_id=other_claimant_id, status=status)
+                                break
+
+
             if event.event_type == EventType.VOTE and actor is not None and target is not None:
                 days_with_new_votes.add(event.day)
                 self.daily_votes.setdefault(event.day, {})[actor] = target
@@ -199,6 +218,13 @@ class RuleBaseAgent(BaseAgent):
         if not survivors:
             return GameAction(target_id=-1)
 
+        # --- Urgency Calculation ---
+        survivor_count = len(survivors) + 1
+        total_players = len(status.players)
+        progress = (total_players - survivor_count) / (total_players - 2) if (total_players - 2) > 0 else 0
+        day_factor = min((status.day - 1) / 4.0, 1.0) # Scale over first 5 days
+        urgency_factor = np.clip(0.6 * progress + 0.4 * day_factor, 0, 1)
+
         probabilities = self.bayesian_engine.get_mafia_probabilities()
         public_probabilities = self.public_bayesian_engine.get_mafia_probabilities()
         my_public_mafia_prob = public_probabilities[self.id]
@@ -219,7 +245,9 @@ class RuleBaseAgent(BaseAgent):
             if probabilities[p.id] > max_personal_sus:
                 max_personal_sus, personal_target = probabilities[p.id], p.id
         
-        if personal_target != -1 and max_personal_sus > 0.5:
+        accusation_threshold = 0.6 - (0.3 * urgency_factor) # Range [0.6, 0.3]
+
+        if personal_target != -1 and max_personal_sus > accusation_threshold:
              if self.role == Role.MAFIA or random.random() < 0.5:
                  return GameAction(target_id=personal_target, claim_role=Role.MAFIA)
 
@@ -253,6 +281,18 @@ class RuleBaseAgent(BaseAgent):
         alive_players = [p for p in status.players if p.alive]
         if not alive_players or len(alive_players) <= 2: return GameAction(target_id=-1)
 
+        survivor_count = len(alive_players)
+        total_players = len(status.players)
+
+        # --- Urgency Calculation ---
+        progress = (total_players - survivor_count) / (total_players - 2) if (total_players - 2) > 0 else 0
+        day_factor = min((status.day - 1) / 4.0, 1.0) # Scale over first 5 days
+        urgency_factor = np.clip(0.6 * progress + 0.4 * day_factor, 0, 1)
+
+        # --- Abstain Logic ---
+        abstain_threshold = 1.5 + (0.8 * urgency_factor) # Range [1.5, 2.3]
+
+
         # --- Temperature Annealing ---
         total_players = len(status.players)
         progress = (total_players - len(alive_players)) / (total_players - 2) if (total_players - 2) > 0 else 1
@@ -280,7 +320,7 @@ class RuleBaseAgent(BaseAgent):
 
         # --- Decision ---
         entropy = calculate_entropy(normalized_probs)
-        if should_abstain(entropy, ABSTAIN_ENTROPY_THRESHOLD): return GameAction(target_id=-1)
+        if should_abstain(entropy, abstain_threshold): return GameAction(target_id=-1)
         
         target_id = softmax_selection(normalized_probs, temperature=current_temp)
         return GameAction(target_id=target_id)
