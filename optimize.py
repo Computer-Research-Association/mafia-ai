@@ -45,26 +45,41 @@ def objective(trial):
     config.train.BATCH_SIZE = batch_size
 
     # ==========================================
-    # 3. [실험 환경 구축]
+    # 3. [실험 환경 구축 (마피아 vs RBA)]
     # ==========================================
-    # ExperimentManager를 위한 가짜 인자(Namespace) 생성
-    # 최적화 때는 에피소드를 적게(예: 300판) 설정해서 빠르게 훑어보는 게 좋습니다.
-    args = Namespace(
-        mode="train",
-        episodes=300,  # 300판만 돌려보고 판단 (너무 길면 오래 걸림)
-        player_configs=[
-            # 8명 모두 PPO RLAgent로 설정 (모델 크기는 위에서 추천받은 값 적용)
+
+    # 플레이어 설정 구성
+    # - RL 에이전트 2명: 마피아 고정
+    # - RBA 에이전트 6명: 나머지 역할(경찰, 의사, 시민) 자동 할당
+    player_configs = []
+
+    # [Team Mafia] RL Agent 2명
+    for _ in range(2):
+        player_configs.append(
             {
                 "type": "rl",
                 "algo": "ppo",
-                "backbone": "lstm",
+                "backbone": "lstm",  # 마피아는 시계열 정보가 중요하므로 LSTM 권장
                 "hidden_dim": hidden_dim,
                 "num_layers": 2,
-                "role": "random",  # 랜덤 역할 배정
+                "role": "mafia",  # [핵심] 역할을 마피아로 고정
             }
-            for _ in range(8)
-        ],
-        # 로그 경로는 trial 번호별로 분리
+        )
+
+    # [Team Citizen] RBA Agent 6명
+    for _ in range(6):
+        player_configs.append(
+            {
+                "type": "rba",  # 규칙 기반 에이전트
+                "role": "random",  # 남은 역할(경찰1, 의사1, 시민4) 중에서 랜덤 배정
+            }
+        )
+
+    args = Namespace(
+        mode="train",
+        episodes=1500,
+        player_configs=player_configs,
+        # 로그 경로는 trial 번호별로 분리하여 충돌 방지
         paths={"log_dir": f"logs/optuna/trial_{trial.number}", "model_dir": "models"},
     )
 
@@ -72,11 +87,10 @@ def objective(trial):
     final_score = -999.0
 
     try:
-        # 환경 생성 (Optuna 중에는 num_cpus=0 또는 1로 설정하여 안전하게 실행)
-        # 이미 Optuna 자체가 무거우므로 병렬 환경을 과하게 쓰면 멈출 수 있음
+        # 환경 생성 (Optuna 실행 중에는 CPU 부하를 고려해 병렬 프로세스 수 조절)
         env = experiment.build_vec_env(
-            num_envs=8, num_cpus=0
-        )  # 0 = 메인 프로세스에서 실행
+            num_envs=8, num_cpus=0  # 0 = 메인 프로세스에서 실행 (디버깅/안정성 유리)
+        )
 
         agents = experiment.build_agents()
         rl_agents = experiment.get_rl_agents(agents)
@@ -138,7 +152,7 @@ if __name__ == "__main__":
     print(f"Logs will be saved to: {storage_name}")
 
     # 3. 최적화 실행
-    study.optimize(objective, n_trials=20)  # 20번 시도로 수정
+    study.optimize(objective, n_trials=50)  # 50 시도로 수정
 
     # 4. 결과 출력
     print("\n==================================")
