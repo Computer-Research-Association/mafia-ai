@@ -124,6 +124,7 @@ class MafiaEnv(ParallelEnv):
     def step(self, actions):
         # 환경 내재화: 액션이 없는 에이전트(RBA/LLM)의 액션 생성
         # 현재 생존한 모든 플레이어에 대해 확인
+        external_agents = set(actions.keys())
         current_alive_ids = [p.id for p in self.game.players if p.alive]
 
         for pid in current_alive_ids:
@@ -152,17 +153,34 @@ class MafiaEnv(ParallelEnv):
 
         # Convert string keys to int keys for the engine
         engine_actions = {}
-        for agent_id, action in actions.items():
-            pid = self._agent_to_id(agent_id)
+        num_players = config.game.PLAYER_COUNT
+        for agent_id_str, action in actions.items():
+            pid = self._agent_to_id(agent_id_str)
+            
+            game_action = None
             if isinstance(action, (list, np.ndarray)):
-                engine_actions[pid] = GameAction.from_multi_discrete(action)
+                game_action = GameAction.from_multi_discrete(action)
             elif isinstance(action, GameAction):
-                engine_actions[pid] = action
+                game_action = action
             elif isinstance(action, dict):
                 engine_actions[pid] = action
-            else:
-                # Fallback or error
-                pass
+                continue
+            
+            if not game_action:
+                continue
+
+            # Check if the agent uses relative encoding
+            is_relative = isinstance(self.encoder_map[pid], (MDPEncoder, POMDPEncoder))
+
+            # Convert relative target from RL agent to absolute target for engine
+            if is_relative and agent_id_str in external_agents:
+                if game_action.target_id is not None and game_action.target_id != -1:
+                    rel_target = game_action.target_id
+                    abs_target = (rel_target + pid) % num_players
+                    game_action.target_id = abs_target
+            
+            engine_actions[pid] = game_action
+
 
         # 턴 진행 전 상태 저장 (보상 계산용)
         prev_phase = self.game.phase
@@ -489,10 +507,17 @@ class MafiaEnv(ParallelEnv):
         elif phase == Phase.DAY_DISCUSSION:
             _role_mask[1:] = 1
 
+        is_relative = isinstance(self.encoder_map[agent_id], (MDPEncoder, POMDPEncoder))
+        
         if not valid_targets:
             _target_mask[1:] = 0
         else:
+            num_players = config.game.PLAYER_COUNT
             for target_id in valid_targets:
-                _target_mask[target_id + 1] = 1
+                if is_relative:
+                    rel_target_id = (target_id - agent_id) % num_players
+                    _target_mask[rel_target_id + 1] = 1
+                else:
+                    _target_mask[target_id + 1] = 1
 
         return np.concatenate([_target_mask, _role_mask])
