@@ -308,3 +308,23 @@ class POMDPEncoder(BaseEncoder):
         obs[:self._real_dim] = raw_obs
         
         return obs
+
+class AbsoluteEncoder(BaseEncoder):
+    """
+    Encoder for absolute-coordinate agents like Rule-Based Agents.
+    This is essentially a dummy encoder as the agent logic does not depend
+    on a neural network observation. It returns a minimal vector.
+    """
+    def __init__(self):
+        # Return a minimal observation dimension
+        self._dim = 1
+
+    @property
+    def observation_dim(self) -> int:
+        return self._dim
+
+    def encode(self, game, player_id: int) -> np.ndarray:
+        """
+        Returns a dummy observation vector.
+        """
+        return np.zeros(self._dim, dtype=np.float32)
