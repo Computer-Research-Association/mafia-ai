@@ -29,6 +29,8 @@ class MafiaGame:
         self.phase = Phase.GAME_START
         self.discussion_round = 0
         self.history = []
+        self.game_seed = random.randint(0, 1000000)
+
         self._last_votes = []  # 투표 결과 초기화
         self.police_research = [0 for _ in range(7)]  # 경찰 조사 결과 초기화
 
@@ -441,6 +443,7 @@ class MafiaGame:
                 my_role=Role.CITIZEN,
                 players=[PlayerStatus(id=p.id, alive=p.alive) for p in self.players],
                 action_history=self.history,
+                random_seed=self.game_seed,
             )
 
         viewer = self.players[viewer_id]
