@@ -317,7 +317,7 @@ class AbsoluteEncoder(BaseEncoder):
     """
     def __init__(self):
         # Return a minimal observation dimension
-        self._dim = 1
+        self._dim = config.game.MDP_OBS_DIM
 
     @property
     def observation_dim(self) -> int:
