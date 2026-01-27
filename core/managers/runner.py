@@ -260,7 +260,7 @@ def train(
             # 업데이트 주기 체크
             if (
                 completed_episodes - num_finished_now
-            ) // 100 != completed_episodes // 100:
+            ) // 300 != completed_episodes // 300:
                 pbar.write("[System] Updating Agents...")
                 for pid, agent in rl_agents.items():
                     if hasattr(agent, "update"):
