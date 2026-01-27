@@ -54,46 +54,86 @@ def create_player_cards_grid():
                 # 에이전트 객체에서 직접 역할(Role) 정보를 가져와 표시
                 ui.label(player.role.name).classes('text-sm bg-gray-200 text-gray-700 px-2 py-1 rounded-full')
 
-# --- Page Layout ---
 @ui.page('/')
 def main_page():
     """메인 웹 페이지를 구성합니다."""
-    # --- Local Page State & Event Handlers ---
-    
-    async def handle_start_game():
-        """'Start New Game' 버튼 클릭 시 호출될 비동기 핸들러."""
-        ui.notify('새로운 게임을 시작합니다...', type='info')
 
-        # 게임 엔진 리셋 실행
-        if asyncio.iscoroutinefunction(app_state.game_engine.reset):
-            game_status = await app_state.game_engine.reset()
-        else:
-            game_status = await asyncio.to_thread(app_state.game_engine.reset)
+    # --- Event Handlers ---
+    async def handle_start_game():
+        """'Start New Game' 버튼 클릭 시 게임을 리셋하고 UI를 초기화합니다."""
+        ui.notify('새로운 게임을 시작합니다...', type='info')
+        
+        # 게임 리셋 및 상태 가져오기
+        await asyncio.to_thread(app_state.game_engine.reset)
 
         # UI 업데이트
+        run_phase_button.enable()
+        day_phase_label.set_text(f"Day {app_state.game_engine.day} | Phase: {app_state.game_engine.phase.name}")
         player_grid_container.clear()
         with player_grid_container:
             create_player_cards_grid()
         
         ui.notify('게임이 준비되었습니다. 플레이어 역할이 배정되었습니다.', type='positive')
 
-    # --- UI Definition ---
+    async def handle_run_phase():
+        """'Run Next Phase' 버튼 클릭 시 에이전트들의 행동을 수집하여 게임을 진행합니다."""
+        game_engine = app_state.game_engine
 
-    # 페이지 상단 헤더
+        # 게임 종료 여부 확인
+        is_over, _ = game_engine.check_game_over()
+        if is_over:
+            ui.notify("게임이 이미 종료되었습니다.", type='warning')
+            run_phase_button.disable()
+            return
+
+        ui.notify(f"Running Phase: {game_engine.phase.name}...", type='info')
+
+        # 살아있는 에이전트로부터 행동 수집 (비동기 처리)
+        living_players = [p for p in game_engine.players if p.alive]
+        
+        async def get_single_action(player):
+            # 각 에이전트의 관점에서 GameStatus를 생성하여 전달
+            player_view = game_engine.get_game_status(viewer_id=player.id)
+            # 동기 함수인 get_action을 스레드에서 실행하여 이벤트 루프 블로킹 방지
+            action = await asyncio.to_thread(player.get_action, player_view)
+            return player.id, action
+
+        action_tasks = [get_single_action(p) for p in living_players]
+        action_results = await asyncio.gather(*action_tasks)
+        actions = dict(action_results)
+
+        # 게임 페이즈 진행
+        _, is_over, is_win = await asyncio.to_thread(game_engine.step_phase, actions)
+
+        # UI 업데이트
+        day_phase_label.set_text(f"Day {game_engine.day} | Phase: {game_engine.phase.name}")
+        player_grid_container.clear()
+        with player_grid_container:
+            create_player_cards_grid()
+
+        # 게임 종료 처리
+        if is_over:
+            winner = "시민" if is_win else "마피아"
+            ui.notify(f"게임 종료! {winner} 팀의 승리입니다!", type='positive', multi_line=True, timeout=None, close_button=True)
+            run_phase_button.disable()
+
+    # --- UI Definition ---
     create_header()
 
-    # 메인 컨텐츠 영역
     with ui.column().classes('w-full max-w-4xl mx-auto p-8 items-center'):
         
+        # Day, Phase 정보 표시 레이블
+        day_phase_label = ui.label("게임을 시작하려면 'Start New Game' 버튼을 누르세요.").classes('text-xl font-semibold mb-4')
+
         # 컨트롤 버튼 영역
         with ui.row().classes('mb-8 gap-4'):
             ui.button('Start New Game', on_click=handle_start_game)
-            ui.button('Run Next Phase', on_click=lambda: ui.notify('아직 구현되지 않았습니다!')).props('outline')
+            run_phase_button = ui.button('Run Next Phase', on_click=handle_run_phase).props('outline')
+            run_phase_button.disable() # 초기에는 비활성화
 
-        # 플레이어 정보가 표시될 컨테이너 (app.storage 대신 지역 변수 사용)
+        # 플레이어 카드 그리드
         player_grid_container = ui.column().classes('w-full items-center')
         with player_grid_container:
-            # 초기 상태 표시
             create_player_cards_grid()
 
 # --- App Entrypoint ---
