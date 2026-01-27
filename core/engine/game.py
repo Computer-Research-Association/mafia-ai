@@ -358,6 +358,7 @@ class MafiaGame:
 
         # --- 2. 마피아 투표 집계 및 최종 타겟 결정 ---
         if mafia_votes:
+            random.shuffle(mafia_votes)
             vote_counts = Counter(mafia_votes)
             max_votes = vote_counts.most_common(1)[0][1]
             top_targets = [p for p, v in vote_counts.items() if v == max_votes]
