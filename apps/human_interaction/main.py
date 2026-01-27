@@ -13,7 +13,7 @@ from nicegui import ui, app
 
 from core.engine.game import MafiaGame
 from core.agents.rule_base_agent import RuleBaseAgent
-from core.engine.state import GameStatus, Role
+from core.engine.state import GameStatus, Role, GameAction
 
 # --- Application State ---
 # 앱의 상태를 관리하는 클래스. 게임 엔진 인스턴스를 저장합니다.
