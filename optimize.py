@@ -17,19 +17,21 @@ def objective(trial):
     # ==========================================
 
     # 학습률 (Learning Rate): 로그 스케일로 탐색 (0.00001 ~ 0.001)
-    lr = trial.suggest_float("lr", 1e-5, 1e-3, log=True)
+    lr = trial.suggest_float("lr", 1e-6, 3e-4, log=True)
 
     # 감마 (Gamma): 미래 보상 중요도 (0.9 ~ 0.999)
     gamma = trial.suggest_float("gamma", 0.90, 0.999)
 
     # 엔트로피 계수 (Entropy Coef): 탐험 비율 (0.01 ~ 0.1)
-    entropy_coef = trial.suggest_float("entropy_coef", 0.01, 0.1)
+    entropy_coef = trial.suggest_float("entropy_coef", 0.005, 0.05)
 
     # 배치 크기 (Batch Size): 64, 128, 256 중 선택
-    batch_size = trial.suggest_categorical("batch_size", [128, 256])
+    batch_size = trial.suggest_categorical("batch_size", [2048, 4096])
 
     # 신경망 크기 (Hidden Dim): 모델 복잡도
-    hidden_dim = trial.suggest_categorical("hidden_dim", [64, 128, 256])
+    hidden_dim = trial.suggest_categorical("hidden_dim", [128, 256, 512])
+
+    eps_clip = trial.suggest_categorical("eps_clip", [0.01, 0.02])
 
     print(
         f"\n[Trial {trial.number}] Testing: LR={lr:.5f}, Gamma={gamma:.3f}, Batch={batch_size}, Hidden={hidden_dim}"
@@ -43,6 +45,7 @@ def objective(trial):
     config.train.GAMMA = gamma
     config.train.ENTROPY_COEF = entropy_coef
     config.train.BATCH_SIZE = batch_size
+    config.train.EPS_CLIP = eps_clip
 
     # ==========================================
     # 3. [실험 환경 구축 (마피아 vs RBA)]
@@ -145,14 +148,14 @@ if __name__ == "__main__":
         direction="maximize",
         storage=storage_name,
         load_if_exists=True,  # 없으면 만들고, 있으면 로드함 (방금 지웠으니 무조건 새로 만듦)
-        pruner=optuna.pruners.MedianPruner(n_startup_trials=5, n_warmup_steps=50),
+        pruner=optuna.pruners.MedianPruner(n_startup_trials=5, n_warmup_steps=200),
     )
 
     print("=== Mafia AI Hyperparameter Optimization Start ===")
     print(f"Logs will be saved to: {storage_name}")
 
     # 3. 최적화 실행
-    study.optimize(objective, n_trials=50)  # 50 시도로 수정
+    study.optimize(objective, n_trials=30)  # 30 시도로 수정
 
     # 4. 결과 출력
     print("\n==================================")

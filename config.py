@@ -54,11 +54,11 @@ class GameSettings(BaseSettings):
         Role.CITIZEN,
     ]
     MAX_DISCUSSION_ROUNDS: int = 2
-    
+
     # Observation Dimensions
-    MDP_OBS_DIM: int = 286    # MLP/MDP용 전체 차원 (패딩의 기준점)
-    POMDP_OBS_DIM: int = 54   # RNN/POMDP용 실제 유효 데이터 차원
-    
+    MDP_OBS_DIM: int = 286  # MLP/MDP용 전체 차원 (패딩의 기준점)
+    POMDP_OBS_DIM: int = 54  # RNN/POMDP용 실제 유효 데이터 차원
+
     ACTION_DIMS: List[int] = [9, 5]  # [Target(9), Role(5)]
 
 
@@ -66,7 +66,7 @@ class TrainSettings(BaseSettings):
     LR: float = 0.0001
     GAMMA: float = 0.99
     EPS_CLIP: float = 0.2
-    K_EPOCHS: int = 4
+    K_EPOCHS: int = 10
     BATCH_SIZE: int = 256
     ENTROPY_COEF: float = 0.05
     VALUE_LOSS_COEF: float = 0.5

@@ -19,7 +19,7 @@ def make_env_for_worker():
 
 
 from core.envs.mafia_env import MafiaEnv
-from core.envs.encoders import MDPEncoder, POMDPEncoder
+from core.envs.encoders import MDPEncoder, POMDPEncoder, AbsoluteEncoder
 from core.agents import AgentBuilder
 from core.agents.rl_agent import RLAgent
 from core.managers.logger import LogManager
@@ -71,12 +71,19 @@ class ExperimentManager:
         메인 프로세스용 환경
         [수정] Runner가 로그를 중앙 관리하므로, Env 내부에는 logger를 주지 않습니다.
         """
-        # 1. 먼저 빌더를 통해 사용할 인코더 맵을 미리 파악 (또는 빌더가 반환하게 함)
         encoder_map = {}
         if self.player_configs:
             for i, p_cfg in enumerate(self.player_configs):
-                bb = p_cfg.get("backbone", "mlp").lower()
-                encoder_map[i] = POMDPEncoder() if bb in ["lstm", "gru", "rnn"] else MDPEncoder()
+                agent_type = p_cfg.get("type", "rl").lower()
+                if agent_type == "rl":
+                    bb = p_cfg.get("backbone", "mlp").lower()
+                    encoder_map[i] = POMDPEncoder() if bb in ["lstm", "gru", "rnn"] else MDPEncoder()
+                else:  # For 'rba', 'llm'
+                    encoder_map[i] = AbsoluteEncoder()
+        else:
+            # Default to AbsoluteEncoder for all if no configs are provided (e.g., all RBA simulation)
+            encoder_map = {i: AbsoluteEncoder() for i in range(config.game.PLAYER_COUNT)}
+
         env = MafiaEnv(encoder_map=encoder_map)
         self._inject_fixed_roles(env)
         
@@ -88,13 +95,19 @@ class ExperimentManager:
         """
         print(f"[System] Building Parallel Env: {num_envs} games with {num_cpus} CPUs")
 
-        # 1. 단일 환경 템플릿 생성
-        # [수정] 리스트 대신 단일 인스턴스를 사용해 에러 해결
         encoder_map = {}
         if self.player_configs:
             for i, p_cfg in enumerate(self.player_configs):
-                bb = p_cfg.get("backbone", "mlp").lower()
-                encoder_map[i] = POMDPEncoder() if bb in ["lstm", "gru", "rnn"] else MDPEncoder()
+                agent_type = p_cfg.get("type", "rl").lower()
+                if agent_type == "rl":
+                    bb = p_cfg.get("backbone", "mlp").lower()
+                    encoder_map[i] = POMDPEncoder() if bb in ["lstm", "gru", "rnn"] else MDPEncoder()
+                else: # For 'rba', 'llm'
+                    encoder_map[i] = AbsoluteEncoder()
+        else:
+            # Default to MDPEncoder for RL-only parallel training
+            encoder_map = {i: MDPEncoder() for i in range(config.game.PLAYER_COUNT)}
+
 
         env = MafiaEnv(encoder_map=encoder_map)
 

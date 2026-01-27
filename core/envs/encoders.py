@@ -46,44 +46,54 @@ class MDPEncoder(BaseEncoder):
         return self._dim
 
     def encode(self, game, player_id: int) -> np.ndarray:
+        num_players = config.game.PLAYER_COUNT
+        def to_relative_id(actor_id: Optional[int]) -> int:
+            if actor_id is None or actor_id < 0:
+                return -1
+            return (actor_id - player_id) % num_players
+
         status = game.get_game_status(player_id)
         
         # === [Maps Generation] ===
         # 1. Vote Map (8x8)
-        vote_map = np.zeros((8, 8), dtype=np.float32)
+        vote_map = np.zeros((num_players, num_players), dtype=np.float32)
         # 2. Attack Map (8x8)
-        attack_map = np.zeros((8, 8), dtype=np.float32)
+        attack_map = np.zeros((num_players, num_players), dtype=np.float32)
         # 3. Vouch Map (8x8)
-        vouch_map = np.zeros((8, 8), dtype=np.float32)
+        vouch_map = np.zeros((num_players, num_players), dtype=np.float32)
         # 4. Role Claim Map (8x5)
-        claim_map = np.zeros((8, 5), dtype=np.float32)
+        claim_map = np.zeros((num_players, 5), dtype=np.float32)
         
         # 5. Alive Map (8)
-        alive_vec = np.array([1.0 if p.alive else 0.0 for p in game.players], dtype=np.float32)
+        alive_vec_abs = np.array([1.0 if p.alive else 0.0 for p in game.players], dtype=np.float32)
+        alive_vec = np.roll(alive_vec_abs, -player_id)
 
         # History Traversal (Cumulative)
         for event in status.action_history:
             actor = event.actor_id
             target = event.target_id
             
+            rel_actor = to_relative_id(actor)
+            rel_target = to_relative_id(target)
+
             # Skip invalid actor/target indices (0~7 only)
-            if actor < 0 or actor >= 8:
+            if rel_actor < 0:
                 continue
 
             # Role Claim Update
             if event.event_type == EventType.CLAIM and isinstance(event.value, Role):
-                claim_map[actor][int(event.value)] = 1.0
+                claim_map[rel_actor][int(event.value)] = 1.0
             
-            if target is None or target < 0 or target >= 8:
+            if rel_target < 0:
                 continue
 
             # Cumulative Updates
             if event.event_type == EventType.VOTE:
-                vote_map[actor][target] += 1.0
+                vote_map[rel_actor][rel_target] += 1.0
             elif event.event_type in [EventType.KILL, EventType.POLICE_RESULT]:
-                attack_map[actor][target] += 1.0
+                attack_map[rel_actor][rel_target] += 1.0
             elif event.event_type in [EventType.PROTECT]:
-                vouch_map[actor][target] += 1.0
+                vouch_map[rel_actor][rel_target] += 1.0
 
         # Normalization (Max Scaling)
         if np.max(vote_map) > 0: vote_map /= np.max(vote_map)
@@ -92,8 +102,8 @@ class MDPEncoder(BaseEncoder):
 
         # 1. Self Info (12)
         # ID One-hot (8)
-        id_vec = np.zeros(8, dtype=np.float32)
-        id_vec[player_id] = 1.0
+        id_vec = np.zeros(num_players, dtype=np.float32)
+        id_vec[0] = 1.0 # Self ID is always 0 in relative terms
 
         # Role One-hot (4)
         role_vec = np.zeros(4, dtype=np.float32)
@@ -119,18 +129,20 @@ class MDPEncoder(BaseEncoder):
 
         if last_event:
             # Actor ID (9)
-            actor_vec = np.zeros(9, dtype=np.float32)
-            if last_event.actor_id == -1:
-                actor_vec[8] = 1.0
+            actor_vec = np.zeros(num_players + 1, dtype=np.float32)
+            rel_actor_id = to_relative_id(last_event.actor_id)
+            if rel_actor_id == -1:
+                actor_vec[num_players] = 1.0
             else:
-                actor_vec[last_event.actor_id] = 1.0
+                actor_vec[rel_actor_id] = 1.0
 
             # Target ID (9)
-            target_vec = np.zeros(9, dtype=np.float32)
-            if last_event.target_id is None or last_event.target_id == -1:
-                target_vec[8] = 1.0
+            target_vec = np.zeros(num_players + 1, dtype=np.float32)
+            rel_target_id = to_relative_id(last_event.target_id)
+            if rel_target_id == -1:
+                target_vec[num_players] = 1.0
             else:
-                target_vec[last_event.target_id] = 1.0
+                target_vec[rel_target_id] = 1.0
 
             # Value/Role (5)
             value_vec = np.zeros(5, dtype=np.float32)
@@ -151,10 +163,10 @@ class MDPEncoder(BaseEncoder):
                 pass
 
         else:
-            actor_vec = np.zeros(9, dtype=np.float32)
-            actor_vec[8] = 1.0
-            target_vec = np.zeros(9, dtype=np.float32)
-            target_vec[8] = 1.0
+            actor_vec = np.zeros(num_players + 1, dtype=np.float32)
+            actor_vec[num_players] = 1.0
+            target_vec = np.zeros(num_players + 1, dtype=np.float32)
+            target_vec[num_players] = 1.0
             value_vec = np.zeros(5, dtype=np.float32)
             value_vec[4] = 1.0
             type_vec = np.zeros(7, dtype=np.float32)
@@ -199,11 +211,17 @@ class POMDPEncoder(BaseEncoder):
         return self._dim
 
     def encode(self, game, player_id: int) -> np.ndarray:
+        num_players = config.game.PLAYER_COUNT
+        def to_relative_id(actor_id: Optional[int]) -> int:
+            if actor_id is None or actor_id < 0:
+                return -1
+            return (actor_id - player_id) % num_players
+
         status = game.get_game_status(player_id)
         
         # 1. Self Info (12)
-        id_vec = np.zeros(8, dtype=np.float32)
-        id_vec[player_id] = 1.0
+        id_vec = np.zeros(num_players, dtype=np.float32)
+        id_vec[0] = 1.0 # Self ID is always 0
 
         role_vec = np.zeros(4, dtype=np.float32)
         role_vec[int(status.my_role)] = 1.0
@@ -225,17 +243,19 @@ class POMDPEncoder(BaseEncoder):
             last_event = status.action_history[-1]
 
         if last_event:
-            actor_vec = np.zeros(9, dtype=np.float32)
-            if last_event.actor_id == -1:
-                actor_vec[8] = 1.0
+            actor_vec = np.zeros(num_players + 1, dtype=np.float32)
+            rel_actor_id = to_relative_id(last_event.actor_id)
+            if rel_actor_id == -1:
+                actor_vec[num_players] = 1.0
             else:
-                actor_vec[last_event.actor_id] = 1.0
+                actor_vec[rel_actor_id] = 1.0
 
-            target_vec = np.zeros(9, dtype=np.float32)
-            if last_event.target_id is None or last_event.target_id == -1:
-                target_vec[8] = 1.0
+            target_vec = np.zeros(num_players + 1, dtype=np.float32)
+            rel_target_id = to_relative_id(last_event.target_id)
+            if rel_target_id == -1:
+                target_vec[num_players] = 1.0
             else:
-                target_vec[last_event.target_id] = 1.0
+                target_vec[rel_target_id] = 1.0
 
             value_vec = np.zeros(5, dtype=np.float32)
             if last_event.value is None:
@@ -254,16 +274,17 @@ class POMDPEncoder(BaseEncoder):
                 pass
 
         else:
-            actor_vec = np.zeros(9, dtype=np.float32)
-            actor_vec[8] = 1.0
-            target_vec = np.zeros(9, dtype=np.float32)
-            target_vec[8] = 1.0
+            actor_vec = np.zeros(num_players + 1, dtype=np.float32)
+            actor_vec[num_players] = 1.0
+            target_vec = np.zeros(num_players + 1, dtype=np.float32)
+            target_vec[num_players] = 1.0
             value_vec = np.zeros(5, dtype=np.float32)
             value_vec[4] = 1.0
             type_vec = np.zeros(7, dtype=np.float32)
 
         # 4. Alive Map (8) - Essential for decision making
-        alive_vec = np.array([1.0 if p.alive else 0.0 for p in game.players], dtype=np.float32)
+        alive_vec_abs = np.array([1.0 if p.alive else 0.0 for p in game.players], dtype=np.float32)
+        alive_vec = np.roll(alive_vec_abs, -player_id)
 
         # Concatenate
         raw_obs = np.concatenate(
@@ -287,3 +308,23 @@ class POMDPEncoder(BaseEncoder):
         obs[:self._real_dim] = raw_obs
         
         return obs
+
+class AbsoluteEncoder(BaseEncoder):
+    """
+    Encoder for absolute-coordinate agents like Rule-Based Agents.
+    This is essentially a dummy encoder as the agent logic does not depend
+    on a neural network observation. It returns a minimal vector.
+    """
+    def __init__(self):
+        # Return a minimal observation dimension
+        self._dim = config.game.MDP_OBS_DIM
+
+    @property
+    def observation_dim(self) -> int:
+        return self._dim
+
+    def encode(self, game, player_id: int) -> np.ndarray:
+        """
+        Returns a dummy observation vector.
+        """
+        return np.zeros(self._dim, dtype=np.float32)
