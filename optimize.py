@@ -17,19 +17,21 @@ def objective(trial):
     # ==========================================
 
     # 학습률 (Learning Rate): 로그 스케일로 탐색 (0.00001 ~ 0.001)
-    lr = trial.suggest_float("lr", 1e-5, 1e-3, log=True)
+    lr = trial.suggest_float("lr", 1e-6, 3e-4, log=True)
 
     # 감마 (Gamma): 미래 보상 중요도 (0.9 ~ 0.999)
     gamma = trial.suggest_float("gamma", 0.90, 0.999)
 
     # 엔트로피 계수 (Entropy Coef): 탐험 비율 (0.01 ~ 0.1)
-    entropy_coef = trial.suggest_float("entropy_coef", 0.01, 0.1)
+    entropy_coef = trial.suggest_float("entropy_coef", 0.005, 0.05)
 
     # 배치 크기 (Batch Size): 64, 128, 256 중 선택
-    batch_size = trial.suggest_categorical("batch_size", [128, 256])
+    batch_size = trial.suggest_categorical("batch_size", [2048, 4096])
 
     # 신경망 크기 (Hidden Dim): 모델 복잡도
-    hidden_dim = trial.suggest_categorical("hidden_dim", [64, 128, 256])
+    hidden_dim = trial.suggest_categorical("hidden_dim", [128, 256, 512])
+
+    eps_clip = trial.suggest_categorical("eps_clip", [0.01, 0.02])
 
     print(
         f"\n[Trial {trial.number}] Testing: LR={lr:.5f}, Gamma={gamma:.3f}, Batch={batch_size}, Hidden={hidden_dim}"
@@ -43,28 +45,44 @@ def objective(trial):
     config.train.GAMMA = gamma
     config.train.ENTROPY_COEF = entropy_coef
     config.train.BATCH_SIZE = batch_size
+    config.train.EPS_CLIP = eps_clip
 
     # ==========================================
-    # 3. [실험 환경 구축]
+    # 3. [실험 환경 구축 (마피아 vs RBA)]
     # ==========================================
-    # ExperimentManager를 위한 가짜 인자(Namespace) 생성
-    # 최적화 때는 에피소드를 적게(예: 300판) 설정해서 빠르게 훑어보는 게 좋습니다.
-    args = Namespace(
-        mode="train",
-        episodes=300,  # 300판만 돌려보고 판단 (너무 길면 오래 걸림)
-        player_configs=[
-            # 8명 모두 PPO RLAgent로 설정 (모델 크기는 위에서 추천받은 값 적용)
+
+    # 플레이어 설정 구성
+    # - RL 에이전트 2명: 마피아 고정
+    # - RBA 에이전트 6명: 나머지 역할(경찰, 의사, 시민) 자동 할당
+    player_configs = []
+
+    # [Team Mafia] RL Agent 2명
+    for _ in range(2):
+        player_configs.append(
             {
                 "type": "rl",
                 "algo": "ppo",
-                "backbone": "lstm",
+                "backbone": "lstm",  # 마피아는 시계열 정보가 중요하므로 LSTM 권장
                 "hidden_dim": hidden_dim,
                 "num_layers": 2,
-                "role": "random",  # 랜덤 역할 배정
+                "role": "mafia",  # [핵심] 역할을 마피아로 고정
             }
-            for _ in range(8)
-        ],
-        # 로그 경로는 trial 번호별로 분리
+        )
+
+    # [Team Citizen] RBA Agent 6명
+    for _ in range(6):
+        player_configs.append(
+            {
+                "type": "rba",  # 규칙 기반 에이전트
+                "role": "random",  # 남은 역할(경찰1, 의사1, 시민4) 중에서 랜덤 배정
+            }
+        )
+
+    args = Namespace(
+        mode="train",
+        episodes=1500,
+        player_configs=player_configs,
+        # 로그 경로는 trial 번호별로 분리하여 충돌 방지
         paths={"log_dir": f"logs/optuna/trial_{trial.number}", "model_dir": "models"},
     )
 
@@ -72,11 +90,10 @@ def objective(trial):
     final_score = -999.0
 
     try:
-        # 환경 생성 (Optuna 중에는 num_cpus=0 또는 1로 설정하여 안전하게 실행)
-        # 이미 Optuna 자체가 무거우므로 병렬 환경을 과하게 쓰면 멈출 수 있음
+        # 환경 생성 (Optuna 실행 중에는 CPU 부하를 고려해 병렬 프로세스 수 조절)
         env = experiment.build_vec_env(
-            num_envs=8, num_cpus=0
-        )  # 0 = 메인 프로세스에서 실행
+            num_envs=8, num_cpus=0  # 0 = 메인 프로세스에서 실행 (디버깅/안정성 유리)
+        )
 
         agents = experiment.build_agents()
         rl_agents = experiment.get_rl_agents(agents)
@@ -131,14 +148,14 @@ if __name__ == "__main__":
         direction="maximize",
         storage=storage_name,
         load_if_exists=True,  # 없으면 만들고, 있으면 로드함 (방금 지웠으니 무조건 새로 만듦)
-        pruner=optuna.pruners.MedianPruner(n_startup_trials=5, n_warmup_steps=50),
+        pruner=optuna.pruners.MedianPruner(n_startup_trials=5, n_warmup_steps=200),
     )
 
     print("=== Mafia AI Hyperparameter Optimization Start ===")
     print(f"Logs will be saved to: {storage_name}")
 
     # 3. 최적화 실행
-    study.optimize(objective, n_trials=20)  # 20번 시도로 수정
+    study.optimize(objective, n_trials=30)  # 30 시도로 수정
 
     # 4. 결과 출력
     print("\n==================================")
