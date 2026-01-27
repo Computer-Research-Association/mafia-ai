@@ -20,6 +20,7 @@ class MafiaGame:
         self.phase = Phase.DAY_DISCUSSION
         self.discussion_round = 0
         self.history: List[GameEvent] = []
+        self.game_seed = random.randint(0, 1000000)
 
     def reset(self) -> GameStatus:
         """
