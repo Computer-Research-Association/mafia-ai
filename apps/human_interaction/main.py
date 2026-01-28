@@ -1,14 +1,14 @@
 """
 마피아 게임 Human-AI Interaction을 위한 NiceGUI 웹 애플리케이션의 메인 파일.
-(수정: 내러티브 말풍선, 밤/낮 전환, 페이즈 연출 적용)
+(수정: 테마 기반 낮/밤 전환)
 """
 import sys
 from pathlib import Path
 import asyncio
 import json
-from typing import List, Dict
+from typing import Optional
 
-# 프로젝트 루트 디렉토리를 Python 경로에 추가하여 core 모듈을 임포트할 수 있도록 함
+# 프로젝트 루트 디렉토리를 Python 경로에 추가
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 STATIC_DIR = Path(__file__).resolve().parent / 'static'
 sys.path.append(str(PROJECT_ROOT))
@@ -18,22 +18,32 @@ from pydantic import BaseModel
 
 from core.engine.game import MafiaGame
 from core.agents.rule_base_agent import RuleBaseAgent
-from core.engine.state import GameStatus, Role, Phase, EventType
+from core.engine.state import Role, Phase, EventType
 from core.managers.logger import LogManager
 
-# 정적 파일 경로 설정 (CSS, JS)
+# 정적 파일 경로 설정
 app.add_static_files('/static', STATIC_DIR)
 
-
 # --- Application State ---
-class AppState:
-    def __init__(self):
-        agents = [RuleBaseAgent(i, Role.CITIZEN) for i in range(8)]
-        self.game_engine = MafiaGame(agents=agents)
-        self.log_manager = LogManager(experiment_name="narrative_generator", write_mode=False)
-app.state = AppState()
+class AppState(BaseModel):
+    game_engine: MafiaGame
+    log_manager: LogManager
+    day_phase_text: str = "Day 0 | WAITING"
+    game_over: bool = False
+    previous_day: int = 0
+    next_button_text: str = "NEXT PHASE"
 
-# --- Browser Console Logging & JS Interaction ---
+    class Config:
+        arbitrary_types_allowed = True
+
+# 앱 상태 초기화
+agents = [RuleBaseAgent(i, Role.CITIZEN) for i in range(8)]
+state = AppState(
+    game_engine=MafiaGame(agents=agents),
+    log_manager=LogManager(experiment_name="narrative_generator", write_mode=False)
+)
+
+# --- Browser & JS Interaction ---
 def log_to_console(client: Client, data: BaseModel):
     try:
         json_data = json.dumps(data.model_dump(mode='json'))
@@ -42,11 +52,17 @@ def log_to_console(client: Client, data: BaseModel):
         print(f"콘솔 로깅 실패: {e}")
         client.run_javascript(f'console.error("Failed to log data: {e}");')
 
-# --- UI Components ---
-def create_header():
-    with ui.header().classes('bg-primary text-white p-4'):
-        ui.label('Mafia AI: Human Interaction').classes('text-2xl font-bold')
+def show_announcement(client: Client, text: str):
+    """화면 중앙에 텍스트 애니메이션과 함께 백드롭을 표시합니다."""
+    client.run_javascript("document.getElementById('announcement-backdrop').classList.add('visible');")
+    client.run_javascript(f"document.getElementById('day-announcement-text').innerText = '{text}';")
+    client.run_javascript("const el = document.getElementById('day-announcement'); el.classList.remove('animate'); void el.offsetWidth; el.classList.add('animate');")
+    
+    def hide():
+        client.run_javascript("document.getElementById('announcement-backdrop').classList.remove('visible');")
+    ui.timer(3.0, hide, once=True)
 
+# --- UI Components ---
 def create_card_html(player_id: int) -> str:
     return f"""
     <div class="card-container">
@@ -60,92 +76,104 @@ def create_card_html(player_id: int) -> str:
     </div>
     """
 
-def update_player_cards(client: Client):
-    game_engine: MafiaGame = app.state.game_engine
-    for player in game_engine.players:
+def update_ui_for_game_state(client: Client):
+    """UI의 모든 동적 요소를 현재 게임 상태에 맞게 업데이트합니다."""
+    for player in state.game_engine.players:
         client.run_javascript(f"document.getElementById('player-role-{player.id}').innerText = '{player.role.name}';")
-        if not player.alive:
-            client.run_javascript(f"document.getElementById('player-card-{player.id}').classList.add('dead');")
-        else:
-            client.run_javascript(f"document.getElementById('player-card-{player.id}').classList.remove('dead');")
+        client.run_javascript(f"document.getElementById('player-card-{player.id}').classList.{'add' if not player.alive else 'remove'}('dead');")
 
-# --- Game Loop ---
-async def run_game_loop(client: Client):
-    game_engine: MafiaGame = app.state.game_engine
-    log_manager: LogManager = app.state.log_manager
+    phase_name = state.game_engine.phase.name.replace('_', ' ').title()
+    state.day_phase_text = f"Day {state.game_engine.day} | {phase_name}"
+
+    # 테마 전환
+    theme = 'night' if state.game_engine.phase == Phase.NIGHT else 'day'
+    client.run_javascript(f"set_theme('{theme}')")
     
+    if state.game_engine.day > state.previous_day:
+        show_announcement(client, f"Day {state.game_engine.day}")
+        state.previous_day = state.game_engine.day
+
+# --- Game Control ---
+async def step_phase_handler(client: Client):
+    """'NEXT PHASE'/'PLAY AGAIN' 버튼 클릭 시 호출되는 핸들러."""
+    if state.game_over:
+        await init_game(client)
+        return
+
+    history_len_before = len(state.game_engine.history)
+    living_players = [p for p in state.game_engine.players if p.alive]
+    
+    async def get_single_action(player):
+        player_view = state.game_engine.get_game_status(viewer_id=player.id)
+        action = await asyncio.to_thread(player.get_action, player_view)
+        return player.id, action
+    
+    actions = dict(await asyncio.gather(*[get_single_action(p) for p in living_players]))
+    
+    _, is_over, is_win = await asyncio.to_thread(state.game_engine.step_phase, actions)
+    
+    new_events = state.game_engine.history[history_len_before:]
+    for event in new_events:
+        log_to_console(client, event)
+        if event.event_type == EventType.CLAIM:
+            text = state.log_manager.interpret_event(event).replace('"', '\\"').replace("'", "\\'")
+            if event.actor_id is not None:
+                client.run_javascript(f"type_text('player-bubble-text-{event.actor_id}', '{text}');")
+        elif event.event_type == EventType.VOTE and event.target_id is not None:
+            client.run_javascript(f"shake_card({event.target_id});")
+    
+    update_ui_for_game_state(client)
+
+    if is_over:
+        state.game_over = True
+        winner = "CITIZEN" if is_win else "MAFIA"
+        show_announcement(client, f"{winner} TEAM WINS!")
+        state.next_button_text = "PLAY AGAIN"
+
+async def init_game(client: Client):
+    """새 게임을 시작하고 UI를 초기화합니다."""
     print("새로운 게임을 시작합니다...")
-    await asyncio.to_thread(game_engine.reset)
-    update_player_cards(client)
-
-    previous_day, previous_phase = 0, None
-    is_over = False
-    while not is_over:
-        await asyncio.sleep(2)
-        
-        # Day/Night Transition & Announcement
-        if game_engine.day > previous_day:
-            client.run_javascript(f"document.getElementById('day-announcement-text').innerText = 'Day {game_engine.day}';")
-            client.run_javascript("const el = document.getElementById('day-announcement'); el.classList.remove('animate'); void el.offsetWidth; el.classList.add('animate');")
-            previous_day = game_engine.day
-        
-        if game_engine.phase != previous_phase:
-            if game_engine.phase == Phase.NIGHT:
-                client.run_javascript("document.getElementById('night-overlay').classList.add('visible');")
-            else:
-                client.run_javascript("document.getElementById('night-overlay').classList.remove('visible');")
-            previous_phase = game_engine.phase
-        
-        living_players = [p for p in game_engine.players if p.alive]
-        history_len_before = len(game_engine.history)
-
-        async def get_single_action(player):
-            player_view = game_engine.get_game_status(viewer_id=player.id)
-            log_to_console(client, player_view)
-            action = await asyncio.to_thread(player.get_action, player_view)
-            return player.id, action
-        
-        action_tasks = [get_single_action(p) for p in living_players]
-        action_results = await asyncio.gather(*action_tasks)
-        actions = dict(action_results)
-        
-        _, is_over, is_win = await asyncio.to_thread(game_engine.step_phase, actions)
-        
-        new_events = game_engine.history[history_len_before:]
-        for event in new_events:
-            log_to_console(client, event)
-            if event.event_type == EventType.CLAIM:
-                text = log_manager.interpret_event(event).replace('"', '\\"').replace("'", "\\'")
-                if event.actor_id is not None:
-                    client.run_javascript(f"type_text('player-bubble-text-{event.actor_id}', '{text}');")
-
-        update_player_cards(client)
+    await asyncio.to_thread(state.game_engine.reset)
     
-    winner = "시민" if is_win else "마피아"
-    print(f"게임 종료! {winner} 팀의 승리입니다!")
-    log_to_console(client, game_engine.get_game_status())
+    state.game_over = False
+    state.previous_day = 0
+    state.next_button_text = "NEXT PHASE"
+    
+    client.run_javascript("set_theme('day')")
+    client.run_javascript("document.getElementById('announcement-backdrop').classList.remove('visible');")
+    client.run_javascript("document.getElementById('day-announcement-text').innerText = '';")
+        
+    update_ui_for_game_state(client)
+    print("게임 초기화 완료.")
 
 @ui.page('/')
 async def main_page(client: Client):
+    # 배경 div를 페이지 최상단에 추가
+    ui.html('<div id="background-div" class="background-div"></div>', sanitize=False)
+    
     ui.add_head_html('<link rel="stylesheet" href="/static/styles.css">')
     ui.add_head_html('<script src="/static/scripts.js"></script>')
-    create_header()
 
-    with ui.column().classes('w-full max-w-4xl mx-auto p-8 items-center'):
+    # --- 상단 제어 및 상태 바 ---
+    with ui.row().classes('w-full h-16 bg-gray-900 text-white items-center justify-between p-4 shadow-md z-30'):
+        ui.label().bind_text_from(state, 'day_phase_text').classes('text-xl font-mono')
+        ui.button(on_click=lambda: step_phase_handler(client)).props('color=primary push').bind_text_from(state, 'next_button_text')
+
+    # --- 플레이어 카드 그리드 ---
+    with ui.column().classes('w-full max-w-5xl mx-auto p-8 items-center'):
         with ui.grid(columns=4).classes('w-full gap-8'):
             for i in range(8):
                 ui.html(content=create_card_html(i), sanitize=False)
-
-    # Hidden overlays for effects
-    with ui.element('div').classes('night-overlay').props('id="night-overlay"'):
-        ui.element('div').classes('fog fog-1')
-        ui.element('div').classes('fog fog-2')
-    with ui.element('div').classes('day-announcement').props('id="day-announcement"') as announcement:
+    
+    # --- 중앙 알림 및 백드롭 ---
+    ui.html('<div id="announcement-backdrop" class="announcement-backdrop"></div>', sanitize=False)
+    with ui.element('div').classes('day-announcement').props('id="day-announcement"'):
         ui.label().props('id="day-announcement-text"')
 
+    # --- 초기화 ---
     await client.connected()
     ui.run_javascript('initCardHoverEffects();')
-    asyncio.create_task(run_game_loop(client))
+    await init_game(client)
 
 # --- App Entrypoint ---
 def run_app():

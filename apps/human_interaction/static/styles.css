@@ -1,10 +1,34 @@
+/* -- 배경 테마 (크로스페이드) -- */
+.background-div {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100vw; height: 100vh;
+    z-index: -1;
+    background: radial-gradient(ellipse at bottom, #d3e8f7 0%, #a7c8e0 100%); /* 낮 테마 */
+}
+
+.background-div::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    background: radial-gradient(ellipse at bottom, #0d1a2f 0%, #02040a 100%); /* 밤 테마 */
+    opacity: 0;
+    transition: opacity 1s ease-in-out;
+}
+
+.background-div.theme-night::before {
+    opacity: 1;
+}
+
+
 :root { --card-height: 180px; --card-width: 130px; }
 .card-container { perspective: 1000px; position: relative; }
 .card {
     width: var(--card-width); height: var(--card-height);
     background: #1a1a1a; color: white; border-radius: 10px; border: 2px solid #555;
     display: flex; flex-direction: column; justify-content: center; align-items: center;
-    font-family: 'Segoe UI', sans-serif; transition: transform 0.1s ease-out;
+    font-family: 'Segoe UI', sans-serif; transition: transform 0.1s ease-out, filter 0.5s;
     position: relative; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.4);
 }
 .card-content { z-index: 2; text-shadow: 0 0 5px black; }
@@ -14,13 +38,23 @@
     animation: shine 7s infinite linear; z-index: 1; opacity: 0.3;
 }
 @keyframes shine { 0% { transform: translateX(-60%) translateY(-10%) rotate(20deg); } 100% { transform: translateX(60%) translateY(10%) rotate(20deg); } }
-.card.dead { filter: grayscale(100%); }
-.card.dead::before {
-    content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-    background: linear-gradient(to top right, rgba(255,255,255,0) 0%, rgba(255,255,255,0) 49.8%, rgba(255,255,255,0.4) 50%, rgba(255,255,255,0) 50.2%),
-                linear-gradient(to top left, rgba(255,255,255,0) 0%, rgba(255,255,255,0) 49.8%, rgba(255,255,255,0.4) 50%, rgba(255,255,255,0) 50.2%);
-    background-size: 100% 100%; transform: rotate(15deg) scale(1.2); z-index: 3; opacity: 0.6;
+
+/* -- 사망 연출 강화 -- */
+.card.dead { 
+    filter: grayscale(100%) brightness(0.4);
 }
+.card.dead::after {
+    content: 'X';
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 10em;
+    font-weight: 900;
+    color: rgba(220, 20, 20, 0.7);
+    z-index: 3;
+    animation: none; /* 기존 빛나는 효과 제거 */
+}
+
 .speech-bubble {
     position: absolute; bottom: 80%; left: 90%;
     min-width: 150px; max-width: 250px;
@@ -36,21 +70,22 @@
     border-width: 10px 10px 0; border-style: solid;
     border-color: #fff transparent transparent transparent;
 }
-.night-overlay {
-    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-    background-color: rgba(6, 0, 15, 0.7); z-index: 20;
-    display: none; opacity: 0; transition: opacity 1.5s;
+
+/* -- 시스템 메시지 집중(Dimming) -- */
+.announcement-backdrop {
+    position: fixed;
+    top: 0; left: 0; width: 100%; height: 100%;
+    background-color: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(8px);
+    z-index: 29; /* 메시지보다 한 단계 아래 */
+    opacity: 0;
+    transition: opacity 0.5s ease-in-out;
+    pointer-events: none;
 }
-.night-overlay.visible { display: block; opacity: 1; }
-.fog {
-    position: absolute; width: 200vw; height: 100vh;
-    background: url(https://i.imgur.com/74gbhS9.png) repeat-x;
-    background-size: contain; background-position: center;
-    animation: fog-move 60s linear infinite;
+.announcement-backdrop.visible {
+    opacity: 1;
 }
-.fog.fog-1 { opacity: 0.1; animation-duration: 120s; }
-.fog.fog-2 { opacity: 0.1; animation-duration: 80s; }
-@keyframes fog-move { 0% { transform: translateX(0); } 100% { transform: translateX(-50%); } }
+
 .day-announcement {
     position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
     font-size: 10em; color: white; font-weight: bold; text-shadow: 0 0 20px black;
@@ -61,4 +96,15 @@
     0% { transform: translate(-50%, -50%) scale(0.5); opacity: 0; }
     50% { transform: translate(-50%, -50%) scale(1.1); opacity: 1; }
     100% { transform: translate(-50%, -50%) scale(1.5); opacity: 0; }
+}
+
+/* -- 투표 이펙트 -- */
+.card.shake {
+    animation: shake 0.5s cubic-bezier(.36,.07,.19,.97) both;
+}
+@keyframes shake {
+  10%, 90% { transform: translate3d(-1px, 0, 0); }
+  20%, 80% { transform: translate3d(2px, 0, 0); }
+  30%, 50%, 70% { transform: translate3d(-4px, 0, 0); }
+  40%, 60% { transform: translate3d(4px, 0, 0); }
 }

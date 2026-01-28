@@ -42,3 +42,28 @@ function initCardHoverEffects() {
         });
     });
 }
+
+// Add this function for the shake effect
+function shake_card(playerId) {
+    const card = document.getElementById(`player-card-${playerId}`);
+    if (card) {
+        card.classList.add('shake');
+        setTimeout(() => {
+            card.classList.remove('shake');
+        }, 500); // Duration of the shake animation
+    }
+}
+
+function set_theme(theme) {
+    const bg = document.getElementById('background-div');
+    if (!bg) return;
+
+    if (theme === 'night') {
+        bg.classList.remove('theme-day');
+        bg.classList.add('theme-night');
+    } else {
+        bg.classList.remove('theme-night');
+        bg.classList.add('theme-day');
+    }
+}
+
