@@ -10,6 +10,7 @@ from typing import List, Dict
 
 # 프로젝트 루트 디렉토리를 Python 경로에 추가하여 core 모듈을 임포트할 수 있도록 함
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+STATIC_DIR = Path(__file__).resolve().parent / 'static'
 sys.path.append(str(PROJECT_ROOT))
 
 from nicegui import ui, app, Client
@@ -20,115 +21,9 @@ from core.agents.rule_base_agent import RuleBaseAgent
 from core.engine.state import GameStatus, Role, Phase, EventType
 from core.managers.logger import LogManager
 
-# --- [스타일링] 카드 및 연출 효과를 위한 CSS 및 JavaScript ---
+# 정적 파일 경로 설정 (CSS, JS)
+app.add_static_files('/static', STATIC_DIR)
 
-ENHANCED_CSS = """
-:root { --card-height: 180px; --card-width: 130px; }
-.card-container { perspective: 1000px; position: relative; }
-.card {
-    width: var(--card-width); height: var(--card-height);
-    background: #1a1a1a; color: white; border-radius: 10px; border: 2px solid #555;
-    display: flex; flex-direction: column; justify-content: center; align-items: center;
-    font-family: 'Segoe UI', sans-serif; transition: transform 0.1s ease-out;
-    position: relative; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.4);
-}
-.card-content { z-index: 2; text-shadow: 0 0 5px black; }
-.card::after {
-    content: ''; position: absolute; top: -50%; left: -50%; width: 200%; height: 200%;
-    background: linear-gradient(110deg, rgba(255,255,255,0) 40%, rgba(255,255,255,0.3) 50%, rgba(255,255,255,0) 60%);
-    animation: shine 7s infinite linear; z-index: 1; opacity: 0.3;
-}
-@keyframes shine { 0% { transform: translateX(-60%) translateY(-10%) rotate(20deg); } 100% { transform: translateX(60%) translateY(10%) rotate(20deg); } }
-.card.dead { filter: grayscale(100%); }
-.card.dead::before {
-    content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-    background: linear-gradient(to top right, rgba(255,255,255,0) 0%, rgba(255,255,255,0) 49.8%, rgba(255,255,255,0.4) 50%, rgba(255,255,255,0) 50.2%),
-                linear-gradient(to top left, rgba(255,255,255,0) 0%, rgba(255,255,255,0) 49.8%, rgba(255,255,255,0.4) 50%, rgba(255,255,255,0) 50.2%);
-    background-size: 100% 100%; transform: rotate(15deg) scale(1.2); z-index: 3; opacity: 0.6;
-}
-.speech-bubble {
-    position: absolute; bottom: 80%; left: 90%;
-    min-width: 150px; max-width: 250px;
-    background-color: #fff; color: #000; border-radius: 8px; padding: 10px;
-    font-size: 0.9em; box-shadow: 0 2px 10px rgba(0,0,0,0.2);
-    opacity: 0; visibility: hidden; transition: opacity 0.3s, visibility 0.3s;
-    z-index: 10; white-space: pre-wrap;
-}
-.speech-bubble.visible { opacity: 1; visibility: visible; }
-.speech-bubble::after {
-    content: ''; position: absolute;
-    bottom: -10px; left: 20px;
-    border-width: 10px 10px 0; border-style: solid;
-    border-color: #fff transparent transparent transparent;
-}
-.night-overlay {
-    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-    background-color: rgba(6, 0, 15, 0.7); z-index: 20;
-    display: none; opacity: 0; transition: opacity 1.5s;
-}
-.night-overlay.visible { display: block; opacity: 1; }
-.fog {
-    position: absolute; width: 200vw; height: 100vh;
-    background: url(https://i.imgur.com/74gbhS9.png) repeat-x;
-    background-size: contain; background-position: center;
-    animation: fog-move 60s linear infinite;
-}
-.fog.fog-1 { opacity: 0.1; animation-duration: 120s; }
-.fog.fog-2 { opacity: 0.1; animation-duration: 80s; }
-@keyframes fog-move { 0% { transform: translateX(0); } 100% { transform: translateX(-50%); } }
-.day-announcement {
-    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-    font-size: 10em; color: white; font-weight: bold; text-shadow: 0 0 20px black;
-    z-index: 30; opacity: 0; pointer-events: none;
-}
-.day-announcement.animate { animation: zoom-fade 2.5s ease-out; }
-@keyframes zoom-fade {
-    0% { transform: translate(-50%, -50%) scale(0.5); opacity: 0; }
-    50% { transform: translate(-50%, -50%) scale(1.1); opacity: 1; }
-    100% { transform: translate(-50%, -50%) scale(1.5); opacity: 0; }
-}
-"""
-
-ENHANCED_JS = """
-function type_text(elementId, text, duration = 5000) {
-    const element = document.getElementById(elementId);
-    if (!element) return;
-    
-    const bubble = element.parentElement;
-    bubble.classList.add('visible');
-    
-    let i = 0;
-    element.innerHTML = '';
-    const typing = setInterval(() => {
-        if (i < text.length) {
-            element.innerHTML += text.charAt(i);
-            i++;
-        } else {
-            clearInterval(typing);
-            setTimeout(() => {
-                bubble.classList.remove('visible');
-            }, duration);
-        }
-    }, 30);
-}
-
-const cards = document.querySelectorAll('.card');
-cards.forEach(card => {
-    card.addEventListener('mousemove', (e) => {
-        const rect = card.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const y = e.clientY - rect.top;
-        const centerX = rect.width / 2;
-        const centerY = rect.height / 2;
-        const rotateX = (y - centerY) / 10;
-        const rotateY = (centerX - x) / 10;
-        card.style.transform = `rotateX(${rotateX}deg) rotateY(${rotateY}deg)`;
-    });
-    card.addEventListener('mouseleave', () => {
-        card.style.transform = 'rotateX(0) rotateY(0)';
-    });
-});
-"""
 
 # --- Application State ---
 class AppState:
@@ -232,7 +127,8 @@ async def run_game_loop(client: Client):
 
 @ui.page('/')
 async def main_page(client: Client):
-    ui.add_head_html(f'<style>{ENHANCED_CSS}</style>')
+    ui.add_head_html('<link rel="stylesheet" href="/static/styles.css">')
+    ui.add_head_html('<script src="/static/scripts.js"></script>')
     create_header()
 
     with ui.column().classes('w-full max-w-4xl mx-auto p-8 items-center'):
@@ -248,7 +144,7 @@ async def main_page(client: Client):
         ui.label().props('id="day-announcement-text"')
 
     await client.connected()
-    ui.run_javascript(ENHANCED_JS)
+    ui.run_javascript('initCardHoverEffects();')
     asyncio.create_task(run_game_loop(client))
 
 # --- App Entrypoint ---
