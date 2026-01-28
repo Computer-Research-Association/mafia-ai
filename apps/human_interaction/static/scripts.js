@@ -1,4 +1,4 @@
-function type_text(elementId, text, duration = 5000) {
+function type_text(elementId, text, hold_duration = 3000) {
     const element = document.getElementById(elementId);
     if (!element) return;
     
@@ -15,7 +15,7 @@ function type_text(elementId, text, duration = 5000) {
             clearInterval(typing);
             setTimeout(() => {
                 bubble.classList.remove('visible');
-            }, duration);
+            }, hold_duration);
         }
     }, 30);
 }
