@@ -3,6 +3,7 @@ from collections import defaultdict
 from config import Role, EventType, Phase
 from core.engine.state import GameEvent
 
+import os
 import numpy as np
 
 # === [1. Reward Parameters] ===
@@ -10,7 +11,8 @@ WIN_REWARD = 1.0
 LOSS_PENALTY = -1.0
 TIME_PENALTY_UNIT = -0.1
 DECEPTION_MULTIPLIER = 1.5
-REWARD_LAMBDA = 0.5
+# Lambda 값: CLI 인자(--lambda)를 통해 주입된 환경 변수 우선 사용
+REWARD_LAMBDA = float(os.getenv("MAFIA_LAMBDA", 0.5))
 INT_REWARD_SCALE = 25.0
 
 # === [2. Reward Matrix Setup] ===
