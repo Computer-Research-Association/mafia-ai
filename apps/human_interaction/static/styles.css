@@ -93,7 +93,7 @@ html, body {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 0.5rem; /* Space between stacked banners */
+    /* gap removed, using margin on banner-item for smooth collapse */
     width: 100%;
     max-width: 600px; /* Max width for banners */
     pointer-events: none;
@@ -110,13 +110,16 @@ html, body {
     text-shadow: none;
     white-space: nowrap;
     opacity: 0;
-    transition: all 0.5s ease-in-out; /* Covers opacity, transform, and other properties */
-    transform: translateY(20px); /* Initial position for slide-in */
+    margin-bottom: 0.5rem; /* Keep space between stacked banners */
+    transition: opacity 0.5s ease-in-out; /* Only opacity transitions for fade */
 }
 
 .banner-item.visible {
     opacity: 1;
-    transform: translateY(0);
+}
+
+.banner-item.hiding {
+    opacity: 0;
 }
 
 /* -- 투표 이펙트 -- */

@@ -75,8 +75,8 @@ narrative_variations = {
         "확신이 설 때까지 움직이지 않겠습니다."
     ],
     "SILENCE": [
-        "...",
-        "흠... 잘 모르겠네요." # Modified entry
+        "흠...",
+        "과연..." # Modified entry
     ]
 }
 
@@ -120,8 +120,9 @@ def log_to_console(client: Client, data: BaseModel):
 def show_announcement(client: Client, text: str):
     """Dynamically creates and shows a new banner, which auto-removes itself."""
     escaped_text = text.replace('\\', '\\\\').replace("'", "\\'").replace('"', '\\"')
-    animation_duration = 3000  # ms, should match CSS animation
-    
+    display_duration = 3000  # ms, how long banner stays fully visible
+    hide_transition_duration = 500 # ms, matches CSS transition duration for 'all' on banner-item
+
     js_code = f"""
         const container = document.getElementById('banner-container');
         if (container) {{
@@ -130,15 +131,23 @@ def show_announcement(client: Client, text: str):
             banner.innerText = '{escaped_text}';
             container.appendChild(banner);
             
-            // Add class to trigger animation
+            // Add class to trigger entrance animation
             requestAnimationFrame(() => {{
+                void banner.offsetWidth; // Force reflow to ensure transition starts
                 banner.classList.add('visible');
             }});
 
-            // Remove the element after animation is complete
+            // After display_duration, start the hiding animation
             setTimeout(() => {{
-                banner.remove();
-            }}, {animation_duration});
+                banner.classList.remove('visible'); // Start fade-out and collapse
+                banner.classList.add('hiding');
+
+                // After hiding_transition_duration, remove element from DOM
+                setTimeout(() => {{
+                    banner.remove();
+                }}, {hide_transition_duration});
+
+            }}, {display_duration});
         }}
     """
     client.run_javascript(js_code)
