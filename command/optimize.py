@@ -4,6 +4,11 @@ from argparse import Namespace
 import torch
 import numpy as np
 import os
+from pathlib import Path
+import sys
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.append(str(PROJECT_ROOT))
 
 # 프로젝트 모듈 가져오기
 from config import config
@@ -57,7 +62,7 @@ def objective(trial):
     player_configs = []
 
     # [Team Mafia] RL Agent 2명
-    for _ in range(2):
+    for _ in range(1):
         player_configs.append(
             {
                 "type": "rl",
@@ -65,16 +70,16 @@ def objective(trial):
                 "backbone": "lstm",  # 마피아는 시계열 정보가 중요하므로 LSTM 권장
                 "hidden_dim": hidden_dim,
                 "num_layers": 2,
-                "role": "mafia",  # [핵심] 역할을 마피아로 고정
+                "role": "police",
             }
         )
 
     # [Team Citizen] RBA Agent 6명
-    for _ in range(6):
+    for _ in range(7):
         player_configs.append(
             {
                 "type": "rba",  # 규칙 기반 에이전트
-                "role": "random",  # 남은 역할(경찰1, 의사1, 시민4) 중에서 랜덤 배정
+                "role": "random",  # 남은 역할 중에서 랜덤 배정
             }
         )
 
