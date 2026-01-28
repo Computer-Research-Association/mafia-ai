@@ -60,7 +60,7 @@ def show_announcement(client: Client, text: str):
     
     def hide():
         client.run_javascript("document.getElementById('announcement-backdrop').classList.remove('visible');")
-    ui.timer(3.0, hide, once=True)
+    ui.timer(2.0, hide, once=True)
 
 # --- UI Components ---
 def create_card_html(player_id: int) -> str:
