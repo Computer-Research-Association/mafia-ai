@@ -31,6 +31,12 @@ class ExperimentManager:
         self.args = args
         self.player_configs = getattr(args, "player_configs", [])
         self.mode = args.mode
+
+        # [수정] CLI에서 받은 람다 값을 환경 변수에 주입
+        if hasattr(args, "lambda_val") and args.lambda_val is not None:
+            os.environ["MAFIA_LAMBDA"] = str(args.lambda_val)
+            print(f"[System] REWARD_LAMBDA set to {args.lambda_val} via CLI.")
+
         self.logger = self._setup_logger()
 
     def _setup_logger(self) -> LogManager:
@@ -43,7 +49,12 @@ class ExperimentManager:
                     )
                     break
 
-        log_dir = str(getattr(self.args, "paths", {}).get("log_dir", "logs"))
+        # [수정] CLI 인자 `log_dir` 우선 적용
+        if hasattr(self.args, "log_dir") and self.args.log_dir:
+            log_dir = self.args.log_dir
+        else:
+            log_dir = str(getattr(self.args, "paths", {}).get("log_dir", "logs"))
+
         # 메인 프로세스는 정상적으로 파일을 씀
         return LogManager(
             experiment_name=experiment_name, log_dir=log_dir, write_mode=True

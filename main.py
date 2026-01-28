@@ -1,23 +1,43 @@
 import sys
 import os
 import threading
+import argparse
+from typing import List, Dict, Any
 
 from PyQt6.QtWidgets import QApplication
 from core.managers.runner import train, test
 from core.managers.experiment import ExperimentManager
 from gui.pages.dashboard import DashBoard
+from config import config as cfg
 
-STOP = threading.Event()  # 종료 신호
+STOP = threading.Event()  # GUI용 종료 신호
 
 
-def run_simulation(args):
+def run_simulation(args, stop_event: threading.Event = None):
     """
-    AI 학습/테스트 로직
-    ExperimentManager를 통해 설정 및 객체 생성 위임
+    AI 학습/테스트 통합 로직 (CLI & GUI 겸용)
+    ExperimentManager를 통해 설정 및 객체 생성을 위임합니다.
     """
-    if not getattr(args, "player_configs", None):
-        print("Error: Player configurations not found. Please use the GUI.")
-        return
+    # [수정] CLI 모드일 때 player_configs가 없으므로 동적 생성
+    if not hasattr(args, "player_configs") or not args.player_configs:
+        print("[CLI Mode] Generating player configurations...")
+        player_configs: List[Dict[str, Any]] = []
+        rl_agent_count = args.rl_count if hasattr(args, "rl_count") else 0
+        
+        for i in range(cfg.game.PLAYER_COUNT):
+            if i < rl_agent_count:
+                # RL 에이전트 설정
+                player_configs.append({
+                    "type": "rl",
+                    "role": args.rl_role.upper() if hasattr(args, "rl_role") else "RANDOM",
+                    "algo": "ppo",  # 기본 알고리즘
+                    "backbone": "mlp"  # 기본 백본
+                })
+            else:
+                # 룰 기반 에이전트 설정
+                player_configs.append({"type": "rba", "role": "RANDOM"})
+        
+        args.player_configs = player_configs
 
     # ExperimentManager 초기화
     experiment = ExperimentManager(args)
@@ -30,21 +50,23 @@ def run_simulation(args):
         rl_agents = experiment.get_rl_agents(agents)
 
         print(f"[{args.mode.upper()}] mode with {len(agents)} agents.")
+        print(f"Player Configs: {args.player_configs}")
 
         # 모드별 실행
         if args.mode == "train":
-            env = experiment.build_vec_env(num_envs=8, num_cpus=4)
+            # 병렬 환경 생성 시 CPU 코어 수 제한 ( 안정성 )
+            num_cpus = min(4, os.cpu_count() or 1)
+            env = experiment.build_vec_env(num_envs=8, num_cpus=num_cpus)
             train(
                 env,
                 rl_agents,
                 agents,
                 args,
                 experiment.logger,
-                stop_event=STOP,
+                stop_event=stop_event,
             )
-
         elif args.mode == "test":
-            test(env, agents, args, logger=experiment.logger, stop_event=STOP)
+            test(env, agents, args, logger=experiment.logger, stop_event=stop_event)
 
     finally:
         # 리소스 정리
@@ -53,16 +75,17 @@ def run_simulation(args):
 
 
 def start_gui():
+    """GUI 모드 실행 함수"""
     app = QApplication(sys.argv)
     launcher = DashBoard()
 
     def on_simulation_start(args):
         STOP.clear()
-        sim_thread = threading.Thread(target=run_simulation, args=(args,), daemon=True)
+        sim_thread = threading.Thread(target=run_simulation, args=(args, STOP), daemon=True)
         sim_thread.start()
 
     def on_simulation_stop():
-        print("시뮬레이션 종료")
+        print("Simulation stop signal received.")
         STOP.set()
 
     # 시그널 연결
@@ -74,8 +97,23 @@ def start_gui():
 
 
 def main():
-    print("Starting Mafia AI GUI...")
-    start_gui()
+    """메인 엔트리 포인트: CLI 인자 확인 후 GUI 또는 CLI 모드 실행"""
+    parser = argparse.ArgumentParser(description="Mafia AI Trainer - GUI and CLI")
+    parser.add_argument("--mode", type=str, choices=["train", "test"], help="Execution mode: train or test")
+    parser.add_argument("--episodes", type=int, default=1000, help="Number of episodes to run")
+    parser.add_argument("--lambda", type=float, dest="lambda_val", help="Lambda for reward calculation")
+    parser.add_argument("--rl_role", type=str, default="mafia", choices=["mafia", "police", "doctor", "citizen"], help="Role for RL agents")
+    parser.add_argument("--rl_count", type=int, default=0, help="Number of RL agents")
+    parser.add_argument("--log_dir", type=str, help="Directory to save logs")
+
+    # sys.argv 길이가 1보다 크면 CLI 인자가 있는 것으로 간주
+    if len(sys.argv) > 1:
+        args = parser.parse_args()
+        print("--- Running in CLI mode ---")
+        run_simulation(args)  # CLI 모드에서는 stop_event가 None
+    else:
+        print("--- Starting GUI mode ---")
+        start_gui()
 
 
 if __name__ == "__main__":
