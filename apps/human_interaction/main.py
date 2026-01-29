@@ -472,11 +472,12 @@ async def main_page(client: Client):
     ui.add_head_html('<link rel="stylesheet" href="/static/styles.css">')
     ui.add_head_html('<script src="/static/scripts.js"></script>')
 
-    with ui.row().classes('w-full h-16 bg-gray-900 text-white items-center justify-between p-4 shadow-md z-30'):
-        ui.label().bind_text_from(state, 'day_phase_text').classes('text-xl font-mono')
-        next_button = ui.button(on_click=lambda: step_phase_handler(client)).props('color=primary push')
+    with ui.row().classes('w-full h-16 items-center justify-between p-4 z-30').style('background: linear-gradient(135deg, rgba(20, 30, 48, 0.95) 0%, rgba(36, 59, 85, 0.95) 100%); backdrop-filter: blur(10px); box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.1); border-bottom: 1px solid rgba(100, 150, 255, 0.2);'):
+        ui.label().bind_text_from(state, 'day_phase_text').classes('text-xl font-mono').style('color: rgba(255, 255, 255, 0.95); font-weight: 600; letter-spacing: 1px; text-shadow: 0 0 20px rgba(100, 150, 255, 0.5);')
+        next_button = ui.button(on_click=lambda: step_phase_handler(client)).props('push').classes('px-6')
         next_button.bind_text_from(state, 'next_button_text')
         next_button.bind_enabled_from(state, 'is_processing_events', backward=lambda v: not v)
+        next_button.style('background: linear-gradient(135deg, rgba(100, 150, 255, 0.8) 0%, rgba(100, 180, 255, 0.8) 100%); border: 1px solid rgba(100, 150, 255, 0.6); box-shadow: 0 4px 15px rgba(100, 150, 255, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2); font-weight: 600; letter-spacing: 0.5px;')
 
     with ui.element('div').classes('player-area w-full'):
         # 영역 컨테이너 (보이는 레이아웃)

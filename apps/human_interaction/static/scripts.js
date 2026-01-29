@@ -135,17 +135,30 @@ function showCardDetail(playerId) {
             infoPanel.innerHTML = `<h2>Player ${playerId} 발언 기록</h2>`;
             
             if (statements.length === 0) {
-                infoPanel.innerHTML += '<p style="color: #aaaaaa; font-size: 1.2em;">아직 발언 기록이 없습니다.</p>';
+                infoPanel.innerHTML += '<div class="empty-history">아직 발언 기록이 없습니다.</div>';
             } else {
+                const timeline = document.createElement('div');
+                timeline.className = 'timeline-container';
+                
+                let lastDay = -1;
                 statements.forEach(stmt => {
                     const stmtDiv = document.createElement('div');
                     stmtDiv.className = 'statement-item';
+                    
+                    // 새로운 날이 시작되면 구분 클래스 추가
+                    if (stmt.day !== lastDay && lastDay !== -1) {
+                        stmtDiv.classList.add('new-day');
+                    }
+                    lastDay = stmt.day;
+                    
                     stmtDiv.innerHTML = `
-                        <div class="day-info">Day ${stmt.day} - ${stmt.phase}</div>
+                        <div class="day-info">Day ${stmt.day} · ${stmt.phase}</div>
                         <div class="statement-text">${stmt.text}</div>
                     `;
-                    infoPanel.appendChild(stmtDiv);
+                    timeline.appendChild(stmtDiv);
                 });
+                
+                infoPanel.appendChild(timeline);
             }
         }
     }).catch(err => {
