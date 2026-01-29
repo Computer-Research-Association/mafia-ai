@@ -58,6 +58,8 @@ function initCardHoverEffects() {
 let currentDetailPlayerId = null;
 
 function showCardDetail(playerId) {
+    console.log('showCardDetail called with playerId:', playerId);
+    
     // 이미 열려있는 카드를 다시 클릭하면 닫기
     if (currentDetailPlayerId === playerId) {
         closeCardDetail();
@@ -67,15 +69,10 @@ function showCardDetail(playerId) {
     // 오버레이가 없으면 생성
     let overlay = document.getElementById('card-detail-overlay');
     if (!overlay) {
+        console.log('Creating new overlay');
         overlay = document.createElement('div');
         overlay.id = 'card-detail-overlay';
         document.body.appendChild(overlay);
-
-        // 카드 컨테이너
-        const cardContainer = document.createElement('div');
-        cardContainer.className = 'detail-card-container';
-        cardContainer.onclick = () => closeCardDetail();
-        overlay.appendChild(cardContainer);
 
         // 정보 패널
         const infoPanel = document.createElement('div');
@@ -90,51 +87,56 @@ function showCardDetail(playerId) {
         });
     }
 
-    // 이전 활성 카드 클래스 제거
-    document.querySelectorAll('.card-container.detail-active').forEach(c => {
-        c.classList.remove('detail-active');
-    });
+    // 이전 활성 카드가 있으면 원래 위치로 복원
+    if (currentDetailPlayerId !== null) {
+        const prevContainer = document.querySelector(`.card-container-${currentDetailPlayerId}`);
+        if (prevContainer) {
+            prevContainer.classList.remove('detail-active');
+            prevContainer.onclick = null;
+        }
+    }
 
     // 현재 카드에 활성 클래스 추가
     const playerContainer = document.querySelector(`.card-container-${playerId}`);
     if (playerContainer) {
+        console.log('Found player container, adding detail-active class');
         playerContainer.classList.add('detail-active');
+        // 카드 클릭으로 닫기
+        playerContainer.onclick = (e) => {
+            e.stopPropagation();
+            closeCardDetail();
+        };
+    } else {
+        console.error('Player container not found for playerId:', playerId);
     }
-
-    // 카드 정보 가져오기
-    const playerRole = document.getElementById(`player-role-${playerId}`).innerText;
-    
-    // 카드 렌더링
-    const cardContainer = overlay.querySelector('.detail-card-container');
-    cardContainer.innerHTML = `
-        <div class="detail-card">
-            <p class="player-id">Player ${playerId}</p>
-            <p>${playerRole}</p>
-        </div>
-    `;
 
     // 발언 기록 가져오기
     window.getPlayerStatements(playerId).then(statements => {
         const infoPanel = overlay.querySelector('.detail-info-panel');
-        infoPanel.innerHTML = `<h2>Player ${playerId} 발언 기록</h2>`;
-        
-        if (statements.length === 0) {
-            infoPanel.innerHTML += '<p style="color: #aaaaaa; font-size: 1.2em;">아직 발언 기록이 없습니다.</p>';
-        } else {
-            statements.forEach(stmt => {
-                const stmtDiv = document.createElement('div');
-                stmtDiv.className = 'statement-item';
-                stmtDiv.innerHTML = `
-                    <div class="day-info">Day ${stmt.day} - ${stmt.phase}</div>
-                    <div class="statement-text">${stmt.text}</div>
-                `;
-                infoPanel.appendChild(stmtDiv);
-            });
+        if (infoPanel) {
+            infoPanel.innerHTML = `<h2>Player ${playerId} 발언 기록</h2>`;
+            
+            if (statements.length === 0) {
+                infoPanel.innerHTML += '<p style="color: #aaaaaa; font-size: 1.2em;">아직 발언 기록이 없습니다.</p>';
+            } else {
+                statements.forEach(stmt => {
+                    const stmtDiv = document.createElement('div');
+                    stmtDiv.className = 'statement-item';
+                    stmtDiv.innerHTML = `
+                        <div class="day-info">Day ${stmt.day} - ${stmt.phase}</div>
+                        <div class="statement-text">${stmt.text}</div>
+                    `;
+                    infoPanel.appendChild(stmtDiv);
+                });
+            }
         }
+    }).catch(err => {
+        console.error('Failed to get player statements:', err);
     });
 
     currentDetailPlayerId = playerId;
     overlay.classList.add('visible');
+    console.log('Overlay visible, currentDetailPlayerId:', currentDetailPlayerId);
 }
 
 function closeCardDetail() {
@@ -143,10 +145,21 @@ function closeCardDetail() {
         overlay.classList.remove('visible');
     }
     
-    // 활성 카드 클래스 제거
-    document.querySelectorAll('.card-container.detail-active').forEach(c => {
-        c.classList.remove('detail-active');
-    });
+    // 활성 카드 클래스 제거 및 원래 위치로 복원
+    if (currentDetailPlayerId !== null) {
+        const container = document.querySelector(`.card-container-${currentDetailPlayerId}`);
+        if (container) {
+            container.classList.remove('detail-active');
+            container.onclick = null;
+            // 위치 복원
+            setTimeout(() => {
+                container.style.position = '';
+                container.style.left = '';
+                container.style.top = '';
+                container.style.zIndex = '';
+            }, 10);
+        }
+    }
     
     currentDetailPlayerId = null;
 }
