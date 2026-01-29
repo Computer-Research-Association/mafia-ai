@@ -55,7 +55,15 @@ function initCardHoverEffects() {
     });
 }
 
+let currentDetailPlayerId = null;
+
 function showCardDetail(playerId) {
+    // 이미 열려있는 카드를 다시 클릭하면 닫기
+    if (currentDetailPlayerId === playerId) {
+        closeCardDetail();
+        return;
+    }
+
     // 오버레이가 없으면 생성
     let overlay = document.getElementById('card-detail-overlay');
     if (!overlay) {
@@ -63,26 +71,37 @@ function showCardDetail(playerId) {
         overlay.id = 'card-detail-overlay';
         document.body.appendChild(overlay);
 
-        // 닫기 버튼
-        const closeBtn = document.createElement('button');
-        closeBtn.className = 'close-detail-btn';
-        closeBtn.innerText = 'CLOSE';
-        closeBtn.onclick = closeCardDetail;
-        overlay.appendChild(closeBtn);
-
         // 카드 컨테이너
         const cardContainer = document.createElement('div');
         cardContainer.className = 'detail-card-container';
+        cardContainer.onclick = () => closeCardDetail();
         overlay.appendChild(cardContainer);
 
         // 정보 패널
         const infoPanel = document.createElement('div');
         infoPanel.className = 'detail-info-panel';
         overlay.appendChild(infoPanel);
+
+        // 배경 클릭으로 닫기
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) {
+                closeCardDetail();
+            }
+        });
+    }
+
+    // 이전 활성 카드 클래스 제거
+    document.querySelectorAll('.card-container.detail-active').forEach(c => {
+        c.classList.remove('detail-active');
+    });
+
+    // 현재 카드에 활성 클래스 추가
+    const playerContainer = document.querySelector(`.card-container-${playerId}`);
+    if (playerContainer) {
+        playerContainer.classList.add('detail-active');
     }
 
     // 카드 정보 가져오기
-    const playerCard = document.getElementById(`player-card-${playerId}`);
     const playerRole = document.getElementById(`player-role-${playerId}`).innerText;
     
     // 카드 렌더링
@@ -94,13 +113,13 @@ function showCardDetail(playerId) {
         </div>
     `;
 
-    // 발언 기록 가져오기 (Python에서 제공)
+    // 발언 기록 가져오기
     window.getPlayerStatements(playerId).then(statements => {
         const infoPanel = overlay.querySelector('.detail-info-panel');
-        infoPanel.innerHTML = `<h2>Player ${playerId} - 발언 기록</h2>`;
+        infoPanel.innerHTML = `<h2>Player ${playerId} 발언 기록</h2>`;
         
         if (statements.length === 0) {
-            infoPanel.innerHTML += '<p style="color: #666;">아직 발언 기록이 없습니다.</p>';
+            infoPanel.innerHTML += '<p style="color: #aaaaaa; font-size: 1.2em;">아직 발언 기록이 없습니다.</p>';
         } else {
             statements.forEach(stmt => {
                 const stmtDiv = document.createElement('div');
@@ -114,7 +133,7 @@ function showCardDetail(playerId) {
         }
     });
 
-    // 오버레이 표시
+    currentDetailPlayerId = playerId;
     overlay.classList.add('visible');
 }
 
@@ -123,6 +142,13 @@ function closeCardDetail() {
     if (overlay) {
         overlay.classList.remove('visible');
     }
+    
+    // 활성 카드 클래스 제거
+    document.querySelectorAll('.card-container.detail-active').forEach(c => {
+        c.classList.remove('detail-active');
+    });
+    
+    currentDetailPlayerId = null;
 }
 
 // Add this function for the shake effect

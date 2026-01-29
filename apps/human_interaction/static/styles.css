@@ -191,16 +191,18 @@ html, body {
     left: 0;
     width: 100vw;
     height: 100vh;
-    background: rgba(0, 0, 0, 0.8);
+    background: rgba(0, 0, 0, 0.9);
     z-index: 1000;
     display: none;
     opacity: 0;
-    transition: opacity 0.3s ease;
+    transition: opacity 0.4s ease;
+    pointer-events: none;
 }
 
 #card-detail-overlay.visible {
     display: flex;
     opacity: 1;
+    pointer-events: auto;
 }
 
 .detail-card-container {
@@ -209,6 +211,7 @@ html, body {
     top: 50%;
     transform: translateY(-50%);
     perspective: 2000px;
+    cursor: pointer;
 }
 
 .detail-card {
@@ -225,17 +228,21 @@ html, body {
     font-family: 'Segoe UI', sans-serif;
     box-shadow: 0 8px 30px rgba(0,0,0,0.6);
     transform-style: preserve-3d;
-    animation: cardFlipIn 0.6s ease-out forwards;
 }
 
-@keyframes cardFlipIn {
+.card-container.detail-active .card {
+    animation: cardMoveAndFlip 0.8s cubic-bezier(0.68, -0.55, 0.265, 1.55) forwards;
+}
+
+@keyframes cardMoveAndFlip {
     0% {
-        transform: rotateY(90deg) scale(0.5);
-        opacity: 0;
+        transform: rotateY(0deg) scale(1);
+    }
+    50% {
+        transform: rotateY(720deg) scale(1.5);
     }
     100% {
-        transform: rotateY(0deg) scale(1);
-        opacity: 1;
+        transform: rotateY(1080deg) scale(3);
     }
 }
 
@@ -255,16 +262,14 @@ html, body {
     top: 10%;
     width: 45%;
     height: 80%;
-    background: rgba(255, 255, 255, 0.95);
-    border-radius: 15px;
     padding: 2rem;
     overflow-y: auto;
-    animation: slideInRight 0.5s ease-out forwards;
+    animation: fadeInRight 0.6s ease-out forwards;
 }
 
-@keyframes slideInRight {
+@keyframes fadeInRight {
     0% {
-        transform: translateX(100%);
+        transform: translateX(50px);
         opacity: 0;
     }
     100% {
@@ -275,46 +280,31 @@ html, body {
 
 .detail-info-panel h2 {
     margin-top: 0;
-    color: #333;
-    border-bottom: 2px solid #555;
-    padding-bottom: 0.5rem;
+    color: #ffffff;
+    font-size: 2em;
+    margin-bottom: 2rem;
+    text-shadow: 0 2px 4px rgba(0,0,0,0.5);
 }
 
 .statement-item {
-    background: #f5f5f5;
-    padding: 1rem;
-    margin: 0.5rem 0;
-    border-radius: 8px;
-    border-left: 4px solid #555;
+    padding: 1rem 0;
+    margin: 1rem 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.statement-item:last-child {
+    border-bottom: none;
 }
 
 .statement-item .day-info {
-    font-size: 0.9em;
-    color: #666;
-    margin-bottom: 0.3rem;
+    font-size: 1em;
+    color: #aaaaaa;
+    margin-bottom: 0.5rem;
+    font-weight: bold;
 }
 
 .statement-item .statement-text {
-    color: #333;
-    font-size: 1.1em;
-}
-
-.close-detail-btn {
-    position: absolute;
-    top: 2rem;
-    right: 2rem;
-    background: #ff4444;
-    color: white;
-    border: none;
-    padding: 1rem 2rem;
-    border-radius: 8px;
+    color: #ffffff;
     font-size: 1.2em;
-    font-weight: bold;
-    cursor: pointer;
-    z-index: 1001;
-    transition: background 0.3s;
-}
-
-.close-detail-btn:hover {
-    background: #cc0000;
+    line-height: 1.5;
 }
