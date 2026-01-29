@@ -100,7 +100,30 @@ function showCardDetail(playerId) {
     const playerContainer = document.querySelector(`.card-container-${playerId}`);
     if (playerContainer) {
         console.log('Found player container, adding detail-active class');
-        playerContainer.classList.add('detail-active');
+        
+        // 현재 위치 저장 (애니메이션 시작점)
+        const rect = playerContainer.getBoundingClientRect();
+        const currentLeft = rect.left + rect.width / 2;
+        const currentTop = rect.top + rect.height / 2;
+        
+        // fixed position으로 전환하면서 현재 위치 유지
+        playerContainer.style.position = 'fixed';
+        playerContainer.style.left = currentLeft + 'px';
+        playerContainer.style.top = currentTop + 'px';
+        playerContainer.style.transform = 'translate(-50%, -50%) scale(1)';
+        
+        // 클래스 추가 (애니메이션 트리거)
+        requestAnimationFrame(() => {
+            playerContainer.classList.add('detail-active');
+            
+            // 목표 위치로 이동
+            requestAnimationFrame(() => {
+                playerContainer.style.left = '15%';
+                playerContainer.style.top = '50%';
+                playerContainer.style.transform = 'translate(-50%, -50%) scale(3)';
+            });
+        });
+        
         // 카드 클릭으로 닫기
         playerContainer.onclick = (e) => {
             e.stopPropagation();
@@ -149,15 +172,33 @@ function closeCardDetail() {
     if (currentDetailPlayerId !== null) {
         const container = document.querySelector(`.card-container-${currentDetailPlayerId}`);
         if (container) {
-            container.classList.remove('detail-active');
             container.onclick = null;
-            // 위치 복원
+            
+            // 원래 위치 정보 가져오기
+            const originalClass = `card-container-${currentDetailPlayerId}`;
+            const tempElement = document.createElement('div');
+            tempElement.className = originalClass;
+            tempElement.style.position = 'absolute';
+            tempElement.style.visibility = 'hidden';
+            document.querySelector('.player-area').appendChild(tempElement);
+            
+            const originalRect = tempElement.getBoundingClientRect();
+            document.querySelector('.player-area').removeChild(tempElement);
+            
+            // 원래 위치로 애니메이션
+            container.style.left = (originalRect.left + originalRect.width / 2) + 'px';
+            container.style.top = (originalRect.top + originalRect.height / 2) + 'px';
+            container.style.transform = 'translate(-50%, -50%) scale(1)';
+            
+            // 애니메이션 완료 후 원래 스타일 복원
             setTimeout(() => {
+                container.classList.remove('detail-active');
                 container.style.position = '';
                 container.style.left = '';
                 container.style.top = '';
+                container.style.transform = '';
                 container.style.zIndex = '';
-            }, 10);
+            }, 800);
         }
     }
     
