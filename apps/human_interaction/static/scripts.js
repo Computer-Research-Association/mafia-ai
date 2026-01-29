@@ -66,9 +66,13 @@ function showCardDetail(playerId) {
         return;
     }
 
-    // 이전 카드가 열려있으면 닫기
+    // 이전 카드가 열려있으면 먼저 닫기
     if (currentDetailPlayerId !== null) {
-        closeCardDetail();
+        // 이전 원래 카드 복원
+        const prevOriginalCard = document.querySelector(`.card-container-${currentDetailPlayerId}`);
+        if (prevOriginalCard) {
+            prevOriginalCard.classList.remove('detail-hidden');
+        }
     }
 
     // 오버레이가 없으면 생성
@@ -101,14 +105,8 @@ function showCardDetail(playerId) {
     // 원래 카드 숨기기
     const originalCard = document.querySelector(`.card-container-${playerId}`);
     if (originalCard) {
-        originalCard.style.opacity = '0';
-        originalCard.dataset.hidden = 'true';
+        originalCard.classList.add('detail-hidden');
     }
-
-    // 원래 카드 위치 가져오기
-    const rect = originalCard.getBoundingClientRect();
-    const startLeft = rect.left + rect.width / 2;
-    const startTop = rect.top + rect.height / 2;
 
     // 카드 정보 가져오기
     const playerRole = document.getElementById(`player-role-${playerId}`).innerText;
@@ -122,24 +120,12 @@ function showCardDetail(playerId) {
         </div>
     `;
 
-    // detail-card를 원래 위치에서 시작
-    cardContainer.style.left = startLeft + 'px';
-    cardContainer.style.top = startTop + 'px';
-    cardContainer.style.transform = 'translate(-50%, -50%) scale(0.333)';
-
     // 오버레이 표시
     overlay.classList.add('visible');
-
-    // 애니메이션 시작: 목표 위치로 이동 및 회전
+    
+    // 카드 컨테이너 표시
     requestAnimationFrame(() => {
-        const detailCard = cardContainer.querySelector('.detail-card');
-        
-        requestAnimationFrame(() => {
-            cardContainer.style.left = '15%';
-            cardContainer.style.top = '50%';
-            cardContainer.style.transform = 'translate(-50%, -50%) scale(1)';
-            detailCard.classList.add('spinning');
-        });
+        cardContainer.classList.add('visible');
     });
 
     // 발언 기록 가져오기
@@ -173,6 +159,12 @@ function showCardDetail(playerId) {
 function closeCardDetail() {
     console.log('closeCardDetail called');
     const overlay = document.getElementById('card-detail-overlay');
+    const cardContainer = overlay?.querySelector('.detail-card-container');
+    
+    if (cardContainer) {
+        cardContainer.classList.remove('visible');
+    }
+    
     if (overlay) {
         overlay.classList.remove('visible');
     }
@@ -180,9 +172,8 @@ function closeCardDetail() {
     // 원래 카드 다시 보이기
     if (currentDetailPlayerId !== null) {
         const originalCard = document.querySelector(`.card-container-${currentDetailPlayerId}`);
-        if (originalCard && originalCard.dataset.hidden === 'true') {
-            originalCard.style.opacity = '1';
-            delete originalCard.dataset.hidden;
+        if (originalCard) {
+            originalCard.classList.remove('detail-hidden');
         }
     }
     

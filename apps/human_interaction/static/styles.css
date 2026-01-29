@@ -37,6 +37,11 @@ html, body {
     position: relative;
     transition: opacity 0.4s ease-out, filter 0.4s ease-out;
 }
+
+.card-container.detail-hidden {
+    opacity: 0 !important;
+    pointer-events: none;
+}
 .card {
     width: var(--card-width); height: var(--card-height);
     background: #1a1a1a; color: white; border-radius: 10px; border: 2px solid #555;
@@ -209,12 +214,18 @@ html, body {
 
 .detail-card-container {
     position: fixed;
+    left: 15%;
+    top: 50%;
+    transform: translateY(-50%);
     perspective: 2000px;
     cursor: pointer;
     z-index: 1001;
-    transition: left 0.8s cubic-bezier(0.68, -0.55, 0.265, 1.55),
-                top 0.8s cubic-bezier(0.68, -0.55, 0.265, 1.55),
-                transform 0.8s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+    opacity: 0;
+    transition: opacity 0.4s ease;
+}
+
+.detail-card-container.visible {
+    opacity: 1;
 }
 
 .detail-card {
@@ -230,8 +241,6 @@ html, body {
     align-items: center;
     font-family: 'Segoe UI', sans-serif;
     box-shadow: 0 8px 30px rgba(0,0,0,0.6);
-    transform-style: preserve-3d;
-    transition: transform 0.8s cubic-bezier(0.68, -0.55, 0.265, 1.55);
 }
 
 .detail-card.spinning {

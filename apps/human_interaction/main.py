@@ -234,6 +234,23 @@ def process_ui_events(client: Client):
         js_call = f"type_text('player-bubble-text-{actor_id}', '{text}', {hold_duration_ms})"
         client.run_javascript(js_call)
         delay = 0.25  # 내러티브 사이 간격
+    
+    elif event_type == 'update_ui':
+        # 게임 상태 UI 업데이트
+        for player in state.game_engine.players:
+            client.run_javascript(f"document.getElementById('player-role-{player.id}').innerText = '{player.role.name}';")
+            client.run_javascript(f"document.getElementById('player-card-{player.id}').classList.{'add' if not player.alive else 'remove'}('dead');")
+
+        phase_name = state.game_engine.phase.name.replace('_', ' ').title()
+        state.day_phase_text = f"Day {state.game_engine.day} | {phase_name}"
+
+        theme = 'night' if state.game_engine.phase == Phase.NIGHT else 'day'
+        client.run_javascript(f"set_theme('{theme}')")
+        
+        if state.game_engine.day > state.previous_day:
+            state.previous_day = state.game_engine.day
+        
+        delay = 0.3  # UI 업데이트 후 약간의 대기
 
     # 처리 후, 다음 이벤트를 처리하기 위해 스스로를 다시 스케줄링
     ui.timer(delay, lambda: process_ui_events(client), once=True)
@@ -285,7 +302,8 @@ async def step_phase_handler(client: Client):
             text = get_random_narrative(event).replace('"', '\\"').replace("'", "\\'")
             state.ui_event_queue.append(('narrative', event.actor_id, text))
 
-    update_ui_for_game_state(client)
+    # 3. 게임 상태 UI 업데이트를 큐에 추가
+    state.ui_event_queue.append(('update_ui',))
 
     # --- UI 이벤트 처리 시작 ---
     if state.ui_event_queue and not state.is_processing_events:
