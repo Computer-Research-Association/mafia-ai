@@ -23,20 +23,26 @@ def run_simulation(args, stop_event: threading.Event = None):
         print("[CLI Mode] Generating player configurations...")
         player_configs: List[Dict[str, Any]] = []
         rl_agent_count = args.rl_count if hasattr(args, "rl_count") else 0
-        
+
         for i in range(cfg.game.PLAYER_COUNT):
             if i < rl_agent_count:
                 # RL 에이전트 설정
-                player_configs.append({
-                    "type": "rl",
-                    "role": args.rl_role.upper() if hasattr(args, "rl_role") else "RANDOM",
-                    "algo": "ppo",  # 기본 알고리즘
-                    "backbone": "mlp"  # 기본 백본
-                })
+                player_configs.append(
+                    {
+                        "type": "rl",
+                        "role": (
+                            args.rl_role.upper()
+                            if hasattr(args, "rl_role")
+                            else "RANDOM"
+                        ),
+                        "algo": "ppo",  # 기본 알고리즘
+                        "backbone": "lstm",  # 기본 백본
+                    }
+                )
             else:
                 # 룰 기반 에이전트 설정
                 player_configs.append({"type": "rba", "role": "RANDOM"})
-        
+
         args.player_configs = player_configs
 
     # ExperimentManager 초기화
@@ -81,7 +87,9 @@ def start_gui():
 
     def on_simulation_start(args):
         STOP.clear()
-        sim_thread = threading.Thread(target=run_simulation, args=(args, STOP), daemon=True)
+        sim_thread = threading.Thread(
+            target=run_simulation, args=(args, STOP), daemon=True
+        )
         sim_thread.start()
 
     def on_simulation_stop():
@@ -99,10 +107,25 @@ def start_gui():
 def main():
     """메인 엔트리 포인트: CLI 인자 확인 후 GUI 또는 CLI 모드 실행"""
     parser = argparse.ArgumentParser(description="Mafia AI Trainer - GUI and CLI")
-    parser.add_argument("--mode", type=str, choices=["train", "test"], help="Execution mode: train or test")
-    parser.add_argument("--episodes", type=int, default=1000, help="Number of episodes to run")
-    parser.add_argument("--lambda", type=float, dest="lambda_val", help="Lambda for reward calculation")
-    parser.add_argument("--rl_role", type=str, default="mafia", choices=["mafia", "police", "doctor", "citizen"], help="Role for RL agents")
+    parser.add_argument(
+        "--mode",
+        type=str,
+        choices=["train", "test"],
+        help="Execution mode: train or test",
+    )
+    parser.add_argument(
+        "--episodes", type=int, default=1000, help="Number of episodes to run"
+    )
+    parser.add_argument(
+        "--lambda", type=float, dest="lambda_val", help="Lambda for reward calculation"
+    )
+    parser.add_argument(
+        "--rl_role",
+        type=str,
+        default="mafia",
+        choices=["mafia", "police", "doctor", "citizen"],
+        help="Role for RL agents",
+    )
     parser.add_argument("--rl_count", type=int, default=0, help="Number of RL agents")
     parser.add_argument("--log_dir", type=str, help="Directory to save logs")
 
