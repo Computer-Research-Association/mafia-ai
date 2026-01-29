@@ -491,6 +491,7 @@ class MafiaGame:
             my_role=viewer.role,
             players=[PlayerStatus(id=p.id, alive=p.alive) for p in self.players],
             action_history=filtered,
+            random_seed=self.game_seed,
         )
 
     def check_game_over(self, player_id: Optional[int] = None) -> Tuple[bool, bool]:
