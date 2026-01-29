@@ -180,14 +180,33 @@ function closeCardDetail() {
     currentDetailPlayerId = null;
 }
 
-// Add this function for the shake effect
+// Add this function for the shake effect and move to voted area
 function shake_card(playerId) {
     const card = document.getElementById(`player-card-${playerId}`);
+    const placeholder = document.getElementById(`placeholder-${playerId}`);
+    const votedArea = document.getElementById('voted-area');
+    const cardContainer = document.querySelector(`.card-container-${playerId}`);
+    const cardLayer = document.getElementById('card-layer');
+    
     if (card) {
         card.classList.add('shake');
         setTimeout(() => {
             card.classList.remove('shake');
-        }, 500); // Duration of the shake animation
+        }, 500);
+    }
+    
+    // placeholder를 voted-area로 이동
+    if (placeholder && votedArea) {
+        votedArea.appendChild(placeholder);
+        
+        // 카드를 placeholder 위치로 애니메이션
+        if (cardContainer && cardLayer) {
+            const layerRect = cardLayer.getBoundingClientRect();
+            const rect = placeholder.getBoundingClientRect();
+            
+            cardContainer.style.left = (rect.left - layerRect.left) + 'px';
+            cardContainer.style.top = (rect.top - layerRect.top) + 'px';
+        }
     }
 }
 

@@ -35,7 +35,7 @@ html, body {
 .card-container { 
     perspective: 1000px; 
     position: relative;
-    transition: opacity 0.4s ease-out, filter 0.4s ease-out;
+    transition: all 0.6s cubic-bezier(0.4, 0.0, 0.2, 1);
 }
 
 .card-container.detail-hidden {
@@ -161,34 +161,114 @@ html, body {
   40%, 60% { transform: translate3d(4px, 0, 0); }
 }
 
-/* --- Player Card Layout --- */
+/* --- Player Card Layout: Placeholder + Card Layer --- */
 .player-area {
     position: relative;
     width: 100%;
-    max-width: 1400px; /* 화면이 넓을 때를 위한 최대 너비 */
-    margin: 2rem auto; /* 상단 여백 */
-    height: 75vh;
+    height: 100vh;
+    padding: 2rem;
+    box-sizing: border-box;
 }
 
-.card-container {
+/* 왼쪽: 살아있는 플레이어들 placeholder */
+#alive-deck {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(var(--card-width), 1fr));
+    gap: 1.5rem;
+    align-content: flex-start;
+    padding: 2.5rem 2rem 2rem 2rem;
+    background: rgba(100, 150, 255, 0.1);
+    border: 2px solid rgba(100, 150, 255, 0.3);
+    border-radius: 15px;
+}
+
+#alive-deck::before {
+    content: 'ALIVE PLAYERS';
     position: absolute;
-    transform-style: preserve-3d;
-    transition: transform 0.5s, opacity 0.4s ease-out, filter 0.4s ease-out;
+    top: 0.5rem;
+    left: 1rem;
+    font-size: 0.9em;
+    font-weight: bold;
+    color: rgba(100, 150, 255, 0.6);
+    z-index: 10;
 }
 
-/* --- Arc Layout Positions & Rotations --- */
+/* placeholder - 카드 크기와 동일하게 */
+.card-placeholder {
+    width: var(--card-width);
+    height: var(--card-height);
+    /* border: 1px dashed rgba(255,255,255,0.2); */
+}
 
-/* Bottom row */
-.card-container-0 { top: 80%; left: 25%; transform: translate(-50%, -50%); }
-.card-container-1 { top: 85%; left: 40%; transform: translate(-50%, -50%); }
-.card-container-2 { top: 85%; left: 60%; transform: translate(-50%, -50%); }
-.card-container-3 { top: 80%; left: 75%; transform: translate(-50%, -50%); }
+/* 오른쪽 위: 투표 받은 플레이어들 */
+#voted-area {
+    position: relative;
+    flex: 1;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(var(--card-width), 1fr));
+    gap: 1rem;
+    align-content: flex-start;
+    padding: 2.5rem 1.5rem 1.5rem 1.5rem;
+    background: rgba(255, 100, 100, 0.15);
+    border: 2px solid rgba(255, 100, 100, 0.3);
+    border-radius: 15px;
+}
 
-/* Top row */
-.card-container-4 { top: 20%; left: 25%; transform: translate(-50%, -50%); }
-.card-container-5 { top: 15%; left: 40%; transform: translate(-50%, -50%); }
-.card-container-6 { top: 15%; left: 60%; transform: translate(-50%, -50%); }
-.card-container-7 { top: 20%; left: 75%; transform: translate(-50%, -50%); }
+#voted-area::before {
+    content: 'VOTED';
+    position: absolute;
+    top: 0.5rem;
+    left: 1rem;
+    font-size: 0.9em;
+    font-weight: bold;
+    color: rgba(255, 100, 100, 0.8);
+    z-index: 10;
+}
+
+/* 오른쪽 아래: 죽은 플레이어들 */
+#dead-area {
+    position: relative;
+    flex: 1;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(var(--card-width), 1fr));
+    gap: 1rem;
+    align-content: flex-start;
+    padding: 2.5rem 1.5rem 1.5rem 1.5rem;
+    background: rgba(0, 0, 0, 0.2);
+    border: 2px solid rgba(100, 100, 100, 0.3);
+    border-radius: 15px;
+}
+
+#dead-area::before {
+    content: 'ELIMINATED';
+    position: absolute;
+    top: 0.5rem;
+    left: 1rem;
+    font-size: 0.9em;
+    font-weight: bold;
+    color: rgba(150, 150, 150, 0.8);
+    z-index: 10;
+}
+
+/* 실제 카드들 (position: absolute) */
+.card-container {
+    position: absolute !important;
+    transform-style: preserve-3d;
+    transition: all 0.6s cubic-bezier(0.4, 0.0, 0.2, 1);
+}
+
+/* Remove old arc layout positions */
+.card-container-0,
+.card-container-1,
+.card-container-2,
+.card-container-3,
+.card-container-4,
+.card-container-5,
+.card-container-6,
+.card-container-7 {
+    position: absolute;
+}
 
 /* --- Card Detail View --- */
 #card-detail-overlay {

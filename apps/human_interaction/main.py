@@ -34,9 +34,11 @@ class AppState(BaseModel):
     day_phase_text: str = "Day 0 | WAITING"
     game_over: bool = False
     previous_day: int = 0
+    previous_phase: Optional[Phase] = None
     next_button_text: str = "NEXT PHASE"
     ui_event_queue: Deque = Field(default_factory=deque)
     is_processing_events: bool = False
+    pending_death_announcements: list = Field(default_factory=list)
 
     class Config:
         arbitrary_types_allowed = True
@@ -183,7 +185,7 @@ def show_announcement(client: Client, text: str):
 def create_card_html(player_id: int) -> str:
     """플레이어 카드의 HTML 구조를 생성합니다. 플레이어별 고유 클래스를 추가합니다."""
     return f"""
-    <div class="card-container card-container-{player_id}">
+    <div class="card-container card-container-{player_id}" style="position: absolute; pointer-events: auto;">
         <div class="speech-bubble" id="player-bubble-{player_id}"><p id="player-bubble-text-{player_id}"></p></div>
         <div class="card" id="player-card-{player_id}">
             <div class="card-content">
@@ -195,9 +197,61 @@ def create_card_html(player_id: int) -> str:
     """
 
 def update_ui_for_game_state(client: Client):
+    # 각 플레이어의 역할 및 생존 상태 업데이트
     for player in state.game_engine.players:
         client.run_javascript(f"document.getElementById('player-role-{player.id}').innerText = '{player.role.name}';")
         client.run_javascript(f"document.getElementById('player-card-{player.id}').classList.{'add' if not player.alive else 'remove'}('dead');")
+    
+    # placeholder 이동 + 카드 애니메이션
+    alive_players = [p.id for p in state.game_engine.players if p.alive]
+    dead_players = [p.id for p in state.game_engine.players if not p.alive]
+    
+    client.run_javascript(f"""
+        (function() {{
+            const aliveDeck = document.getElementById('alive-deck');
+            const deadArea = document.getElementById('dead-area');
+            const aliveIds = {alive_players};
+            const deadIds = {dead_players};
+            const cardLayer = document.getElementById('card-layer');
+            
+            if (!cardLayer) {{
+                console.error('Card layer not found!');
+                return;
+            }}
+            
+            // Step 1: placeholder들 이동 (논리적 위치 변경)
+            aliveIds.forEach(id => {{
+                const placeholder = document.getElementById('placeholder-' + id);
+                if (placeholder && aliveDeck && placeholder.parentElement !== aliveDeck) {{
+                    aliveDeck.appendChild(placeholder);
+                }}
+            }});
+            
+            deadIds.forEach(id => {{
+                const placeholder = document.getElementById('placeholder-' + id);
+                if (placeholder && deadArea && placeholder.parentElement !== deadArea) {{
+                    deadArea.appendChild(placeholder);
+                }}
+            }});
+            
+            // Step 2: 각 카드를 해당 placeholder 위치로 애니메이션
+            const layerRect = cardLayer.getBoundingClientRect();
+            
+            for (let i = 0; i < 8; i++) {{
+                const placeholder = document.getElementById('placeholder-' + i);
+                const card = document.querySelector('.card-container-' + i);
+                
+                if (placeholder && card) {{
+                    const rect = placeholder.getBoundingClientRect();
+                    const targetLeft = rect.left - layerRect.left;
+                    const targetTop = rect.top - layerRect.top;
+                    
+                    card.style.left = targetLeft + 'px';
+                    card.style.top = targetTop + 'px';
+                }}
+            }}
+        }})()
+    """)
 
     phase_name = state.game_engine.phase.name.replace('_', ' ').title()
     state.day_phase_text = f"Day {state.game_engine.day} | {phase_name}"
@@ -230,27 +284,10 @@ def process_ui_events(client: Client):
     
     elif event_type == 'narrative':
         actor_id, text = args
-        hold_duration_ms = 1500  # 단축된 유지 시간
+        hold_duration_ms = 1500
         js_call = f"type_text('player-bubble-text-{actor_id}', '{text}', {hold_duration_ms})"
         client.run_javascript(js_call)
         delay = 0.25  # 내러티브 사이 간격
-    
-    elif event_type == 'update_ui':
-        # 게임 상태 UI 업데이트
-        for player in state.game_engine.players:
-            client.run_javascript(f"document.getElementById('player-role-{player.id}').innerText = '{player.role.name}';")
-            client.run_javascript(f"document.getElementById('player-card-{player.id}').classList.{'add' if not player.alive else 'remove'}('dead');")
-
-        phase_name = state.game_engine.phase.name.replace('_', ' ').title()
-        state.day_phase_text = f"Day {state.game_engine.day} | {phase_name}"
-
-        theme = 'night' if state.game_engine.phase == Phase.NIGHT else 'day'
-        client.run_javascript(f"set_theme('{theme}')")
-        
-        if state.game_engine.day > state.previous_day:
-            state.previous_day = state.game_engine.day
-        
-        delay = 0.3  # UI 업데이트 후 약간의 대기
 
     # 처리 후, 다음 이벤트를 처리하기 위해 스스로를 다시 스케줄링
     ui.timer(delay, lambda: process_ui_events(client), once=True)
@@ -277,33 +314,40 @@ async def step_phase_handler(client: Client):
     action_results = await asyncio.gather(*action_tasks)
     actions = dict(action_results)
 
+    # 1. 현재 phase 시작 알림 먼저 표시 (phase가 바뀐 경우에만)
+    if state.previous_phase != old_phase:
+        if old_phase == Phase.NIGHT:
+            state.ui_event_queue.append(('announcement', "밤이 되었습니다"))
+        elif old_phase == Phase.DAY_DISCUSSION:
+            state.ui_event_queue.append(('announcement', f"{state.game_engine.day}일차 낮이 밝았습니다"))
+        state.previous_phase = old_phase
+
+    # 2. 이전 턴의 사망 메시지를 그 다음에 표시
+    for death_msg in state.pending_death_announcements:
+        state.ui_event_queue.append(('announcement', death_msg))
+    state.pending_death_announcements.clear()
+
+    # 3. 현재 상태를 UI에 표시 (step 실행 전!)
+    update_ui_for_game_state(client)
+
+    # 4. step 실행 (다음 phase로 전환)
     _, is_over, is_win = await asyncio.to_thread(state.game_engine.step_phase, actions)
     new_phase = state.game_engine.phase
-
-    # --- UI 이벤트 큐에 추가 ---
-    # 1. 단계 전환 알림
-    if new_phase != old_phase:
-        if new_phase == Phase.NIGHT:
-            state.ui_event_queue.append(('announcement', "밤이 되었습니다"))
-        elif new_phase == Phase.DAY_DISCUSSION:
-            state.ui_event_queue.append(('announcement', f"{state.game_engine.day}일차 낮이 밝았습니다"))
     
-    # 2. 게임 이벤트(사망, 발언 등) 처리
+    # 5. 게임 이벤트 처리 - 사망은 pending에 저장, 발언은 즉시 큐에 추가
     new_events = state.game_engine.history[history_len_before:]
     for event in new_events:
         # log_to_console(client, event) # 임시 비활성화
         if event.event_type == EventType.EXECUTE:
-            state.ui_event_queue.append(('announcement', f"투표로 {event.target_id}번 플레이어가 처형되었습니다. (직업: {event.value.name})"))
+            state.pending_death_announcements.append(f"투표로 {event.target_id}번 플레이어가 처형되었습니다. (직업: {event.value.name})")
         elif event.event_type == EventType.KILL:
-            state.ui_event_queue.append(('announcement', f"지난 밤 {event.target_id}번 플레이어가 살해당했습니다."))
+            state.pending_death_announcements.append(f"지난 밤 {event.target_id}번 플레이어가 살해당했습니다.")
         elif event.event_type in [EventType.CLAIM, EventType.VOTE] and event.actor_id is not None:
             if event.event_type == EventType.VOTE and event.target_id is not None:
                 client.run_javascript(f"shake_card({event.target_id});")
+            # 발언을 큐에 추가
             text = get_random_narrative(event).replace('"', '\\"').replace("'", "\\'")
             state.ui_event_queue.append(('narrative', event.actor_id, text))
-
-    # 3. 게임 상태 UI 업데이트를 큐에 추가
-    state.ui_event_queue.append(('update_ui',))
 
     # --- UI 이벤트 처리 시작 ---
     if state.ui_event_queue and not state.is_processing_events:
@@ -311,7 +355,7 @@ async def step_phase_handler(client: Client):
         print("UI Event processor KICKED OFF.")
         process_ui_events(client)
 
-    # 3. 게임 종료 알림
+    # 5. 게임 종료 알림
     if is_over:
         state.game_over = True
         winner = "CITIZEN" if is_win else "MAFIA"
@@ -330,14 +374,29 @@ async def init_game(client: Client):
     
     state.game_over = False
     state.previous_day = 0
+    state.previous_phase = None
     state.next_button_text = "NEXT PHASE"
     state.ui_event_queue.clear()
     state.is_processing_events = False
+    state.pending_death_announcements.clear()
 
     client.run_javascript("set_theme('day')")
-    # 아래 2줄은 더 이상 존재하지 않는 요소에 접근하므로 삭제 또는 주석 처리합니다.
-    # client.run_javascript("document.getElementById('announcement-backdrop').classList.remove('visible');")
-    # client.run_javascript("document.getElementById('day-announcement-text').innerText = '';")
+    
+    # placeholder들을 alive-deck으로 초기화
+    client.run_javascript("""
+        const aliveDeck = document.getElementById('alive-deck');
+        for (let i = 0; i < 8; i++) {
+            const placeholder = document.getElementById('placeholder-' + i);
+            if (placeholder && aliveDeck) {
+                aliveDeck.appendChild(placeholder);
+            }
+        }
+        
+        const votedArea = document.getElementById('voted-area');
+        const deadArea = document.getElementById('dead-area');
+        if (votedArea) votedArea.innerHTML = '';
+        if (deadArea) deadArea.innerHTML = '';
+    """)
         
     update_ui_for_game_state(client)
     print("게임 초기화 완료.")
@@ -355,13 +414,61 @@ async def main_page(client: Client):
         next_button.bind_enabled_from(state, 'is_processing_events', backward=lambda v: not v)
 
     with ui.element('div').classes('player-area w-full'):
-        for i in range(8):
-            ui.html(content=create_card_html(i), sanitize=False)
+        # 영역 컨테이너 (보이는 레이아웃)
+        with ui.element('div').props('id="area-container"').style('display: flex; gap: 2rem; width: 100%; height: 100%;'):
+            # 왼쪽: 살아있는 플레이어들
+            with ui.element('div').props('id="alive-deck"').style('flex: 0 0 60%;'):
+                for i in range(8):
+                    ui.element('div').props(f'id="placeholder-{i}" class="card-placeholder"')
+            
+            # 오른쪽: 투표/죽은 플레이어
+            with ui.element('div').props('id="right-side"').style('flex: 0 0 35%; display: flex; flex-direction: column; gap: 2rem;'):
+                ui.element('div').props('id="voted-area"').style('flex: 1;')
+                ui.element('div').props('id="dead-area"').style('flex: 1;')
+        
+        # 카드 레이어 (absolute overlay)
+        with ui.element('div').props('id="card-layer"').style('position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;'):
+            for i in range(8):
+                ui.html(content=create_card_html(i), sanitize=False)
     
     # Container for dynamically added announcement banners
     ui.element('div').props('id="banner-container"')
 
     await client.connected()
+    
+    # 디버깅 및 초기 위치 설정
+    client.run_javascript("""
+        console.log('Initializing card positions...');
+        
+        const cardLayer = document.getElementById('card-layer');
+        const aliveDeck = document.getElementById('alive-deck');
+        
+        if (!cardLayer || !aliveDeck) {
+            console.error('Required elements not found!', {cardLayer, aliveDeck});
+            return;
+        }
+        
+        const layerRect = cardLayer.getBoundingClientRect();
+        console.log('Layer rect:', layerRect);
+        
+        // 각 카드를 placeholder 위치로 설정
+        for (let i = 0; i < 8; i++) {
+            const placeholder = document.getElementById('placeholder-' + i);
+            const card = document.querySelector('.card-container-' + i);
+            
+            if (placeholder && card) {
+                const rect = placeholder.getBoundingClientRect();
+                const left = rect.left - layerRect.left;
+                const top = rect.top - layerRect.top;
+                
+                console.log(`Card ${i} positioned at: left=${left}, top=${top}`);
+                card.style.left = left + 'px';
+                card.style.top = top + 'px';
+            } else {
+                console.warn(`Card ${i} or placeholder not found!`, {card, placeholder});
+            }
+        }
+    """)
     
     # JavaScript 함수: 플레이어 발언 기록 가져오기
     ui.run_javascript('''
