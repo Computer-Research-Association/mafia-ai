@@ -45,6 +45,8 @@ class AppState(BaseModel):
     waiting_for_human: bool = False
     selected_target: int = -1  # UI에서 선택된 타겟
     selected_role: Optional[Role] = None  # UI에서 선택된 역할
+    action_step: int = 0  # 0: 플레이어 선택, 1: 역할 선택
+    current_instruction: str = "플레이어를 선택하세요"
 
     class Config:
         arbitrary_types_allowed = True
@@ -340,17 +342,24 @@ async def step_phase_handler(client: Client):
     ai_action_results = await asyncio.gather(*action_tasks)
     actions = dict(ai_action_results)
     
-    # Step B: 사람 행동 대기 (생존해 있고 GAME_START가 아닌 경우)
+    # Step B: 사람 행동 대기 (생존해 있고 특정 Phase에서만)
     human_player = state.game_engine.players[state.human_player_id]
-    if human_player.alive and old_phase != Phase.GAME_START:
-        # UI 입력 대기를 위한 Future 생성
+    
+    # Check if human player is alive AND current phase requires human action
+    requires_human_action = False
+    if human_player.alive:
+        if old_phase in [Phase.DAY_DISCUSSION, Phase.DAY_VOTE]:
+            requires_human_action = True
+        elif old_phase == Phase.NIGHT and human_player.role in [Role.MAFIA, Role.POLICE, Role.DOCTOR]:
+            requires_human_action = True
+
+    if requires_human_action:
         state.human_action_future = asyncio.Future()
+        
+        update_modal_ui()
+        client.run_javascript('document.getElementById("human-control-modal").classList.add("visible");')
         state.waiting_for_human = True
         
-        # UI가 업데이트되도록 트리거 (버튼들이 보이도록)
-        ui.update()
-        
-        # 사람의 행동을 기다림
         human_action = await state.human_action_future
         actions[state.human_player_id] = human_action
         state.waiting_for_human = False
@@ -489,10 +498,8 @@ async def init_game(client: Client):
     state.waiting_for_human = False
     state.selected_target = -1
     state.selected_role = None
-    
-    # 버튼 딕셔너리 초기화
-    target_buttons.clear()
-    role_buttons.clear()
+    state.action_step = 0
+    state.current_instruction = "플레이어를 선택하세요"
 
     client.run_javascript("set_theme('day')")
     
@@ -517,58 +524,122 @@ async def init_game(client: Client):
 
 def on_human_action(target_id: int, claim_role: Optional[Role] = None):
     """사람 플레이어의 행동을 처리하는 콜백"""
+    ui.run_javascript('document.getElementById("human-control-modal").classList.remove("visible");')
     if state.human_action_future and not state.human_action_future.done():
         action = GameAction(target_id=target_id, claim_role=claim_role)
         state.human_action_future.set_result(action)
-        # 선택 초기화
+        # 선택 상태 초기화
         state.selected_target = -1
         state.selected_role = None
+        state.action_step = 0
+        state.current_instruction = "플레이어를 선택하세요."
 
-def select_target(target_id: int):
-    """타겟을 선택/해제하는 함수"""
-    if state.selected_target == target_id:
-        state.selected_target = -1  # 같은 버튼을 다시 누르면 선택 해제
-    else:
-        state.selected_target = target_id
-    # UI 업데이트
-    update_action_buttons()
-
-def select_role(role: Optional[Role]):
-    """역할을 선택/해제하는 함수"""
-    if state.selected_role == role:
-        state.selected_role = None  # 같은 버튼을 다시 누르면 선택 해제
-    else:
-        state.selected_role = role
-    # UI 업데이트
-    update_action_buttons()
-
-def update_action_buttons():
-    """행동 버튼들의 스타일을 업데이트"""
-    # 타겟 버튼 스타일 업데이트
-    for i in range(8):
-        if i != state.human_player_id and i in target_buttons:
-            btn = target_buttons[i]
-            if state.selected_target == i:
-                btn.style('background: rgba(100, 200, 100, 0.8); color: white; font-weight: bold; border-radius: 8px; font-family: "Inter", "Noto Sans KR", sans-serif; text-transform: none; transition: all 0.2s;')
-            else:
-                btn.style('background: rgba(26, 26, 26, 0.08); color: rgba(26, 26, 26, 0.85); font-weight: normal; border-radius: 8px; font-family: "Inter", "Noto Sans KR", sans-serif; text-transform: none; transition: all 0.2s;')
+def select_player_action(player_id: int):
+    """플레이어를 선택하는 함수 (Phase별로 다르게 처리)"""
+    current_phase = state.game_engine.phase
     
-    # 역할 버튼 스타일 업데이트
-    for role in [Role.POLICE, Role.DOCTOR, Role.MAFIA]:
-        if role in role_buttons:
-            btn = role_buttons[role]
-            if state.selected_role == role:
-                btn.style('background: rgba(100, 100, 255, 0.8); color: white; font-weight: bold; border-radius: 8px; font-family: "Inter", "Noto Sans KR", sans-serif; text-transform: none; transition: all 0.2s;')
+    # [REFACTOR] 토론 단계에서만 역할 주장으로 넘어감
+    if current_phase == Phase.DAY_DISCUSSION:
+        state.selected_target = player_id
+        state.action_step = 1  # 역할 선택 단계로 전환
+        state.current_instruction = f"Player {player_id}에 대해 역할을 주장하거나, 주장 없이 의견만 피력합니다."
+        update_modal_ui()
+    else:  # 투표, 밤 단계에서는 즉시 행동 확정
+        on_human_action(player_id, None)
+
+def select_role_action(role: Optional[Role]):
+    """역할을 선택하고 행동 확정"""
+    state.selected_role = role
+    on_human_action(state.selected_target, role)
+
+def go_back():
+    """이전 단계로 돌아가기"""
+    state.action_step = 0
+    state.selected_target = -1
+    state.selected_role = None
+    state.current_instruction = "플레이어를 선택하세요."
+    update_modal_ui()
+
+def update_modal_ui():
+    """모달 UI 업데이트 (단계별로 다른 컨텐츠 표시)"""
+    if modal_container:
+        modal_container.clear()
+        with modal_container:
+            if state.action_step == 0:
+                # Step 1: 플레이어 선택
+                render_player_selection()
             else:
-                btn.style('background: rgba(100, 100, 255, 0.15); color: rgba(26, 26, 26, 0.85); font-weight: normal; border: 1px solid rgba(100, 100, 255, 0.3); border-radius: 8px; font-family: "Inter", "Noto Sans KR", sans-serif; text-transform: none; transition: all 0.2s;')
+                # Step 2: 역할 선택
+                render_role_selection()
 
-# 버튼 참조를 저장할 딕셔너리
-target_buttons = {}
-role_buttons = {}
+def render_player_selection():
+    """플레이어 선택 UI 렌더링"""
+    current_phase = state.game_engine.phase
+    human_player = state.game_engine.players[state.human_player_id]
+    
+    # Phase별 안내 메시지 (이모지 제거)
+    phase_msg = ""
+    if current_phase == Phase.DAY_DISCUSSION:
+        phase_msg = "낮 토론: 다른 플레이어(또는 자신)를 지목하고 역할을 주장하세요."
+    elif current_phase == Phase.DAY_VOTE:
+        phase_msg = "투표: 처형할 플레이어를 선택하세요."
+    elif current_phase == Phase.NIGHT:
+        if human_player.role == Role.MAFIA:
+            phase_msg = f"밤: 제거할 플레이어를 선택하세요. (당신은 {human_player.role.name})"
+        elif human_player.role == Role.POLICE:
+            phase_msg = f"밤: 조사할 플레이어를 선택하세요. (당신은 {human_player.role.name})"
+        elif human_player.role == Role.DOCTOR:
+            phase_msg = f"밤: 보호할 플레이어를 선택하세요. (당신은 {human_player.role.name})"
+        else: # Citizen or other roles with no night action
+            # 시민은 밤에 행동할 수 없으므로, 플레이어 선택 UI를 렌더링하지 않음
+            ui.label(f"밤: 시민은 행동할 수 없습니다. (당신은 {human_player.role.name})").classes('text-sm text-center mb-2 text-gray-400')
+            ui.label("밤이 되었습니다. 잠시 기다려주세요.").classes('text-xl font-bold text-center mt-4 text-white')
+            return # Exit function, no player selection UI needed
 
-def confirm_action():
-    """선택된 타겟과 역할로 행동을 확정하는 함수"""
-    on_human_action(state.selected_target, state.selected_role)
+    ui.label(phase_msg).classes('text-sm text-center mb-2 text-gray-400')
+    
+    with ui.element('div').classes('action-button-grid grid-cols-4'):
+        for player in state.game_engine.players:
+            is_alive = player.alive
+            is_self = player.id == state.human_player_id
+            
+            label = f"Player {player.id}"
+            if is_self:
+                label += "\n(나)"
+            if not is_alive:
+                label += "\n💀"
+            
+            btn = ui.button(
+                label,
+                on_click=lambda pid=player.id: select_player_action(pid)
+            ).classes('action-button')
+            
+            if not is_alive:
+                btn.classes('action-button-disabled', remove='action-button')
+                btn.disable()
+    
+    # 기권 버튼
+    ui.button('기권/패스', on_click=lambda: on_human_action(-1, None)).classes('utility-button-grid utility-button back')
+
+def render_role_selection():
+    """역할 선택 UI 렌더링"""
+    ui.label(f'Player {state.selected_target}를 선택했습니다').classes('text-sm text-center mb-2 text-gray-400')
+    
+    with ui.element('div').classes('action-button-grid grid-cols-4'):
+        for role in [Role.POLICE, Role.DOCTOR, Role.MAFIA, Role.CITIZEN]:
+            btn = ui.button(
+                f'{role.name}',
+                on_click=lambda r=role: select_role_action(r)
+            ).classes('action-button role-claim-button')
+
+    with ui.element('div').classes('utility-button-grid'):
+        # 역할 주장 없이 확정
+        ui.button('역할 주장 안 함', on_click=lambda: select_role_action(None)).classes('utility-button confirm')
+        # 뒤로 가기
+        ui.button('← 뒤로', on_click=go_back).classes('utility-button back')
+
+# 모달 컨테이너 참조
+modal_container = None
 
 @ui.page('/')
 async def main_page(client: Client):
@@ -585,64 +656,31 @@ async def main_page(client: Client):
             backward=lambda v: not v and not state.waiting_for_human)
         next_button.style('background: rgba(26, 26, 26, 0.08); border: 1px solid rgba(26, 26, 26, 0.15); border-radius: 8px; font-weight: 500; letter-spacing: 0.5px; font-family: "Inter", "Noto Sans KR", sans-serif; color: rgba(26, 26, 26, 0.85); transition: all 0.2s ease; text-transform: none;')
     
-    # 사람 플레이어 행동 컨트롤 패널
-    with ui.column().classes('w-full items-center z-30').style('padding: 1rem 2rem; background: rgba(255, 255, 255, 0.95); border-bottom: 2px solid rgba(26, 26, 26, 0.15); gap: 1rem; box-shadow: 0 2px 8px rgba(0,0,0,0.1);') as human_control_panel:
-        human_control_panel.bind_visibility_from(state, 'waiting_for_human')
+    # 사람 플레이어 행동 컨트롤 모달 오버레이
+    with ui.element('div').props('id="human-control-modal"').classes('fixed inset-0 flex items-center justify-center z-50') as human_control_modal:
         
-        # 헤더
-        with ui.row().classes('w-full justify-between items-center'):
-            with ui.column().classes('gap-1'):
-                ui.label('🎮 당신의 차례입니다! (Player 0)').classes('text-xl font-bold').style('color: rgba(26, 26, 26, 0.9); font-family: "Inter", "Noto Sans KR", sans-serif;')
-                phase_label = ui.label().classes('text-sm font-medium').style('color: rgba(26, 26, 26, 0.6); font-family: "Inter", "Noto Sans KR", sans-serif;')
-                phase_label.bind_text_from(state.game_engine, 'phase', 
-                    backward=lambda p: f"현재 단계: {p.name.replace('_', ' ').title()}" if p else "")
+        # [UI OVERHAUL] 기존 ui.card를 중앙 컨텐츠 컨테이너로 대체
+        with ui.column().classes('items-center gap-4 w-full max-w-2xl'):
+            # 타이틀
+            ui.label('당신의 차례입니다!').classes('action-modal-header text-3xl font-bold text-center mb-2')
             
-            # 현재 역할 표시
-            role_label = ui.label().classes('text-base font-semibold px-4 py-2').style('background: rgba(100, 100, 255, 0.15); border-radius: 8px; color: rgba(26, 26, 26, 0.85); font-family: "Inter", "Noto Sans KR", sans-serif;')
+            # 역할 표시
+            role_label = ui.label().classes('action-modal-role text-lg text-center mb-4')
             role_label.bind_text_from(state.game_engine, 'players',
-                backward=lambda players: f"내 역할: {next((p.role.name for p in players if p.id == state.human_player_id), 'Unknown')}")
-        
-        ui.separator().classes('w-full').style('background: rgba(26, 26, 26, 0.1);')
-        
-        # 타겟 선택
-        with ui.column().classes('w-full gap-2'):
-            ui.label('👤 타겟 선택:').classes('text-base font-semibold').style('color: rgba(26, 26, 26, 0.85); font-family: "Inter", "Noto Sans KR", sans-serif;')
-            with ui.row().classes('gap-2 flex-wrap'):
-                for i in range(8):
-                    if i != state.human_player_id:
-                        btn = ui.button(f'Player {i}', on_click=lambda pid=i: select_target(pid)).classes('px-5 py-3')
-                        btn.style('background: rgba(26, 26, 26, 0.08); border-radius: 8px; font-family: "Inter", "Noto Sans KR", sans-serif; text-transform: none; transition: all 0.2s;')
-                        # 생존 여부에 따라 버튼 활성화/비활성화
-                        btn.bind_enabled_from(state.game_engine, 'players', 
-                            backward=lambda players, pid=i: any(p.id == pid and p.alive for p in players))
-                        # 버튼 참조 저장
-                        target_buttons[i] = btn
-        
-        # 역할 주장
-        with ui.column().classes('w-full gap-2'):
-            ui.label('🎭 역할 주장 (선택사항):').classes('text-base font-semibold').style('color: rgba(26, 26, 26, 0.85); font-family: "Inter", "Noto Sans KR", sans-serif;')
-            with ui.row().classes('gap-2'):
-                for role in [Role.POLICE, Role.DOCTOR, Role.MAFIA]:
-                    claim_btn = ui.button(f'{role.name}', on_click=lambda r=role: select_role(r)).classes('px-5 py-3')
-                    claim_btn.style('background: rgba(100, 100, 255, 0.15); border: 1px solid rgba(100, 100, 255, 0.3); border-radius: 8px; font-family: "Inter", "Noto Sans KR", sans-serif; text-transform: none; transition: all 0.2s;')
-                    # 버튼 참조 저장
-                    role_buttons[role] = claim_btn
-        
-        ui.separator().classes('w-full').style('background: rgba(26, 26, 26, 0.1);')
-        
-        # 행동 확정 버튼들
-        with ui.row().classes('gap-3 justify-center w-full'):
-            confirm_btn = ui.button('✅ 행동 확정', on_click=confirm_action).classes('px-8 py-3')
-            confirm_btn.style('background: rgba(50, 150, 50, 0.9); color: white; border-radius: 8px; font-weight: 600; font-family: "Inter", "Noto Sans KR", sans-serif; text-transform: none; font-size: 1.1em;')
+                backward=lambda players: f"당신의 역할: {next((p.role.name for p in players if p.id == state.human_player_id), 'Unknown')}")
             
-            pass_btn = ui.button('⏭️ 기권/패스', on_click=lambda: on_human_action(-1)).classes('px-8 py-3')
-            pass_btn.style('background: rgba(200, 200, 200, 0.5); color: rgba(26, 26, 26, 0.85); border-radius: 8px; font-weight: 500; font-family: "Inter", "Noto Sans KR", sans-serif; text-transform: none; font-size: 1.1em;')
-        
-        # 선택 상태 표시
-        selection_info = ui.label().classes('text-sm text-center').style('color: rgba(26, 26, 26, 0.6); font-family: "Inter", "Noto Sans KR", sans-serif; font-style: italic;')
-        selection_info.bind_text_from(state, 'selected_target',
-            backward=lambda t: f"선택됨: 타겟 Player {t}" + (f", 역할 주장: {state.selected_role.name}" if state.selected_role else "") if t != -1 else 
-                              (f"선택됨: 역할 주장만 ({state.selected_role.name})" if state.selected_role else "타겟 또는 역할을 선택하고 확정 버튼을 누르세요"))
+            ui.separator().style('background: rgba(255, 255, 255, 0.2); margin: 1rem 0;')
+            
+            # 안내 문구
+            instruction_label = ui.label().classes('action-modal-instruction text-xl font-semibold text-center mb-6')
+            instruction_label.bind_text_from(state, 'current_instruction')
+            
+            # 동적 컨텐츠 영역
+            global modal_container
+            modal_container = ui.column().classes('w-full gap-4')
+            with modal_container:
+                # 초기 렌더링을 위해 호출, update_modal_ui에 의해 업데이트됨
+                render_player_selection()
 
     with ui.element('div').classes('player-area w-full'):
         # 영역 컨테이너 (보이는 레이아웃)
@@ -731,7 +769,7 @@ def get_player_statements(player_id: int):
 
 # --- App Entrypoint ---
 def run_app():
-    ui.run(title='Mafia AI', storage_secret='a_very_secret_key_for_demo', reload=False)
+    ui.run(title='Mafia AI', storage_secret='a_very_secret_key_for_demo', reload=True)
 
 if __name__ in {"__main__", "__mp_main__"}:
     run_app()
