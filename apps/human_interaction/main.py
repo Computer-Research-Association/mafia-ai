@@ -344,8 +344,34 @@ async def main_page(client: Client):
     ui.element('div').props('id="banner-container"')
 
     await client.connected()
+    
+    # JavaScript 함수: 플레이어 발언 기록 가져오기
+    ui.run_javascript('''
+        window.getPlayerStatements = async function(playerId) {
+            const response = await fetch(`/api/player_statements/${playerId}`);
+            return await response.json();
+        };
+    ''')
+    
     ui.run_javascript('initCardHoverEffects();')
     await init_game(client)
+
+# --- API Endpoints ---
+@app.get('/api/player_statements/{player_id}')
+def get_player_statements(player_id: int):
+    """특정 플레이어의 발언 기록을 반환합니다."""
+    statements = []
+    for event in state.game_engine.history:
+        if event.event_type in [EventType.CLAIM, EventType.VOTE] and event.actor_id == player_id:
+            phase_name = event.phase.name.replace('_', ' ').title() if event.phase else 'Unknown'
+            text = get_random_narrative(event)
+            statements.append({
+                'day': event.day,
+                'phase': phase_name,
+                'text': text,
+                'event_type': event.event_type.name
+            })
+    return statements
 
 # --- App Entrypoint ---
 def run_app():

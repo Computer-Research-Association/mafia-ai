@@ -46,7 +46,83 @@ function initCardHoverEffects() {
         card.addEventListener('mouseleave', () => {
             card.style.transform = 'rotateX(0) rotateY(0)';
         });
+
+        // 카드 클릭 이벤트
+        card.addEventListener('click', () => {
+            const playerId = card.id.replace('player-card-', '');
+            showCardDetail(playerId);
+        });
     });
+}
+
+function showCardDetail(playerId) {
+    // 오버레이가 없으면 생성
+    let overlay = document.getElementById('card-detail-overlay');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'card-detail-overlay';
+        document.body.appendChild(overlay);
+
+        // 닫기 버튼
+        const closeBtn = document.createElement('button');
+        closeBtn.className = 'close-detail-btn';
+        closeBtn.innerText = 'CLOSE';
+        closeBtn.onclick = closeCardDetail;
+        overlay.appendChild(closeBtn);
+
+        // 카드 컨테이너
+        const cardContainer = document.createElement('div');
+        cardContainer.className = 'detail-card-container';
+        overlay.appendChild(cardContainer);
+
+        // 정보 패널
+        const infoPanel = document.createElement('div');
+        infoPanel.className = 'detail-info-panel';
+        overlay.appendChild(infoPanel);
+    }
+
+    // 카드 정보 가져오기
+    const playerCard = document.getElementById(`player-card-${playerId}`);
+    const playerRole = document.getElementById(`player-role-${playerId}`).innerText;
+    
+    // 카드 렌더링
+    const cardContainer = overlay.querySelector('.detail-card-container');
+    cardContainer.innerHTML = `
+        <div class="detail-card">
+            <p class="player-id">Player ${playerId}</p>
+            <p>${playerRole}</p>
+        </div>
+    `;
+
+    // 발언 기록 가져오기 (Python에서 제공)
+    window.getPlayerStatements(playerId).then(statements => {
+        const infoPanel = overlay.querySelector('.detail-info-panel');
+        infoPanel.innerHTML = `<h2>Player ${playerId} - 발언 기록</h2>`;
+        
+        if (statements.length === 0) {
+            infoPanel.innerHTML += '<p style="color: #666;">아직 발언 기록이 없습니다.</p>';
+        } else {
+            statements.forEach(stmt => {
+                const stmtDiv = document.createElement('div');
+                stmtDiv.className = 'statement-item';
+                stmtDiv.innerHTML = `
+                    <div class="day-info">Day ${stmt.day} - ${stmt.phase}</div>
+                    <div class="statement-text">${stmt.text}</div>
+                `;
+                infoPanel.appendChild(stmtDiv);
+            });
+        }
+    });
+
+    // 오버레이 표시
+    overlay.classList.add('visible');
+}
+
+function closeCardDetail() {
+    const overlay = document.getElementById('card-detail-overlay');
+    if (overlay) {
+        overlay.classList.remove('visible');
+    }
 }
 
 // Add this function for the shake effect
