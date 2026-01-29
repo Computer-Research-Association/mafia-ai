@@ -32,21 +32,41 @@ html, body {
 
 
 :root { --card-height: 180px; --card-width: 130px; }
-.card-container { perspective: 1000px; position: relative; }
+.card-container { 
+    perspective: 1000px; 
+    position: relative;
+    transition: opacity 0.3s ease, filter 0.3s ease;
+}
 .card {
     width: var(--card-width); height: var(--card-height);
     background: #1a1a1a; color: white; border-radius: 10px; border: 2px solid #555;
     display: flex; flex-direction: column; justify-content: center; align-items: center;
-    font-family: 'Segoe UI', sans-serif; transition: transform 0.1s ease-out, filter 0.5s;
+    font-family: 'Segoe UI', sans-serif; transition: transform 0.3s ease, filter 0.5s;
     position: relative; box-shadow: 0 4px 15px rgba(0,0,0,0.4);
     overflow: hidden; /* Shine effect containment */
 }
 
-/* 카드가 활성화(말풍선)되거나 호버될 때 앞으로 나오도록 함 */
-.card-container:has(.speech-bubble.visible),
-.card-container:hover {
+/* 말풍선이 보일 때만 z-index 상승 (이동 효과 제거) */
+.card-container:has(.speech-bubble.visible) {
     z-index: 20;
-    transform: translateZ(1px); /* Stacking context promotion */
+}
+
+/* 한 카드를 hover하면 다른 카드들은 흐릿하게 */
+.player-area:has(.card-container:hover) .card-container {
+    opacity: 0.4;
+    filter: blur(2px);
+}
+
+/* hover된 카드는 강조 */
+.card-container:hover {
+    opacity: 1 !important;
+    filter: blur(0) !important;
+    z-index: 20;
+}
+
+/* hover된 카드 내부 확대 */
+.card-container:hover .card {
+    transform: scale(1.15);
 }
 
 .card-content { z-index: 2; text-shadow: 0 0 5px black; }
