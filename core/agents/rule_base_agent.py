@@ -121,11 +121,9 @@ class RuleBaseAgent(BaseAgent):
 
         # 2. 공유 시드로 셔플 (모든 에이전트가 동일한 결과를 얻음)
         # (local random instance를 사용하여 전역 random 상태에 영향 안 줌)
-        rng = random.Random(seed)
-        rng.shuffle(candidates)
+        rng = random.Random(seed + day)
 
-        # 3. 날짜 기반 선택
-        return candidates[day % len(candidates)]
+        return rng.choice(candidates)
 
     def _get_confirmed_players(
         self, alive_players: List[int], context: dict
