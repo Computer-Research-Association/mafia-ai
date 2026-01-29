@@ -472,12 +472,12 @@ async def main_page(client: Client):
     ui.add_head_html('<link rel="stylesheet" href="/static/styles.css">')
     ui.add_head_html('<script src="/static/scripts.js"></script>')
 
-    with ui.row().classes('w-full h-16 items-center justify-between p-4 z-30').style('background: rgba(26, 26, 26, 0.85); backdrop-filter: blur(15px); box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.05); border-bottom: 1px solid #555;'):
-        ui.label().bind_text_from(state, 'day_phase_text').classes('text-xl').style('color: rgba(255, 255, 255, 0.9); font-weight: 600; letter-spacing: 1.5px; font-family: "Inter", "Noto Sans KR", sans-serif;')
-        next_button = ui.button(on_click=lambda: step_phase_handler(client)).props('push').classes('px-6')
+    with ui.row().classes('w-full h-16 items-center justify-between z-30').style('padding: 1rem 4rem; background: linear-gradient(135deg, rgba(26, 26, 26, 0.9) 0%, rgba(35, 35, 35, 0.85) 100%); backdrop-filter: blur(15px); box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(100, 150, 255, 0.1); border-bottom: 2px solid rgba(100, 150, 255, 0.3);'):
+        ui.label().bind_text_from(state, 'day_phase_text').classes('text-xl').style('color: rgba(255, 255, 255, 0.95); font-weight: 600; letter-spacing: 1.5px; font-family: "Inter", "Noto Sans KR", sans-serif; text-shadow: 0 0 15px rgba(100, 150, 255, 0.3);')
+        next_button = ui.button(on_click=lambda: step_phase_handler(client)).props('push').classes('px-6 py-2')
         next_button.bind_text_from(state, 'next_button_text')
         next_button.bind_enabled_from(state, 'is_processing_events', backward=lambda v: not v)
-        next_button.style('background: #1a1a1a; border: 2px solid #555; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.05); font-weight: 600; letter-spacing: 0.5px; font-family: "Inter", "Noto Sans KR", sans-serif; color: white; transition: all 0.2s ease;')
+        next_button.style('background: linear-gradient(135deg, rgba(26, 26, 26, 0.95) 0%, rgba(35, 35, 35, 0.95) 100%); border: 2px solid rgba(100, 150, 255, 0.4); box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(100, 150, 255, 0.2), 0 0 20px rgba(100, 150, 255, 0.1); font-weight: 600; letter-spacing: 0.5px; font-family: "Inter", "Noto Sans KR", sans-serif; color: rgba(255, 255, 255, 0.95); transition: all 0.2s ease;')
 
     with ui.element('div').classes('player-area w-full'):
         # 영역 컨테이너 (보이는 레이아웃)
