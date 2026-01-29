@@ -66,6 +66,11 @@ function showCardDetail(playerId) {
         return;
     }
 
+    // 이전 카드가 열려있으면 닫기
+    if (currentDetailPlayerId !== null) {
+        closeCardDetail();
+    }
+
     // 오버레이가 없으면 생성
     let overlay = document.getElementById('card-detail-overlay');
     if (!overlay) {
@@ -73,6 +78,12 @@ function showCardDetail(playerId) {
         overlay = document.createElement('div');
         overlay.id = 'card-detail-overlay';
         document.body.appendChild(overlay);
+
+        // 카드 컨테이너
+        const cardContainer = document.createElement('div');
+        cardContainer.className = 'detail-card-container';
+        cardContainer.onclick = () => closeCardDetail();
+        overlay.appendChild(cardContainer);
 
         // 정보 패널
         const infoPanel = document.createElement('div');
@@ -87,51 +98,49 @@ function showCardDetail(playerId) {
         });
     }
 
-    // 이전 활성 카드가 있으면 원래 위치로 복원
-    if (currentDetailPlayerId !== null) {
-        const prevContainer = document.querySelector(`.card-container-${currentDetailPlayerId}`);
-        if (prevContainer) {
-            prevContainer.classList.remove('detail-active');
-            prevContainer.onclick = null;
-        }
+    // 원래 카드 숨기기
+    const originalCard = document.querySelector(`.card-container-${playerId}`);
+    if (originalCard) {
+        originalCard.style.opacity = '0';
+        originalCard.dataset.hidden = 'true';
     }
 
-    // 현재 카드에 활성 클래스 추가
-    const playerContainer = document.querySelector(`.card-container-${playerId}`);
-    if (playerContainer) {
-        console.log('Found player container, adding detail-active class');
+    // 원래 카드 위치 가져오기
+    const rect = originalCard.getBoundingClientRect();
+    const startLeft = rect.left + rect.width / 2;
+    const startTop = rect.top + rect.height / 2;
+
+    // 카드 정보 가져오기
+    const playerRole = document.getElementById(`player-role-${playerId}`).innerText;
+    
+    // 카드 렌더링
+    const cardContainer = overlay.querySelector('.detail-card-container');
+    cardContainer.innerHTML = `
+        <div class="detail-card">
+            <p class="player-id">Player ${playerId}</p>
+            <p>${playerRole}</p>
+        </div>
+    `;
+
+    // detail-card를 원래 위치에서 시작
+    cardContainer.style.left = startLeft + 'px';
+    cardContainer.style.top = startTop + 'px';
+    cardContainer.style.transform = 'translate(-50%, -50%) scale(0.333)';
+
+    // 오버레이 표시
+    overlay.classList.add('visible');
+
+    // 애니메이션 시작: 목표 위치로 이동 및 회전
+    requestAnimationFrame(() => {
+        const detailCard = cardContainer.querySelector('.detail-card');
         
-        // 현재 위치 저장 (애니메이션 시작점)
-        const rect = playerContainer.getBoundingClientRect();
-        const currentLeft = rect.left + rect.width / 2;
-        const currentTop = rect.top + rect.height / 2;
-        
-        // fixed position으로 전환하면서 현재 위치 유지
-        playerContainer.style.position = 'fixed';
-        playerContainer.style.left = currentLeft + 'px';
-        playerContainer.style.top = currentTop + 'px';
-        playerContainer.style.transform = 'translate(-50%, -50%) scale(1)';
-        
-        // 클래스 추가 (애니메이션 트리거)
         requestAnimationFrame(() => {
-            playerContainer.classList.add('detail-active');
-            
-            // 목표 위치로 이동
-            requestAnimationFrame(() => {
-                playerContainer.style.left = '15%';
-                playerContainer.style.top = '50%';
-                playerContainer.style.transform = 'translate(-50%, -50%) scale(3)';
-            });
+            cardContainer.style.left = '15%';
+            cardContainer.style.top = '50%';
+            cardContainer.style.transform = 'translate(-50%, -50%) scale(1)';
+            detailCard.classList.add('spinning');
         });
-        
-        // 카드 클릭으로 닫기
-        playerContainer.onclick = (e) => {
-            e.stopPropagation();
-            closeCardDetail();
-        };
-    } else {
-        console.error('Player container not found for playerId:', playerId);
-    }
+    });
 
     // 발언 기록 가져오기
     window.getPlayerStatements(playerId).then(statements => {
@@ -158,47 +167,22 @@ function showCardDetail(playerId) {
     });
 
     currentDetailPlayerId = playerId;
-    overlay.classList.add('visible');
     console.log('Overlay visible, currentDetailPlayerId:', currentDetailPlayerId);
 }
 
 function closeCardDetail() {
+    console.log('closeCardDetail called');
     const overlay = document.getElementById('card-detail-overlay');
     if (overlay) {
         overlay.classList.remove('visible');
     }
     
-    // 활성 카드 클래스 제거 및 원래 위치로 복원
+    // 원래 카드 다시 보이기
     if (currentDetailPlayerId !== null) {
-        const container = document.querySelector(`.card-container-${currentDetailPlayerId}`);
-        if (container) {
-            container.onclick = null;
-            
-            // 원래 위치 정보 가져오기
-            const originalClass = `card-container-${currentDetailPlayerId}`;
-            const tempElement = document.createElement('div');
-            tempElement.className = originalClass;
-            tempElement.style.position = 'absolute';
-            tempElement.style.visibility = 'hidden';
-            document.querySelector('.player-area').appendChild(tempElement);
-            
-            const originalRect = tempElement.getBoundingClientRect();
-            document.querySelector('.player-area').removeChild(tempElement);
-            
-            // 원래 위치로 애니메이션
-            container.style.left = (originalRect.left + originalRect.width / 2) + 'px';
-            container.style.top = (originalRect.top + originalRect.height / 2) + 'px';
-            container.style.transform = 'translate(-50%, -50%) scale(1)';
-            
-            // 애니메이션 완료 후 원래 스타일 복원
-            setTimeout(() => {
-                container.classList.remove('detail-active');
-                container.style.position = '';
-                container.style.left = '';
-                container.style.top = '';
-                container.style.transform = '';
-                container.style.zIndex = '';
-            }, 800);
+        const originalCard = document.querySelector(`.card-container-${currentDetailPlayerId}`);
+        if (originalCard && originalCard.dataset.hidden === 'true') {
+            originalCard.style.opacity = '1';
+            delete originalCard.dataset.hidden;
         }
     }
     
