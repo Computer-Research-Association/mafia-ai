@@ -246,8 +246,11 @@ def update_ui_for_game_state(client: Client):
                 }}
             }});
             
-            // Step 2: 각 카드를 해당 placeholder 위치로 애니메이션
-            const layerRect = cardLayer.getBoundingClientRect();
+            // Grid 재배치가 완료되도록 두 번의 requestAnimationFrame 사용
+            requestAnimationFrame(() => {{
+                requestAnimationFrame(() => {{
+                    // Step 2: 각 카드를 해당 placeholder 위치로 애니메이션
+                    const layerRect = cardLayer.getBoundingClientRect();
             
             for (let i = 0; i < 8; i++) {{
                 const placeholder = document.getElementById('placeholder-' + i);
@@ -262,6 +265,8 @@ def update_ui_for_game_state(client: Client):
                     card.style.top = targetTop + 'px';
                 }}
             }}
+                }});
+            }});
         }})()
     """)
 
@@ -472,23 +477,23 @@ async def main_page(client: Client):
     ui.add_head_html('<link rel="stylesheet" href="/static/styles.css">')
     ui.add_head_html('<script src="/static/scripts.js"></script>')
 
-    with ui.row().classes('w-full h-16 items-center justify-between z-30').style('padding: 1rem 4rem; background: linear-gradient(135deg, rgba(26, 26, 26, 0.9) 0%, rgba(35, 35, 35, 0.85) 100%); backdrop-filter: blur(15px); box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(100, 150, 255, 0.1); border-bottom: 2px solid rgba(100, 150, 255, 0.3);'):
-        ui.label().bind_text_from(state, 'day_phase_text').classes('text-xl').style('color: rgba(255, 255, 255, 0.95); font-weight: 600; letter-spacing: 1.5px; font-family: "Inter", "Noto Sans KR", sans-serif; text-shadow: 0 0 15px rgba(100, 150, 255, 0.3);')
-        next_button = ui.button(on_click=lambda: step_phase_handler(client)).props('push').classes('px-6 py-2')
+    with ui.row().classes('w-full h-16 items-center justify-between z-30').style('padding: 1rem 4rem; background: transparent;'):
+        ui.label().bind_text_from(state, 'day_phase_text').classes('text-xl').style('color: rgba(26, 26, 26, 0.85); font-weight: 500; letter-spacing: 1px; font-family: "Inter", "Noto Sans KR", sans-serif;')
+        next_button = ui.button(on_click=lambda: step_phase_handler(client)).props('flat').classes('px-8 py-2')
         next_button.bind_text_from(state, 'next_button_text')
         next_button.bind_enabled_from(state, 'is_processing_events', backward=lambda v: not v)
-        next_button.style('background: linear-gradient(135deg, rgba(26, 26, 26, 0.95) 0%, rgba(35, 35, 35, 0.95) 100%); border: 2px solid rgba(100, 150, 255, 0.4); box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(100, 150, 255, 0.2), 0 0 20px rgba(100, 150, 255, 0.1); font-weight: 600; letter-spacing: 0.5px; font-family: "Inter", "Noto Sans KR", sans-serif; color: rgba(255, 255, 255, 0.95); transition: all 0.2s ease;')
+        next_button.style('background: rgba(26, 26, 26, 0.08); border: 1px solid rgba(26, 26, 26, 0.15); border-radius: 8px; font-weight: 500; letter-spacing: 0.5px; font-family: "Inter", "Noto Sans KR", sans-serif; color: rgba(26, 26, 26, 0.85); transition: all 0.2s ease; text-transform: none;')
 
     with ui.element('div').classes('player-area w-full'):
         # 영역 컨테이너 (보이는 레이아웃)
-        with ui.element('div').props('id="area-container"').style('display: flex; gap: 2rem; width: 100%; height: 100%;'):
+        with ui.element('div').props('id="area-container"').style('display: flex; width: 100%; height: 100%; justify-content: space-between;'):
             # 왼쪽: 살아있는 플레이어들
             with ui.element('div').props('id="alive-deck"').style('flex: 0 0 60%;'):
                 for i in range(8):
                     ui.element('div').props(f'id="placeholder-{i}" class="card-placeholder"')
             
             # 오른쪽: 투표/죽은 플레이어
-            with ui.element('div').props('id="right-side"').style('flex: 0 0 35%; display: flex; flex-direction: column; gap: 2rem;'):
+            with ui.element('div').props('id="right-side"').style('flex: 0 0 37.5%; display: flex; flex-direction: column; gap: 2rem;'):
                 ui.element('div').props('id="voted-area"').style('flex: 1;')
                 ui.element('div').props('id="dead-area"').style('flex: 1;')
         
