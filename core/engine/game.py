@@ -20,6 +20,7 @@ class MafiaGame:
         self.phase = Phase.DAY_DISCUSSION
         self.discussion_round = 0
         self.history: List[GameEvent] = []
+        self.game_seed = 0
 
     def reset(self) -> GameStatus:
         """

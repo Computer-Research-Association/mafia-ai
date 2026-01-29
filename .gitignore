@@ -37,3 +37,6 @@ mafia_optuna.db
 .ipynb_checkpoints
 .gemini/
 gha-creds-*.json
+
+# NiceGUI files
+/.nicegui

@@ -1,0 +1,590 @@
+/* --- Google Fonts --- */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+KR:wght@400;500;700&display=swap');
+
+/* --- Global Resets & Layout --- */
+html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow-x: hidden; /* Prevent horizontal scroll */
+    font-family: 'Inter', 'Noto Sans KR', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+/* -- 배경 테마 (심플하고 현대적) -- */
+.background-div {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100vw; height: 100vh;
+    z-index: -1;
+    /* 낮 테마 - 부드러운 하늘색 */
+    background: #e3f2fd;
+}
+
+.background-div::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    /* 밤 테마 - 어두운 남색 */
+    background: #1a1f2e;
+    opacity: 0;
+    transition: opacity 1s ease-in-out;
+}
+
+.background-div.theme-night::before {
+    opacity: 1;
+}
+
+
+:root { --card-height: 180px; --card-width: 130px; }
+.card-container { 
+    perspective: 1000px; 
+    position: relative;
+    transition: all 0.6s cubic-bezier(0.4, 0.0, 0.2, 1);
+}
+
+.card-container.detail-hidden {
+    opacity: 0 !important;
+    pointer-events: none;
+}
+.card {
+    width: var(--card-width); height: var(--card-height);
+    background: #1a1a1a;
+    color: white;
+    border-radius: 12px;
+    border: 2px solid #555;
+    display: flex; flex-direction: column; justify-content: center; align-items: center;
+    font-family: 'Inter', 'Noto Sans KR', sans-serif;
+    transition: transform 0.3s ease, filter 0.5s, box-shadow 0.3s ease;
+    position: relative;
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.3);
+    overflow: hidden; /* Shine effect containment */
+    cursor: pointer;
+}
+
+/* 말풍선이 보일 때만 z-index 상승 (이동 효과 제거) */
+.card-container:has(.speech-bubble.visible) {
+    z-index: 20;
+}
+
+/* 한 카드를 hover하면 다른 카드들은 흐릿하게 */
+.player-area:has(.card-container:hover) .card-container {
+    opacity: 0.4;
+    filter: blur(2px);
+}
+
+/* hover된 카드는 강조 */
+.card-container:hover {
+    opacity: 1 !important;
+    filter: blur(0) !important;
+    z-index: 20;
+}
+
+/* hover된 카드 내부 확대 */
+.card-container:hover .card {
+    transform: scale(1.15);
+}
+
+.card-content { z-index: 2; text-shadow: 0 0 5px black; }
+.card::after {
+    content: ''; position: absolute; top: -50%; left: -50%; width: 200%; height: 200%;
+    background: linear-gradient(110deg, rgba(255,255,255,0) 40%, rgba(255,255,255,0.3) 50%, rgba(255,255,255,0) 60%);
+    animation: shine 7s infinite linear; z-index: 1; opacity: 0.3;
+}
+@keyframes shine { 0% { transform: translateX(-60%) translateY(-10%) rotate(20deg); } 100% { transform: translateX(60%) translateY(10%) rotate(20deg); } }
+
+/* -- 사망 연출 강화 -- */
+.card.dead { 
+    filter: grayscale(100%) brightness(0.4);
+}
+
+.speech-bubble {
+    position: absolute; 
+    bottom: 95%; /* Position above the card */
+    left: 50%; 
+    min-width: 150px; max-width: 250px;
+    background: rgba(255, 255, 255, 0.98);
+    color: rgba(26, 26, 26, 0.9);
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    border-radius: 10px;
+    padding: 10px 12px;
+    font-size: 0.85em;
+    font-family: 'Inter', 'Noto Sans KR', sans-serif;
+    font-weight: 400;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    opacity: 0; visibility: hidden; 
+    transition: opacity 0.3s, visibility 0.3s;
+    z-index: 100;
+    white-space: pre-wrap;
+    /* Center horizontally and create stacking context */
+    transform: translateX(-50%) translate3d(0, 0, 0);
+    backdrop-filter: blur(10px);
+}
+.speech-bubble.visible { opacity: 1; visibility: visible; }
+.speech-bubble::after {
+    content: ''; position: absolute;
+    bottom: -8px; left: 20px;
+    border-width: 8px 8px 0; border-style: solid;
+    border-color: rgba(255, 255, 255, 0.98) transparent transparent transparent;
+    filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.05));
+}
+
+/* -- 시스템 배너 컨테이너 -- */
+#banner-container {
+    position: fixed;
+    top: 5%; /* Adjust position for stacking */
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 999;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    /* gap removed, using margin on banner-item for smooth collapse */
+    width: 100%;
+    max-width: 600px; /* Max width for banners */
+    pointer-events: none;
+}
+
+.banner-item {
+    background: linear-gradient(to right, 
+        rgba(0, 0, 0, 0) 0%, 
+        rgba(0, 0, 0, 0.85) 15%, 
+        rgba(0, 0, 0, 0.85) 85%, 
+        rgba(0, 0, 0, 0) 100%);
+    color: rgba(255, 255, 255, 0.95);
+    padding: 0.6rem 3rem;
+    border-radius: 0;
+    border: none;
+    box-shadow: none;
+    font-size: 2em;
+    font-weight: 400;
+    font-family: 'Inter', 'Noto Sans KR', sans-serif;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+    white-space: nowrap;
+    opacity: 0;
+    margin-bottom: 0.5rem;
+    overflow: hidden;
+    box-sizing: border-box;
+    transition: opacity 0.5s ease-in-out;
+    letter-spacing: 0.5px;
+}
+
+.banner-item.visible {
+    opacity: 1;
+}
+
+.banner-item.collapsing {
+    transition: height 0.5s ease-in-out, margin-bottom 0.5s ease-in-out, padding-top 0.5s ease-in-out, padding-bottom 0.5s ease-in-out;
+}
+
+/* -- 투표 이펙트 -- */
+.card.shake {
+    animation: shake 0.5s cubic-bezier(.36,.07,.19,.97) both;
+}
+@keyframes shake {
+  10%, 90% { transform: translate3d(-1px, 0, 0); }
+  20%, 80% { transform: translate3d(2px, 0, 0); }
+  30%, 50%, 70% { transform: translate3d(-4px, 0, 0); }
+  40%, 60% { transform: translate3d(4px, 0, 0); }
+}
+
+/* --- Player Card Layout: Placeholder + Card Layer --- */
+.player-area {
+    position: relative;
+    width: 100%;
+    height: 100vh;
+    padding: 2rem 4rem;
+    box-sizing: border-box;
+}
+
+/* 왼쪽: 살아있는 플레이어들 placeholder */
+#alive-deck {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(var(--card-width), 1fr));
+    gap: 1.5rem;
+    align-content: flex-start;
+    padding: 2.5rem 2rem 2rem 2rem;
+    background: rgba(255, 255, 255, 0.5);
+    border: 2px solid rgba(0, 0, 0, 0.08);
+    border-radius: 20px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+    backdrop-filter: blur(10px);
+    transition: all 0.6s ease;
+}
+
+.background-div.theme-night ~ * #alive-deck {
+    background: rgba(30, 35, 50, 0.6);
+    border-color: rgba(100, 150, 255, 0.3);
+    box-shadow: 0 4px 25px rgba(0, 0, 0, 0.5);
+}
+
+#alive-deck::before {
+    content: 'ALIVE PLAYERS';
+    position: absolute;
+    top: 0.7rem;
+    left: 1.2rem;
+    font-size: 0.75em;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: rgba(0, 0, 0, 0.4);
+    text-transform: uppercase;
+    z-index: 10;
+    transition: color 0.6s ease;
+}
+
+.background-div.theme-night ~ * #alive-deck::before {
+    color: rgba(100, 180, 255, 0.7);
+}
+
+/* placeholder - 카드 크기와 동일하게 */
+.card-placeholder {
+    width: var(--card-width);
+    height: var(--card-height);
+    /* border: 1px dashed rgba(255,255,255,0.2); */
+}
+
+/* 오른쪽 위: 투표 받은 플레이어들 */
+#voted-area {
+    position: relative;
+    flex: 1;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(var(--card-width), 1fr));
+    gap: 1rem;
+    align-content: flex-start;
+    padding: 2.5rem 1.5rem 1.5rem 1.5rem;
+    background: rgba(255, 240, 240, 0.6);
+    border: 2px solid rgba(255, 100, 100, 0.15);
+    border-radius: 20px;
+    box-shadow: 0 4px 20px rgba(255, 100, 100, 0.1);
+    backdrop-filter: blur(10px);
+    transition: all 0.6s ease;
+}
+
+.background-div.theme-night ~ * #voted-area {
+    background: rgba(50, 30, 35, 0.6);
+    border-color: rgba(255, 100, 100, 0.3);
+    box-shadow: 0 4px 25px rgba(255, 50, 50, 0.2);
+}
+
+#voted-area::before {
+    content: 'VOTED';
+    position: absolute;
+    top: 0.7rem;
+    left: 1.2rem;
+    font-size: 0.75em;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: rgba(200, 50, 50, 0.6);
+    text-transform: uppercase;
+    z-index: 10;
+    transition: color 0.6s ease;
+}
+
+.background-div.theme-night ~ * #voted-area::before {
+    color: rgba(255, 130, 130, 0.8);
+}
+
+/* 오른쪽 아래: 죽은 플레이어들 */
+#dead-area {
+    position: relative;
+    flex: 1;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(var(--card-width), 1fr));
+    gap: 1rem;
+    align-content: flex-start;
+    padding: 2.5rem 1.5rem 1.5rem 1.5rem;
+    background: rgba(220, 220, 220, 0.5);
+    border: 2px solid rgba(0, 0, 0, 0.08);
+    border-radius: 20px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
+    backdrop-filter: blur(10px);
+    transition: all 0.6s ease;
+}
+
+.background-div.theme-night ~ * #dead-area {
+    background: rgba(25, 28, 35, 0.7);
+    border-color: rgba(100, 100, 120, 0.3);
+    box-shadow: 0 4px 25px rgba(0, 0, 0, 0.6);
+}
+
+#dead-area::before {
+    content: 'ELIMINATED';
+    position: absolute;
+    top: 0.7rem;
+    left: 1.2rem;
+    font-size: 0.75em;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: rgba(0, 0, 0, 0.3);
+    text-transform: uppercase;
+    z-index: 10;
+    transition: color 0.6s ease;
+}
+
+.background-div.theme-night ~ * #dead-area::before {
+    color: rgba(150, 150, 160, 0.6);
+}
+
+/* 실제 카드들 (position: absolute) */
+.card-container {
+    position: absolute !important;
+    transform-style: preserve-3d;
+    transition: all 0.6s cubic-bezier(0.4, 0.0, 0.2, 1);
+}
+
+/* Remove old arc layout positions */
+.card-container-0,
+.card-container-1,
+.card-container-2,
+.card-container-3,
+.card-container-4,
+.card-container-5,
+.card-container-6,
+.card-container-7 {
+    position: absolute;
+}
+
+/* --- Card Detail View --- */
+#card-detail-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(0, 0, 0, 0.9);
+    z-index: 1000;
+    display: flex;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.4s ease, visibility 0.4s ease;
+    pointer-events: none;
+}
+
+#card-detail-overlay.visible {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+}
+
+.detail-card-container {
+    position: fixed;
+    left: 15%;
+    top: 50%;
+    transform: translateY(-50%);
+    perspective: 2000px;
+    cursor: pointer;
+    z-index: 1001;
+    opacity: 0;
+    transition: opacity 0.4s ease;
+}
+
+.detail-card-container.visible {
+    opacity: 1;
+}
+
+.detail-card {
+    width: calc(var(--card-width) * 3);
+    height: calc(var(--card-height) * 3);
+    background: #1a1a1a;
+    color: white;
+    border-radius: 20px;
+    border: 4px solid #555;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    font-family: 'Segoe UI', sans-serif;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.6);
+}
+
+.detail-card.spinning {
+    transform: rotateY(1080deg);
+}
+
+.detail-card p {
+    margin: 0.5rem 0;
+    font-size: 1.8em;
+}
+
+.detail-card .player-id {
+    font-size: 3em;
+    font-weight: bold;
+}
+
+.detail-card p {
+    margin: 0.5rem 0;
+    font-size: 1.8em;
+}
+
+.detail-card .player-id {
+    font-size: 3em;
+    font-weight: bold;
+}
+
+.detail-info-panel {
+    position: fixed;
+    right: 5%;
+    top: 10%;
+    width: 45%;
+    height: 80%;
+    padding: 2rem 1rem 2rem 2rem;
+    overflow-y: auto;
+    z-index: 1002;
+    animation: fadeInRight 0.6s ease-out forwards;
+}
+
+/* 커스텀 스크롤바 */
+.detail-info-panel::-webkit-scrollbar {
+    width: 8px;
+}
+
+.detail-info-panel::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 4px;
+}
+
+.detail-info-panel::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.3);
+    border-radius: 4px;
+}
+
+.detail-info-panel::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.5);
+}
+
+@keyframes fadeInRight {
+    0% {
+        transform: translateX(50px);
+        opacity: 0;
+    }
+    100% {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+.detail-info-panel h2 {
+    margin-top: 0;
+    color: rgba(255, 255, 255, 0.95);
+    font-size: 2em;
+    font-weight: 700;
+    margin-bottom: 2rem;
+    text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+    padding-left: 1rem;
+}
+
+/* 타임라인 컨테이너 */
+.timeline-container {
+    position: relative;
+    padding-left: 3rem;
+}
+
+/* 타임라인 세로선 */
+.timeline-container::before {
+    content: '';
+    position: absolute;
+    left: 1rem;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    background: linear-gradient(to bottom, 
+        rgba(100, 150, 255, 0.6) 0%, 
+        rgba(100, 150, 255, 0.3) 50%, 
+        rgba(100, 150, 255, 0.1) 100%);
+    border-radius: 2px;
+}
+
+.statement-item {
+    position: relative;
+    padding: 1.5rem 0 1.5rem 1.5rem;
+    margin: 0;
+    border-left: 3px solid transparent;
+    transition: all 0.3s ease;
+}
+
+.statement-item:hover {
+    padding-left: 2rem;
+    background: linear-gradient(to right, 
+        rgba(100, 150, 255, 0.08) 0%, 
+        rgba(100, 150, 255, 0.02) 70%, 
+        transparent 100%);
+}
+
+/* 타임라인 점 */
+.statement-item::before {
+    content: '';
+    position: absolute;
+    left: -2.15rem;
+    top: 1.8rem;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: #1a1a1a;
+    border: 3px solid rgba(100, 150, 255, 0.6);
+    box-shadow: 0 0 0 4px rgba(100, 150, 255, 0.15);
+    transition: all 0.3s ease;
+    z-index: 2;
+}
+
+.statement-item:hover::before {
+    transform: scale(1.3);
+    border-color: rgba(100, 200, 255, 0.9);
+    box-shadow: 
+        0 0 0 4px rgba(100, 150, 255, 0.25),
+        0 0 15px rgba(100, 150, 255, 0.5);
+}
+
+/* Day 구분선 */
+.statement-item.new-day {
+    margin-top: 2rem;
+}
+
+.statement-item.new-day::after {
+    content: '';
+    position: absolute;
+    left: -3rem;
+    top: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(to right, 
+        rgba(100, 150, 255, 0.3) 0%, 
+        rgba(100, 150, 255, 0.1) 50%, 
+        transparent 100%);
+}
+
+.statement-item .day-info {
+    font-size: 0.95em;
+    color: rgba(100, 200, 255, 0.8);
+    margin-bottom: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    text-shadow: 0 0 10px rgba(100, 150, 255, 0.3);
+}
+
+.statement-item .statement-text {
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 1.15em;
+    line-height: 1.6;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+    padding: 0.5rem 0;
+}
+
+/* 빈 히스토리 메시지 */
+.empty-history {
+    text-align: center;
+    padding: 4rem 2rem;
+    color: rgba(255, 255, 255, 0.3);
+    font-size: 1.1em;
+    font-style: italic;
+}
+
+.empty-history::before {
+    content: '💬';
+    display: block;
+    font-size: 3em;
+    margin-bottom: 1rem;
+    opacity: 0.3;
+}
