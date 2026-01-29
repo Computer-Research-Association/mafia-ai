@@ -206,24 +206,36 @@ def update_ui_for_game_state(client: Client):
     alive_players = [p.id for p in state.game_engine.players if p.alive]
     dead_players = [p.id for p in state.game_engine.players if not p.alive]
     
+    # 현재 phase 확인
+    current_phase = state.game_engine.phase if state.game_engine else None
+    is_voting_phase = current_phase == Phase.DAY_VOTE
+    
     client.run_javascript(f"""
         (function() {{
             const aliveDeck = document.getElementById('alive-deck');
+            const votedArea = document.getElementById('voted-area');
             const deadArea = document.getElementById('dead-area');
             const aliveIds = {alive_players};
             const deadIds = {dead_players};
             const cardLayer = document.getElementById('card-layer');
+            const isVotingPhase = {str(is_voting_phase).lower()};
             
             if (!cardLayer) {{
                 console.error('Card layer not found!');
                 return;
             }}
             
-            // Step 1: placeholder들 이동 (논리적 위치 변경)
+            // Step 1: placeholder들 이동
             aliveIds.forEach(id => {{
                 const placeholder = document.getElementById('placeholder-' + id);
-                if (placeholder && aliveDeck && placeholder.parentElement !== aliveDeck) {{
-                    aliveDeck.appendChild(placeholder);
+                // 투표 phase가 아니면 모든 alive 카드를 alive-deck으로
+                // 투표 phase면 voted에 있는 애들은 그대로 두기
+                if (placeholder) {{
+                    if (!isVotingPhase || placeholder.parentElement !== votedArea) {{
+                        if (aliveDeck && placeholder.parentElement !== aliveDeck) {{
+                            aliveDeck.appendChild(placeholder);
+                        }}
+                    }}
                 }}
             }});
             
@@ -334,8 +346,12 @@ async def step_phase_handler(client: Client):
     _, is_over, is_win = await asyncio.to_thread(state.game_engine.step_phase, actions)
     new_phase = state.game_engine.phase
     
-    # 5. 게임 이벤트 처리 - 사망은 pending에 저장, 발언은 즉시 큐에 추가
+    # 5. 게임 이벤트 처리 - 사망은 pending에 저장, 발언은 DOM 순서대로 큐에 추가
     new_events = state.game_engine.history[history_len_before:]
+    
+    # 새 발언 이벤트를 임시로 저장 (actor_id -> text 매핑)
+    new_narrative_events = {}
+    
     for event in new_events:
         # log_to_console(client, event) # 임시 비활성화
         if event.event_type == EventType.EXECUTE:
@@ -345,9 +361,54 @@ async def step_phase_handler(client: Client):
         elif event.event_type in [EventType.CLAIM, EventType.VOTE] and event.actor_id is not None:
             if event.event_type == EventType.VOTE and event.target_id is not None:
                 client.run_javascript(f"shake_card({event.target_id});")
-            # 발언을 큐에 추가
+            # 발언을 임시로 저장
             text = get_random_narrative(event).replace('"', '\\"').replace("'", "\\'")
-            state.ui_event_queue.append(('narrative', event.actor_id, text))
+            new_narrative_events[event.actor_id] = text
+    
+    # DOM 순서대로 발언을 큐에 추가: alive-deck → voted-area → dead-area
+    dom_order = await client.run_javascript("""
+        (function() {
+            const aliveDeck = document.getElementById('alive-deck');
+            const votedArea = document.getElementById('voted-area');
+            const deadArea = document.getElementById('dead-area');
+            
+            let order = [];
+            
+            // alive-deck의 placeholder 순서대로
+            if (aliveDeck) {
+                const aliveChildren = aliveDeck.querySelectorAll('.card-placeholder');
+                aliveChildren.forEach(ph => {
+                    const id = ph.id.replace('placeholder-', '');
+                    order.push(parseInt(id));
+                });
+            }
+            
+            // voted-area의 placeholder 순서대로
+            if (votedArea) {
+                const votedChildren = votedArea.querySelectorAll('.card-placeholder');
+                votedChildren.forEach(ph => {
+                    const id = ph.id.replace('placeholder-', '');
+                    order.push(parseInt(id));
+                });
+            }
+            
+            // dead-area의 placeholder 순서대로
+            if (deadArea) {
+                const deadChildren = deadArea.querySelectorAll('.card-placeholder');
+                deadChildren.forEach(ph => {
+                    const id = ph.id.replace('placeholder-', '');
+                    order.push(parseInt(id));
+                });
+            }
+            
+            return order;
+        })()
+    """, timeout=5.0)
+    
+    if dom_order:
+        for player_id in dom_order:
+            if player_id in new_narrative_events:
+                state.ui_event_queue.append(('narrative', player_id, new_narrative_events[player_id]))
 
     # --- UI 이벤트 처리 시작 ---
     if state.ui_event_queue and not state.is_processing_events:
@@ -355,7 +416,7 @@ async def step_phase_handler(client: Client):
         print("UI Event processor KICKED OFF.")
         process_ui_events(client)
 
-    # 5. 게임 종료 알림
+    # 6. 게임 종료 알림
     if is_over:
         state.game_over = True
         winner = "CITIZEN" if is_win else "MAFIA"
@@ -365,6 +426,10 @@ async def step_phase_handler(client: Client):
             state.is_processing_events = True
             print("UI Event processor KICKED OFF for game over.")
             process_ui_events(client)
+    
+    # 7. execute 후 night으로 넘어가면 바로 다음 단계로 진행
+    if new_phase == Phase.NIGHT:
+        await step_phase_handler(client)
 
 
 async def init_game(client: Client):

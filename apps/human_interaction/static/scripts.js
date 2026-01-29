@@ -199,13 +199,15 @@ function shake_card(playerId) {
     if (placeholder && votedArea) {
         votedArea.appendChild(placeholder);
         
-        // 카드를 placeholder 위치로 애니메이션
+        // 카드를 placeholder 위치로 즉시 애니메이션
         if (cardContainer && cardLayer) {
-            const layerRect = cardLayer.getBoundingClientRect();
-            const rect = placeholder.getBoundingClientRect();
-            
-            cardContainer.style.left = (rect.left - layerRect.left) + 'px';
-            cardContainer.style.top = (rect.top - layerRect.top) + 'px';
+            requestAnimationFrame(() => {
+                const layerRect = cardLayer.getBoundingClientRect();
+                const rect = placeholder.getBoundingClientRect();
+                
+                cardContainer.style.left = (rect.left - layerRect.left) + 'px';
+                cardContainer.style.top = (rect.top - layerRect.top) + 'px';
+            });
         }
     }
 }
