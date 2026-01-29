@@ -121,7 +121,6 @@ def show_announcement(client: Client, text: str):
     """Dynamically creates and shows a new banner, which auto-removes itself."""
     escaped_text = text.replace('\\', '\\\\').replace("'", "\\'").replace('"', '\\"')
     display_duration = 3000  # ms, how long banner stays fully visible
-    hide_transition_duration = 500 # ms, matches CSS transition duration for 'all' on banner-item
 
     js_code = f"""
         const container = document.getElementById('banner-container');
@@ -139,13 +138,41 @@ def show_announcement(client: Client, text: str):
 
             // After display_duration, start the hiding animation
             setTimeout(() => {{
-                banner.classList.remove('visible'); // Start fade-out and collapse
-                banner.classList.add('hiding');
-
-                // After hiding_transition_duration, remove element from DOM
-                setTimeout(() => {{
-                    banner.remove();
-                }}, {hide_transition_duration});
+                // Step 1: Fade out (opacity transition)
+                banner.classList.remove('visible');
+                
+                // Step 2: After opacity transition ends, collapse height
+                banner.addEventListener('transitionend', function onOpacityEnd(e) {{
+                    if (e.propertyName === 'opacity') {{
+                        banner.removeEventListener('transitionend', onOpacityEnd);
+                        
+                        // Get computed height including padding
+                        const computedStyle = window.getComputedStyle(banner);
+                        const totalHeight = banner.offsetHeight;
+                        
+                        // Set explicit height before transition
+                        banner.style.height = totalHeight + 'px';
+                        
+                        // Force reflow
+                        void banner.offsetHeight;
+                        
+                        // Add collapsing class and animate to 0
+                        requestAnimationFrame(() => {{
+                            banner.classList.add('collapsing');
+                            banner.style.height = '0px';
+                            banner.style.marginBottom = '0px';
+                            banner.style.paddingTop = '0px';
+                            banner.style.paddingBottom = '0px';
+                        }});
+                        
+                        // Step 3: After height transition ends, remove from DOM
+                        banner.addEventListener('transitionend', function onCollapseEnd(e) {{
+                            if (e.propertyName === 'height') {{
+                                banner.remove();
+                            }}
+                        }});
+                    }}
+                }});
 
             }}, {display_duration});
         }}
