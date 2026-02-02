@@ -79,7 +79,7 @@ def get_rq1_models(root_dir: Path = None) -> List[Dict]:
 # -----------------------------------------------------------------------------
 # 3. 테스트 실행 함수 (Execution Logic)
 # -----------------------------------------------------------------------------
-def run_batch_tests(episodes: int = 100, runs: int = 100):
+def run_batch_tests(episodes: int = 100):
     # 1. 세션 수집
     sessions = get_rq1_models()
     total_sessions = len(sessions)
@@ -104,57 +104,47 @@ def run_batch_tests(episodes: int = 100, runs: int = 100):
         print(f"\n[{idx+1}/{total_sessions}] Session: {sess['session_name']}")
         print(f"Target: {sess['scenario']} | {role.upper()} | Lambda {sess['lambda']}")
 
-        # [핵심] 지정된 횟수만큼 반복 실행 (Run 1 ~ Run N)
-        for r in range(1, runs + 1):
+        eval_log_dir = (
+            PROJECT_ROOT
+            / "logs"
+            / "rq1_test"
+            / sess["scenario"]
+            / f"lambda_{sess['lambda']}"
+        )
+        eval_log_dir.mkdir(parents=True, exist_ok=True)
 
-            run_folder_name = f"{sess['session_name']}_run_{r}"
+        cmd = [
+            PYTHON_EXE,
+            str(MAIN_PY_PATH),
+            "--mode",
+            "test",
+            "--episodes",
+            str(episodes),
+            "--rl_role",
+            role,
+            "--rl_count",
+            str(sess["rl_count"]),
+            "--lambda",
+            str(sess["lambda"]),
+            "--log_dir",
+            str(eval_log_dir),
+            "--model_dir",
+            sess["models_dir"],
+        ]
 
-            eval_log_dir = (
-                PROJECT_ROOT
-                / "logs"
-                / "rq1_test"
-                / sess["scenario"]
-                / f"lambda_{sess['lambda']}"
-                / run_folder_name
-            )
-            eval_log_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            subprocess.run(cmd, check=True)
 
-            print(f"Running {r}/{runs} ... ", end="", flush=True)
-
-            cmd = [
-                PYTHON_EXE,
-                str(MAIN_PY_PATH),
-                "--mode",
-                "test",
-                "--episodes",
-                str(episodes),
-                "--rl_role",
-                role,
-                "--rl_count",
-                str(sess["rl_count"]),
-                "--lambda",
-                str(sess["lambda"]),
-                "--log_dir",
-                str(eval_log_dir),
-                "--model_dir",
-                sess["models_dir"],
-            ]
-
-            try:
-                subprocess.run(cmd, check=True)
-
-                print(f"Done (Saved in .../{run_folder_name})")
-                success_count += 1
-            except subprocess.CalledProcessError:
-                print(f"Failed")
-                fail_count += 1
-            except KeyboardInterrupt:
-                print("\nInterrupted by user.")
-                return
+            success_count += 1
+        except subprocess.CalledProcessError:
+            print(f"Failed")
+            fail_count += 1
+        except KeyboardInterrupt:
+            print("\nInterrupted by user.")
+            return
 
     elapsed = time.time() - start_time
     print("\n" + "=" * 70)
-    print(f"All {runs} runs completed in {elapsed:.1f} seconds.")
     print(f"Success: {success_count} | Failed: {fail_count}")
     print(f"Results saved in: {PROJECT_ROOT / 'logs' / 'rq1_test'}")
 
@@ -167,14 +157,11 @@ if __name__ == "__main__":
     parser.add_argument(
         "--episodes",
         type=int,
-        default=100,
+        default=1000,
         help="Number of episodes for testing each model",
-    )
-    parser.add_argument(
-        "--runs", type=int, default=100, help="Number of runs per session (e.g., 100)"
     )
 
     args = parser.parse_args()
 
     # 실행
-    run_batch_tests(episodes=args.episodes, runs=args.runs)
+    run_batch_tests(episodes=args.episodes)
