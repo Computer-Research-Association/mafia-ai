@@ -12,7 +12,7 @@ LOSS_PENALTY = -1.0
 TIME_PENALTY_UNIT = -0.1
 DECEPTION_MULTIPLIER = 1.5
 # Lambda 값: CLI 인자(--lambda)를 통해 주입된 환경 변수 우선 사용
-REWARD_LAMBDA = float(os.getenv("MAFIA_LAMBDA", 0.5))
+REWARD_LAMBDA = float(os.getenv("MAFIA_LAMBDA", 0.3))
 INT_REWARD_SCALE = 25.0
 
 # === [2. Reward Matrix Setup] ===
@@ -39,7 +39,7 @@ for r in CIV_ROLES:
     REWARD_MATRIX[r][EventType.EXECUTE][Role.CITIZEN] = -5.0
     REWARD_MATRIX[r][EventType.EXECUTE][Role.POLICE] = -10.0
     REWARD_MATRIX[r][EventType.EXECUTE][Role.DOCTOR] = -10.0
-    
+
     # 사망 페널티 (팀원 손실)
     REWARD_MATRIX[r][EventType.KILL][Role.CITIZEN] = -1.0
     REWARD_MATRIX[r][EventType.KILL][Role.POLICE] = -2.0
@@ -56,7 +56,7 @@ class RewardManager:
     def __init__(self):
         self.last_claims: Dict[int, Role] = {}
         self.cumulative_intermediate = defaultdict(float)
-        self.rewards = defaultdict(float)        
+        self.rewards = defaultdict(float)
 
     def reset(self):
         """에피소드 초기화 시 호출"""
@@ -64,7 +64,7 @@ class RewardManager:
 
     def calculate(self, game, start_idx: int = 0) -> Dict[int, float]:
         """
-        게임 히스토리를 분석하여 중간 보상을 누적하고, 
+        게임 히스토리를 분석하여 중간 보상을 누적하고,
         게임 종료 시점에 최종 정규화된 보상을 계산합니다.
         """
         # 이번 호출에서 반환할 보상 (최종 계산 전까지는 0)
@@ -81,7 +81,7 @@ class RewardManager:
 
         # 2. 히스토리 기반 이벤트 분석
         new_events = game.history[start_idx:]
-        
+
         for event in new_events:
             # A. 게임 종료 이벤트 감지
             if event.phase == Phase.GAME_END:
@@ -97,11 +97,11 @@ class RewardManager:
 
             # C. 상호작용 보상 누적 (ΣR_int에 합산)
             target_role = self._get_target_role(game, event.target_id)
-            
+
             for p in game.players:
                 if not p.alive:
                     continue
-                
+
                 base_reward = REWARD_MATRIX[p.role][event.event_type][target_role]
                 if base_reward == 0:
                     continue
@@ -110,7 +110,7 @@ class RewardManager:
                 if p.role == Role.MAFIA and base_reward > 0:
                     if self.last_claims.get(p.id) == Role.POLICE:
                         multiplier = DECEPTION_MULTIPLIER
-                
+
                 # 보상을 즉시 반환하지 않고 누적 변수에 저장
                 self.cumulative_intermediate[p.id] += base_reward * multiplier
 
@@ -118,7 +118,7 @@ class RewardManager:
         if game_ended:
             for p in game.players:
                 # 3-1. 승패 보상 결정 (R_win)
-                is_citizen_team = (p.role != Role.MAFIA)
+                is_citizen_team = p.role != Role.MAFIA
                 if citizen_win:
                     r_win = WIN_REWARD if is_citizen_team else LOSS_PENALTY
                 else:
@@ -127,10 +127,9 @@ class RewardManager:
                 # 3-2. 공식 적용: R = λ * tanh(ΣR_int / k_int) + (1-λ) * R_win
                 r_int_sum = self.cumulative_intermediate[p.id]
                 r_int_norm = np.tanh(r_int_sum / INT_REWARD_SCALE)
-                
-                final_reward = (REWARD_LAMBDA * r_int_norm + 
-                                (1 - REWARD_LAMBDA) * r_win)
-                
+
+                final_reward = REWARD_LAMBDA * r_int_norm + (1 - REWARD_LAMBDA) * r_win
+
                 step_rewards[p.id] = final_reward
 
         return dict(step_rewards)

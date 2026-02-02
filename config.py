@@ -71,7 +71,7 @@ class TrainSettings(BaseSettings):
     ENTROPY_COEF: float = 0.05
     VALUE_LOSS_COEF: float = 0.5
     MAX_GRAD_NORM: float = 0.5
-    IL_COEF: float = 0.1
+    IL_COEF: float = 0.2
 
 
 class PathSettings(BaseSettings):

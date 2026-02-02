@@ -2,6 +2,8 @@ import sys
 import os
 import threading
 import argparse
+import glob
+from pathlib import Path
 from typing import List, Dict, Any
 
 from PyQt6.QtWidgets import QApplication
@@ -56,6 +58,31 @@ def run_simulation(args, stop_event: threading.Event = None):
         rl_agents = experiment.get_rl_agents(agents)
 
         print(f"[{args.mode.upper()}] mode with {len(agents)} agents.")
+
+        # 모델 로드 (테스트 모드 또는 지정된 경우)
+        # 폴더 경로가 전달된 경우
+        if hasattr(args, "model_dir") and args.model_dir:
+            model_dir_path = Path(args.model_dir)
+            print(f"📂  Loading Models from directory: {model_dir_path.name}")
+
+            for agent in rl_agents.values():
+                # 패턴 매칭: agent_{id}_*.pt
+                search_pattern = model_dir_path / f"agent_{agent.id}_*.pt"
+                found_files = list(glob.glob(str(search_pattern)))
+
+                if found_files:
+                    target_file = found_files[0]
+                    try:
+                        agent.load(target_file)
+                        print(
+                            f"   ✅ Agent {agent.id} loaded: {Path(target_file).name}"
+                        )
+                    except Exception as e:
+                        print(f"   ❌ Failed to load {target_file}: {e}")
+                else:
+                    # 해당 에이전트 번호에 맞는 파일이 없을 경우
+                    print(f"   ⚠️ No specific model found for Agent {agent.id}")
+
         print(f"Player Configs: {args.player_configs}")
 
         # 모드별 실행
@@ -128,11 +155,14 @@ def main():
     )
     parser.add_argument("--rl_count", type=int, default=0, help="Number of RL agents")
     parser.add_argument("--log_dir", type=str, help="Directory to save logs")
+    parser.add_argument(
+        "--model_dir", type=str, help="Directory containing .pt files for agents"
+    )
 
     # sys.argv 길이가 1보다 크면 CLI 인자가 있는 것으로 간주
     if len(sys.argv) > 1:
         args = parser.parse_args()
-        print("--- Running in CLI mode ---")
+        print("\n--- Running in CLI mode ---")
         run_simulation(args)  # CLI 모드에서는 stop_event가 None
     else:
         print("--- Starting GUI mode ---")
