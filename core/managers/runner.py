@@ -209,8 +209,39 @@ def train(
             finished_rewards = []
 
             for j in finished_indices:
+                p0_check_idx = j * PLAYERS_PER_GAME
+                game_info = {}
+
+                if isinstance(infos, dict):
+                    if "player_0" in infos:
+                        game_info = infos["player_0"][j]
+                else:  # VectorEnv 스타일
+                    game_info = infos[p0_check_idx]
+
+                raw_winner = None
+                if "winner" in game_info:
+                    raw_winner = game_info["winner"]
+                elif "final_info" in game_info:
+                    final = game_info["final_info"]
+                    if isinstance(final, dict) and "winner" in final:
+                        raw_winner = final["winner"]
+
+                if raw_winner is not None:
+                    try:
+                        w_role = None
+                        if isinstance(raw_winner, Role):
+                            w_role = raw_winner
+                        elif isinstance(raw_winner, str):
+                            w_role = Role[raw_winner]
+                        else:
+                            w_role = Role(int(raw_winner))
+
+                        if w_role in total_wins:
+                            total_wins[w_role] += 1
+                    except Exception as e:
+                        print(f"[Warning] Failed to parse winner: {raw_winner} ({e})")
+
                 for pid in range(PLAYERS_PER_GAME):
-                    # Info 수집
                     if isinstance(infos, dict):
                         agent_key = f"player_{pid}"
                         info = infos[agent_key][j] if agent_key in infos else {}
@@ -223,12 +254,6 @@ def train(
                     # 해당 플레이어의 이번 판 원본 보상 수집 (info와 1:1 매칭)
                     r = current_rewards[pid][j] if pid in current_rewards else 0.0
                     finished_rewards.append(r)
-
-            for info in finished_infos:
-                if "winner" in info:
-                    winner = info["winner"]
-                    if winner in total_wins:
-                        total_wins[winner] += 1
 
             # 3. Calculate Stats
             metrics = stats_manager.calculate_stats(
@@ -291,9 +316,12 @@ def train(
         agent = rl_agents[pid]
         save_path = os.path.join(save_dir, f"agent_{pid}_supersuit.pt")
 
-        my_role_wins = total_wins.get(agent.role, 0)
-        win_rate = my_role_wins / total_game_count if total_game_count > 0 else 0.0
+        if agent.role == Role.MAFIA:
+            my_role_wins = total_wins.get(Role.MAFIA, 0)
+        else:
+            my_role_wins = total_wins.get(Role.CITIZEN, 0)
 
+        win_rate = my_role_wins / total_game_count if total_game_count > 0 else 0.0
         if hasattr(agent, "save"):
             # 메타데이터 생성
             metadata = {

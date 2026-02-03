@@ -94,8 +94,13 @@ class CheckpointManager:
         performance_metrics = []
         if extra_metadata:
             for k, v in extra_metadata.items():
-                metric_entry = {"type": k, "value": str(v)}  # win_rate, accuracy 등
-                # 신뢰구간이나 단위가 있다면 추가 가능
+                # [수정] 값 포맷팅 로직 추가
+                if isinstance(v, float):
+                    val_str = f"{v:.4f}"  # 소수점 4자리까지만 저장
+                else:
+                    val_str = str(v)
+
+                metric_entry = {"type": k, "value": val_str}
                 performance_metrics.append(metric_entry)
 
         # 하이퍼파라미터 추출
