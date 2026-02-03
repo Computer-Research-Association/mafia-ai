@@ -21,8 +21,9 @@ from pydantic import BaseModel
 
 from core.engine.game import MafiaGame
 from core.agents.rule_base_agent import RuleBaseAgent
-from core.engine.state import Role, Phase, EventType, GameEvent
+from core.engine.state import Role, Phase, EventType, GameEvent, GameAction
 from core.managers.logger import LogManager
+from apps.human_interaction.human_agent import HumanAgent
 
 # 정적 파일 경로 설정
 app.add_static_files('/static', STATIC_DIR)
@@ -39,6 +40,13 @@ class AppState(BaseModel):
     ui_event_queue: Deque = Field(default_factory=deque)
     is_processing_events: bool = False
     pending_death_announcements: list = Field(default_factory=list)
+    human_player_id: int = 0
+    human_action_future: Optional[asyncio.Future] = None
+    waiting_for_human: bool = False
+    selected_target: int = -1  # UI에서 선택된 타겟
+    selected_role: Optional[Role] = None  # UI에서 선택된 역할
+    action_step: int = 0  # 0: 플레이어 선택, 1: 역할 선택
+    current_instruction: str = "플레이어를 선택하세요"
 
     class Config:
         arbitrary_types_allowed = True
@@ -322,14 +330,42 @@ async def step_phase_handler(client: Client):
     history_len_before = len(state.game_engine.history)
     living_players = [p for p in state.game_engine.players if p.alive]
     
+    # Step A: AI 행동 계산
     async def get_single_action(player):
         player_view = state.game_engine.get_game_status(viewer_id=player.id)
         action = await asyncio.to_thread(player.get_action, player_view)
         return player.id, action
     
-    action_tasks = [get_single_action(p) for p in living_players]
-    action_results = await asyncio.gather(*action_tasks)
-    actions = dict(action_results)
+    # HumanAgent가 아닌 플레이어들의 행동만 계산
+    ai_players = [p for p in living_players if not isinstance(p, HumanAgent)]
+    action_tasks = [get_single_action(p) for p in ai_players]
+    ai_action_results = await asyncio.gather(*action_tasks)
+    actions = dict(ai_action_results)
+    
+    # Step B: 사람 행동 대기 (생존해 있고 특정 Phase에서만)
+    human_player = state.game_engine.players[state.human_player_id]
+    
+    # Check if human player is alive AND current phase requires human action
+    requires_human_action = False
+    if human_player.alive:
+        if old_phase in [Phase.DAY_DISCUSSION, Phase.DAY_VOTE, Phase.DAY_EXECUTE]:
+            requires_human_action = True
+        elif old_phase == Phase.NIGHT and human_player.role in [Role.MAFIA, Role.POLICE, Role.DOCTOR]:
+            requires_human_action = True
+
+    if requires_human_action:
+        state.human_action_future = asyncio.Future()
+        
+        # 모달 UI를 업데이트하고 표시하여 사용자 행동을 받음
+        update_modal_ui()
+        client.run_javascript('document.getElementById("human-control-modal").classList.add("visible");')
+        state.waiting_for_human = True
+        
+        human_action = await state.human_action_future
+        actions[state.human_player_id] = human_action
+        state.waiting_for_human = False
+    
+    # Step C: 행동 통합 및 엔진 실행
 
     # 1. 현재 phase 시작 알림 먼저 표시 (phase가 바뀐 경우에만)
     if state.previous_phase != old_phase:
@@ -440,6 +476,16 @@ async def step_phase_handler(client: Client):
 async def init_game(client: Client):
     """새 게임을 시작하고 UI를 초기화합니다."""
     print("새로운 게임을 시작합니다...")
+    
+    # 플레이어 초기화: Player 0은 Human, 나머지는 AI
+    agents = []
+    for i in range(8):
+        if i == state.human_player_id:
+            agents.append(HumanAgent(i, Role.CITIZEN))
+        else:
+            agents.append(RuleBaseAgent(i, Role.CITIZEN))
+    
+    state.game_engine = MafiaGame(agents=agents)
     await asyncio.to_thread(state.game_engine.reset)
     
     state.game_over = False
@@ -449,6 +495,12 @@ async def init_game(client: Client):
     state.ui_event_queue.clear()
     state.is_processing_events = False
     state.pending_death_announcements.clear()
+    state.human_action_future = None
+    state.waiting_for_human = False
+    state.selected_target = -1
+    state.selected_role = None
+    state.action_step = 0
+    state.current_instruction = "플레이어를 선택하세요"
 
     client.run_javascript("set_theme('day')")
     
@@ -471,6 +523,154 @@ async def init_game(client: Client):
     update_ui_for_game_state(client)
     print("게임 초기화 완료.")
 
+def on_execution_vote(agree: bool, target_id: Optional[int]):
+    """처형 찬반 투표를 처리하는 콜백"""
+    ui.run_javascript('document.getElementById("human-control-modal").classList.remove("visible");')
+    if state.human_action_future and not state.human_action_future.done():
+        # 찬성하면 후보의 ID를, 반대하면 -1 (기권/반대)를 전송
+        action = GameAction(target_id=target_id if agree else -1)
+        state.human_action_future.set_result(action)
+
+def on_player_or_role_action(target_id: int, claim_role: Optional[Role] = None):
+    """플레이어 선택 또는 역할 주장을 처리하는 콜백"""
+    ui.run_javascript('document.getElementById("human-control-modal").classList.remove("visible");')
+    if state.human_action_future and not state.human_action_future.done():
+        action = GameAction(target_id=target_id, claim_role=claim_role)
+        state.human_action_future.set_result(action)
+        state.selected_target = -1
+        state.selected_role = None
+        state.action_step = 0
+        state.current_instruction = "플레이어를 선택하세요."
+
+def select_player_action(player_id: int):
+    """플레이어를 선택하는 함수 (Phase별로 다르게 처리)"""
+    current_phase = state.game_engine.phase
+    if current_phase == Phase.DAY_DISCUSSION:
+        state.selected_target = player_id
+        state.action_step = 1
+        state.current_instruction = f"Player {player_id}에 대해 역할을 주장하거나, 주장 없이 의견만 피력합니다."
+        update_modal_ui()
+    else:
+        on_player_or_role_action(player_id, None)
+
+def select_role_action(role: Optional[Role]):
+    """역할을 선택하고 행동 확정"""
+    on_player_or_role_action(state.selected_target, role)
+
+def go_back():
+    """이전 단계로 돌아가기"""
+    state.action_step = 0
+    state.selected_target = -1
+    state.selected_role = None
+    state.current_instruction = "플레이어를 선택하세요."
+    update_modal_ui()
+
+def update_modal_ui():
+    """모달 UI를 현재 게임 상태에 맞게 업데이트합니다."""
+    if modal_container:
+        modal_container.clear()
+        with modal_container:
+            current_phase = state.game_engine.phase
+            if current_phase == Phase.DAY_EXECUTE:
+                render_execution_vote_selection()
+            elif state.action_step == 0:
+                render_player_selection()
+            else:
+                render_role_selection()
+
+def render_execution_vote_selection():
+    """처형 찬반 투표 UI 렌더링"""
+    # HACK: game.py를 수정할 수 없어, UI에서 직접 처형 후보자를 계산합니다.
+    # _last_votes는 private 멤버이므로 직접 접근은 권장되지 않습니다.
+    votes = state.game_engine._last_votes
+    target_id = None
+    if votes:
+        max_v = max(votes)
+        if max_v > 0:
+            targets = [i for i, v in enumerate(votes) if v == max_v]
+            if len(targets) == 1:
+                target_id = targets[0]
+
+    if target_id is not None:
+        state.current_instruction = f"플레이어 {target_id}를 처형하시겠습니까?"
+    
+        with ui.row().classes('w-full gap-4 justify-center items-center'):
+            with ui.card().classes('bg-red-800 w-48 h-48 cursor-pointer hover:bg-red-700').on('click', lambda t=target_id: on_execution_vote(True, t)):
+                with ui.column().classes('w-full h-full justify-center items-center'):
+                    ui.label('찬성').classes('text-white text-4xl font-bold')
+            
+            with ui.card().classes('bg-blue-800 w-48 h-48 cursor-pointer hover:bg-blue-700').on('click', lambda t=target_id: on_execution_vote(False, t)):
+                 with ui.column().classes('w-full h-full justify-center items-center'):
+                    ui.label('반대').classes('text-white text-4xl font-bold')
+    else:
+        # 처형 대상이 없는 경우 (동점자 발생 등)
+        state.current_instruction = "처형 대상이 결정되지 않았습니다. 다음 단계로 넘어갑니다."
+        # 자동으로 다음 단계로 넘어가는 로직을 위해 future를 즉시 완료시킵니다.
+        if state.human_action_future and not state.human_action_future.done():
+            # 모달을 먼저 닫고 future를 완료합니다.
+            ui.run_javascript('document.getElementById("human-control-modal").classList.remove("visible");')
+            # action은 중요하지 않으므로 빈 action을 보냅니다.
+            state.human_action_future.set_result(GameAction())
+
+def render_player_selection():
+    """플레이어 선택 UI 렌더링 (카드 기반)"""
+    current_phase = state.game_engine.phase
+    human_player = state.game_engine.players[state.human_player_id]
+    
+    phase_msg = ""
+    if current_phase == Phase.DAY_DISCUSSION:
+        phase_msg = "낮 토론: 다른 플레이어(또는 자신)를 지목하고 역할을 주장하세요."
+    elif current_phase == Phase.DAY_VOTE:
+        phase_msg = "투표: 처형할 플레이어를 선택하세요."
+    elif current_phase == Phase.NIGHT:
+        if human_player.role == Role.MAFIA:
+            phase_msg = f"밤: 제거할 플레이어를 선택하세요. (당신은 {human_player.role.name})"
+        elif human_player.role == Role.POLICE:
+            phase_msg = f"밤: 조사할 플레이어를 선택하세요. (당신은 {human_player.role.name})"
+        elif human_player.role == Role.DOCTOR:
+            phase_msg = f"밤: 보호할 플레이어를 선택하세요. (당신은 {human_player.role.name})"
+
+    ui.label(phase_msg).classes('text-sm text-center mb-2 text-gray-400')
+    
+    with ui.element('div').classes('action-button-grid grid-cols-4'):
+        for player in state.game_engine.players:
+            is_alive = player.alive
+            is_self = player.id == state.human_player_id
+            
+            card_classes = 'action-player-card'
+            if is_self:
+                card_classes += ' is-self'
+            if not is_alive:
+                card_classes += ' is-dead'
+
+            with ui.card().classes(card_classes).on('click', lambda pid=player.id: select_player_action(pid)) as card:
+                if not is_alive:
+                    card.props('disable')
+
+                ui.label(f'Player {player.id}').classes('action-player-card-title')
+                status = "나" if is_self else ("사망" if not is_alive else "생존")
+                ui.label(status).classes('action-player-card-status')
+
+    ui.button('기권/패스', on_click=lambda: on_player_or_role_action(-1, None)).classes('w-full mt-4 utility-button back')
+
+def render_role_selection():
+    """역할 선택 UI 렌더링"""
+    ui.label(f'Player {state.selected_target}를 선택했습니다').classes('text-sm text-center mb-2 text-gray-400')
+    
+    with ui.element('div').classes('action-button-grid grid-cols-4'):
+        for role in [Role.POLICE, Role.DOCTOR, Role.MAFIA, Role.CITIZEN]:
+            btn = ui.button(
+                f'{role.name}',
+                on_click=lambda r=role: select_role_action(r)
+            ).classes('action-button role-claim-button')
+
+    with ui.element('div').classes('utility-button-grid'):
+        ui.button('역할 주장 안 함', on_click=lambda: select_role_action(None)).classes('utility-button confirm')
+        ui.button('← 뒤로', on_click=go_back).classes('utility-button back')
+
+# 모달 컨테이너 참조
+modal_container = None
+
 @ui.page('/')
 async def main_page(client: Client):
     ui.html('<div id="background-div" class="background-div"></div>', sanitize=False)
@@ -481,8 +681,26 @@ async def main_page(client: Client):
         ui.label().bind_text_from(state, 'day_phase_text').classes('text-xl').style('color: rgba(26, 26, 26, 0.85); font-weight: 500; letter-spacing: 1px; font-family: "Inter", "Noto Sans KR", sans-serif;')
         next_button = ui.button(on_click=lambda: step_phase_handler(client)).props('flat').classes('px-8 py-2')
         next_button.bind_text_from(state, 'next_button_text')
-        next_button.bind_enabled_from(state, 'is_processing_events', backward=lambda v: not v)
+        next_button.bind_enabled_from(state, 'is_processing_events', 
+            backward=lambda v: not v and not state.waiting_for_human)
         next_button.style('background: rgba(26, 26, 26, 0.08); border: 1px solid rgba(26, 26, 26, 0.15); border-radius: 8px; font-weight: 500; letter-spacing: 0.5px; font-family: "Inter", "Noto Sans KR", sans-serif; color: rgba(26, 26, 26, 0.85); transition: all 0.2s ease; text-transform: none;')
+    
+    with ui.element('div').props('id="human-control-modal"').classes('fixed inset-0 flex items-center justify-center z-50') as human_control_modal:
+        with ui.column().classes('items-center gap-4 w-full max-w-2xl'):
+            ui.label('당신의 차례입니다!').classes('action-modal-header text-3xl font-bold text-center mb-2')
+            
+            role_label = ui.label().classes('action-modal-role text-lg text-center mb-4')
+            role_label.bind_text_from(state.game_engine, 'players',
+                backward=lambda players: f"당신의 역할: {next((p.role.name for p in players if p.id == state.human_player_id), 'Unknown')}")
+            
+            ui.separator().style('background: rgba(255, 255, 255, 0.2); margin: 1rem 0;')
+            
+            instruction_label = ui.label().classes('action-modal-instruction text-xl font-semibold text-center mb-6')
+            instruction_label.bind_text_from(state, 'current_instruction')
+            
+            global modal_container
+            with ui.column().classes('w-full modal-content-wrapper').props('id="modal-content-wrapper"') as modal_container:
+                render_player_selection()
 
     with ui.element('div').classes('player-area w-full'):
         # 영역 컨테이너 (보이는 레이아웃)
@@ -571,7 +789,7 @@ def get_player_statements(player_id: int):
 
 # --- App Entrypoint ---
 def run_app():
-    ui.run(title='Mafia AI', storage_secret='a_very_secret_key_for_demo', reload=False)
+    ui.run(title='Mafia AI', storage_secret='a_very_secret_key_for_demo', reload=True)
 
 if __name__ in {"__main__", "__mp_main__"}:
     run_app()
