@@ -26,7 +26,7 @@ class DynamicActorCritic(nn.Module):
 
         # Create backbone using factory
         self.backbone = get_backbone(backbone, state_dim, hidden_dim, num_layers)
-        
+
         feature_dim = self.backbone.feature_dim
 
         # Multi-Discrete Action Heads
@@ -52,9 +52,9 @@ class DynamicActorCritic(nn.Module):
         # 1. Dimension adjustment (Batch, Seq, Feature)
         if state.dim() == 2:
             state = state.unsqueeze(1)
-        
+
         # NOTE: Removed dangerous flattening logic for dim > 3 to prevent data mixing in parallel envs
-        
+
         # Current Batch Size
         current_batch_size = state.size(0)
 
@@ -63,11 +63,11 @@ class DynamicActorCritic(nn.Module):
             if hidden_state is not None:
                 if self.backbone_type == "lstm":
                     # LSTM: (h, c) tuple
-                    h_size = hidden_state[0].size(1) 
+                    h_size = hidden_state[0].size(1)
                 else:
                     # GRU: h tensor
                     h_size = hidden_state.size(1)
-                
+
                 # Check batch size match
                 if h_size != current_batch_size:
                     hidden_state = None
@@ -91,7 +91,7 @@ class DynamicActorCritic(nn.Module):
             return None
 
         device = next(self.parameters()).device
-        
+
         h = torch.zeros(self.num_layers, batch_size, self.hidden_dim).to(device)
 
         if self.backbone_type == "lstm":

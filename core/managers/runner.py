@@ -209,7 +209,6 @@ def train(
 
             for j in finished_indices:
                 for pid in range(PLAYERS_PER_GAME):
-                    # Info 수집
                     if isinstance(infos, dict):
                         agent_key = f"player_{pid}"
                         info = infos[agent_key][j] if agent_key in infos else {}
@@ -275,16 +274,32 @@ def train(
     save_dir.mkdir(parents=True, exist_ok=True)
     os.makedirs(save_dir, exist_ok=True)
 
-    for pid, agent in rl_agents.items():
+    if total_game_count > 0:
+        final_average_score = total_reward_sum / total_game_count
+    else:
+        final_average_score = 0.0
+
+    for pid in rl_agents:
+        agent = rl_agents[pid]
         save_path = os.path.join(save_dir, f"agent_{pid}_supersuit.pt")
+
         if hasattr(agent, "save"):
-            agent.save(save_path)
+            # 메타데이터 생성
+            metadata = {
+                "total_episodes": total_game_count,
+                "avg_score": final_average_score,
+                "training_status": "completed",
+            }
+
+            # 메타데이터와 함께 저장 호출
+            agent.save(
+                os.path.join(save_dir, f"agent_{pid}_supersuit.pt"),
+                extra_metadata=metadata,
+            )
             print(f"Saved: {save_path}")
 
     if total_game_count == 0:
         return -999.0
-
-    final_average_score = total_reward_sum / total_game_count
 
     return final_average_score
 
