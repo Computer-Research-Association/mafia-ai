@@ -76,7 +76,7 @@ mypy_extensions==1.1.0
 narwhals==2.15.0
 nest_asyncio==1.6.0
 networkx==3.6.1
-nicegui==0.0.0.post293.dev0+2116d8d
+nicegui 
 numpy==2.4.0
 ollama==0.6.1
 openai==2.14.0
