@@ -28,6 +28,7 @@ def train(
     - 배치 크기 불일치(Shape Mismatch) 원천 차단
     """
 
+    total_wins = {Role.MAFIA: 0, Role.CITIZEN: 0}
     # 1. 플레이어 수 동적 감지 (하드코딩 방지)
     # env.possible_agents가 있으면 사용, 없으면 config나 rl_agents+all_agents 길이로 추론
     if hasattr(env, "possible_agents"):
@@ -223,6 +224,12 @@ def train(
                     r = current_rewards[pid][j] if pid in current_rewards else 0.0
                     finished_rewards.append(r)
 
+            for info in finished_infos:
+                if "winner" in info:
+                    winner = info["winner"]
+                    if winner in total_wins:
+                        total_wins[winner] += 1
+
             # 3. Calculate Stats
             metrics = stats_manager.calculate_stats(
                 infos=finished_infos,
@@ -275,16 +282,36 @@ def train(
     save_dir.mkdir(parents=True, exist_ok=True)
     os.makedirs(save_dir, exist_ok=True)
 
-    for pid, agent in rl_agents.items():
+    if total_game_count > 0:
+        final_average_score = total_reward_sum / total_game_count
+    else:
+        final_average_score = 0.0
+
+    for pid in rl_agents:
+        agent = rl_agents[pid]
         save_path = os.path.join(save_dir, f"agent_{pid}_supersuit.pt")
+
+        my_role_wins = total_wins.get(agent.role, 0)
+        win_rate = my_role_wins / total_game_count if total_game_count > 0 else 0.0
+
         if hasattr(agent, "save"):
-            agent.save(save_path)
+            # 메타데이터 생성
+            metadata = {
+                "total_episodes": total_game_count,
+                "avg_score": final_average_score,
+                "win_rate": win_rate,
+                "training_status": "completed",
+            }
+
+            # 메타데이터와 함께 저장 호출
+            agent.save(
+                os.path.join(save_dir, f"agent_{pid}_supersuit.pt"),
+                extra_metadata=metadata,
+            )
             print(f"Saved: {save_path}")
 
     if total_game_count == 0:
         return -999.0
-
-    final_average_score = total_reward_sum / total_game_count
 
     return final_average_score
 

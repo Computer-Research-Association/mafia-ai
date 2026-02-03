@@ -33,8 +33,6 @@ class CheckpointManager:
             },
             {"name": "python_version", "value": platform.python_version()},
             {"name": "torch_version", "value": torch.__version__},
-            # hostname은 개인정보 보호를 위해 제외하거나 고정값 사용
-            # {"name": "hostname", "value": "private-host"},
             {"name": "device", "value": "cuda" if torch.cuda.is_available() else "cpu"},
         ]
 
