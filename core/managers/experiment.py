@@ -55,9 +55,14 @@ class ExperimentManager:
         else:
             log_dir = str(getattr(self.args, "paths", {}).get("log_dir", "logs"))
 
+        log_events = self.mode != "train"
+
         # 메인 프로세스는 정상적으로 파일을 씀
         return LogManager(
-            experiment_name=experiment_name, log_dir=log_dir, write_mode=True
+            experiment_name=experiment_name,
+            log_dir=log_dir,
+            write_mode=True,
+            log_events=log_events,
         )
 
     # [추가] 환경 내부의 에이전트(Body)에게 고정 역할을 붙여주는 헬퍼 함수
@@ -88,16 +93,20 @@ class ExperimentManager:
                 agent_type = p_cfg.get("type", "rl").lower()
                 if agent_type == "rl":
                     bb = p_cfg.get("backbone", "mlp").lower()
-                    encoder_map[i] = POMDPEncoder() if bb in ["lstm", "gru", "rnn"] else MDPEncoder()
+                    encoder_map[i] = (
+                        POMDPEncoder() if bb in ["lstm", "gru", "rnn"] else MDPEncoder()
+                    )
                 else:  # For 'rba', 'llm'
                     encoder_map[i] = AbsoluteEncoder()
         else:
             # Default to AbsoluteEncoder for all if no configs are provided (e.g., all RBA simulation)
-            encoder_map = {i: AbsoluteEncoder() for i in range(config.game.PLAYER_COUNT)}
+            encoder_map = {
+                i: AbsoluteEncoder() for i in range(config.game.PLAYER_COUNT)
+            }
 
         env = MafiaEnv(encoder_map=encoder_map)
         self._inject_fixed_roles(env)
-        
+
         return env
 
     def build_vec_env(self, num_envs: int = 8, num_cpus: int = 4):
@@ -112,13 +121,14 @@ class ExperimentManager:
                 agent_type = p_cfg.get("type", "rl").lower()
                 if agent_type == "rl":
                     bb = p_cfg.get("backbone", "mlp").lower()
-                    encoder_map[i] = POMDPEncoder() if bb in ["lstm", "gru", "rnn"] else MDPEncoder()
-                else: # For 'rba', 'llm'
+                    encoder_map[i] = (
+                        POMDPEncoder() if bb in ["lstm", "gru", "rnn"] else MDPEncoder()
+                    )
+                else:  # For 'rba', 'llm'
                     encoder_map[i] = AbsoluteEncoder()
         else:
             # Default to MDPEncoder for RL-only parallel training
             encoder_map = {i: MDPEncoder() for i in range(config.game.PLAYER_COUNT)}
-
 
         env = MafiaEnv(encoder_map=encoder_map)
 
