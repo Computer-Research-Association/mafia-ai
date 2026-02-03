@@ -28,7 +28,6 @@ def train(
     - 배치 크기 불일치(Shape Mismatch) 원천 차단
     """
 
-    total_wins = {Role.MAFIA: 0, Role.CITIZEN: 0}
     # 1. 플레이어 수 동적 감지 (하드코딩 방지)
     # env.possible_agents가 있으면 사용, 없으면 config나 rl_agents+all_agents 길이로 추론
     if hasattr(env, "possible_agents"):
@@ -209,38 +208,6 @@ def train(
             finished_rewards = []
 
             for j in finished_indices:
-                p0_check_idx = j * PLAYERS_PER_GAME
-                game_info = {}
-
-                if isinstance(infos, dict):
-                    if "player_0" in infos:
-                        game_info = infos["player_0"][j]
-                else:  # VectorEnv 스타일
-                    game_info = infos[p0_check_idx]
-
-                raw_winner = None
-                if "winner" in game_info:
-                    raw_winner = game_info["winner"]
-                elif "final_info" in game_info:
-                    final = game_info["final_info"]
-                    if isinstance(final, dict) and "winner" in final:
-                        raw_winner = final["winner"]
-
-                if raw_winner is not None:
-                    try:
-                        w_role = None
-                        if isinstance(raw_winner, Role):
-                            w_role = raw_winner
-                        elif isinstance(raw_winner, str):
-                            w_role = Role[raw_winner]
-                        else:
-                            w_role = Role(int(raw_winner))
-
-                        if w_role in total_wins:
-                            total_wins[w_role] += 1
-                    except Exception as e:
-                        print(f"[Warning] Failed to parse winner: {raw_winner} ({e})")
-
                 for pid in range(PLAYERS_PER_GAME):
                     if isinstance(infos, dict):
                         agent_key = f"player_{pid}"
@@ -316,18 +283,11 @@ def train(
         agent = rl_agents[pid]
         save_path = os.path.join(save_dir, f"agent_{pid}_supersuit.pt")
 
-        if agent.role == Role.MAFIA:
-            my_role_wins = total_wins.get(Role.MAFIA, 0)
-        else:
-            my_role_wins = total_wins.get(Role.CITIZEN, 0)
-
-        win_rate = my_role_wins / total_game_count if total_game_count > 0 else 0.0
         if hasattr(agent, "save"):
             # 메타데이터 생성
             metadata = {
                 "total_episodes": total_game_count,
                 "avg_score": final_average_score,
-                "win_rate": win_rate,
                 "training_status": "completed",
             }
 

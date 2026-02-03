@@ -61,16 +61,12 @@ class CheckpointManager:
         """
         timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
-        # [개선 1] 접근 방식(Approach) 자동 감지
-        # IL_COEF가 있고 0보다 크면 모방학습(Supervised) 요소가 섞인 것
         il_coef = train_config.get("IL_COEF", 0.0)
-        approach_type = "reinforcement"  # 기본값은 강화학습
+        approach_type = "reinforcement"
         if il_coef > 0:
-            # RL + IL 하이브리드지만, CycloneDX 열거형에는 reinforcement, supervised 등이 있음
-            # 설명란에 상세히 적고 타입은 주된 알고리즘(RL)을 따르거나 custom으로 표기
+
             approach_type = "reinforcement"
 
-        # [개선 2] 데이터셋(Datasets) 명세
         datasets = [
             {
                 "name": "Self-Play Simulation Logs",
@@ -84,19 +80,14 @@ class CheckpointManager:
                     "name": "Human/Expert Demonstration Data",
                     "type": "dataset",
                     "description": "Used for Imitation Learning (Behavior Cloning)",
-                    "content": {
-                        "url": f"{CheckpointManager.REPO_URL}/tree/main/logs/expert"
-                    },
                 }
             )
 
-        # [개선 3] 성능 지표 (Performance Metrics) 매핑
         performance_metrics = []
         if extra_metadata:
             for k, v in extra_metadata.items():
-                # [수정] 값 포맷팅 로직 추가
                 if isinstance(v, float):
-                    val_str = f"{v:.4f}"  # 소수점 4자리까지만 저장
+                    val_str = f"{v:.4f}"
                 else:
                     val_str = str(v)
 
