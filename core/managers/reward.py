@@ -130,7 +130,7 @@ class RewardManager:
             if event.event_type == EventType.CLAIM and event.actor_id != -1:
                 actor = game.players[event.actor_id]
 
-                is_self_claim = event.targrt_id == -1 or event.target_id == actor.id
+                is_self_claim = event.target_id == -1 or event.target_id == actor.id
 
                 reward_target_role = None
                 lookup_event_type = EventType.CLAIM
