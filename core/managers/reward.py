@@ -11,8 +11,7 @@ WIN_REWARD = 1.0
 LOSS_PENALTY = -1.0
 TIME_PENALTY_UNIT = -0.1
 DECEPTION_MULTIPLIER = 1.5
-# Lambda 값: CLI 인자(--lambda)를 통해 주입된 환경 변수 우선 사용
-REWARD_LAMBDA = float(os.getenv("MAFIA_LAMBDA", 0.5))
+# REWARD_LAMBDA = float(os.getenv("MAFIA_LAMBDA"))
 INT_REWARD_SCALE = 25.0
 ACCUSE_KEY = "ACCUSE"
 CORRECT_KEY = "CORRECT_ACCUSE"
@@ -94,6 +93,7 @@ class RewardManager:
         self.last_claims: Dict[int, Role] = {}
         self.cumulative_intermediate = defaultdict(float)
         self.rewards = defaultdict(float)
+        self.reward_lambda = float(os.getenv("MAFIA_LAMBDA"))
 
     def reset(self):
         """에피소드 초기화 시 호출"""
@@ -154,11 +154,11 @@ class RewardManager:
                     reward_target_role = target_real_role
 
                 if reward_target_role is not None:
-                    base_reward = REWARD_MATRIX[actor.role][lookup_event_type][
+                    reward = REWARD_MATRIX[actor.role][lookup_event_type][
                         reward_target_role
                     ]
-                    if base_reward != 0:
-                        self.cumulative_intermediate[actor.id] += base_reward
+                    if reward != 0:
+                        step_rewards[event.actor_id] += reward
                 continue
 
             # C. 상호작용 보상 누적 (ΣR_int에 합산)
@@ -172,8 +172,13 @@ class RewardManager:
                 if base_reward == 0:
                     continue
 
+                multiplier = 1.0
+                if p.role == Role.MAFIA and base_reward > 0:
+                    if self.last_claims.get(p.id) == Role.POLICE:
+                        multiplier = DECEPTION_MULTIPLIER
+
                 # 보상을 즉시 반환하지 않고 누적 변수에 저장
-                self.cumulative_intermediate[p.id] += base_reward
+                self.cumulative_intermediate[p.id] += base_reward * multiplier
 
         # 3. 최종 공식 적용 (게임이 종료되었을 때만 실행)
         if game_ended:
@@ -189,7 +194,9 @@ class RewardManager:
                 r_int_sum = self.cumulative_intermediate[p.id]
                 r_int_norm = np.tanh(r_int_sum / INT_REWARD_SCALE)
 
-                final_reward = REWARD_LAMBDA * r_int_norm + (1 - REWARD_LAMBDA) * r_win
+                final_reward = (
+                    self.reward_lambda * r_int_norm + (1 - self.reward_lambda) * r_win
+                )
 
                 step_rewards[p.id] = final_reward
 
