@@ -48,7 +48,10 @@ REWARD_MATRIX[_M][EventType.CLAIM][_D] = 1.0
 REWARD_MATRIX[_M][EventType.CLAIM][_C] = 1.0
 
 REWARD_MATRIX[_M][ACCUSE_KEY][_M] = 5.0
+REWARD_MATRIX[_M][CORRECT_KEY][_M] = -5.0
 REWARD_MATRIX[_M][CORRECT_KEY][_P] = -2.0
+REWARD_MATRIX[_M][CORRECT_KEY][_D] = -1.0
+REWARD_MATRIX[_M][CORRECT_KEY][_C] = -0.5
 
 # --- CIVILIAN Team Rewards ---
 REWARD_MATRIX[_P][EventType.CLAIM][_P] = 1.0
@@ -145,7 +148,7 @@ class RewardManager:
 
                     if (
                         isinstance(claimed_role, Role)
-                        and reward_target_role == claimed_role
+                        and target_real_role == claimed_role
                     ):
                         lookup_event_type = CORRECT_KEY
                     else:
@@ -154,31 +157,26 @@ class RewardManager:
                     reward_target_role = target_real_role
 
                 if reward_target_role is not None:
-                    reward = REWARD_MATRIX[actor.role][lookup_event_type][
+                    base_reward = REWARD_MATRIX[actor.role][lookup_event_type][
                         reward_target_role
                     ]
-                    if reward != 0:
-                        step_rewards[event.actor_id] += reward
+                    if base_reward != 0:
+                        self.cumulative_intermediate[actor.id] += base_reward
                 continue
 
             # C. 상호작용 보상 누적 (ΣR_int에 합산)
-            target_role = self._get_target_role(game, event.target_id)
+            else:
+                target_role = self._get_target_role(game, event.target_id)
+                for p in game.players:
+                    if not p.alive:
+                        continue
 
-            for p in game.players:
-                if not p.alive:
-                    continue
+                    base_reward = REWARD_MATRIX[p.role][event.event_type][target_role]
+                    if base_reward == 0:
+                        continue
 
-                base_reward = REWARD_MATRIX[p.role][event.event_type][target_role]
-                if base_reward == 0:
-                    continue
-
-                multiplier = 1.0
-                if p.role == Role.MAFIA and base_reward > 0:
-                    if self.last_claims.get(p.id) == Role.POLICE:
-                        multiplier = DECEPTION_MULTIPLIER
-
-                # 보상을 즉시 반환하지 않고 누적 변수에 저장
-                self.cumulative_intermediate[p.id] += base_reward * multiplier
+                    # 보상을 즉시 반환하지 않고 누적 변수에 저장
+                    self.cumulative_intermediate[p.id] += base_reward
 
         # 3. 최종 공식 적용 (게임이 종료되었을 때만 실행)
         if game_ended:
