@@ -238,3 +238,28 @@ function set_theme(theme) {
     }
 }
 
+const mainBgm = new Audio('/static/sounds/mornig_main_theme.mp3');
+mainBgm.loop = true;
+mainBgm.volume = 0.3;
+
+// 전역에서 접근 가능하도록 window에 등록
+window.playMainBgm = function() {
+    console.log("BGM 재생 시도...");
+    
+    // play()는 Promise를 반환합니다.
+    mainBgm.play().then(() => {
+        console.log("BGM 재생 성공!");
+    }).catch(e => {
+        console.warn("자동 재생 차단됨. 사용자 클릭 대기 중...", e);
+        
+        // 차단되었다면, 사용자가 화면을 한 번이라도 클릭하는 순간 재생되도록 이벤트 등록
+        const enableAudio = () => {
+            mainBgm.play();
+            console.log("사용자 클릭으로 BGM 시작");
+            document.removeEventListener('click', enableAudio);
+            document.removeEventListener('keydown', enableAudio);
+        };
+        document.addEventListener('click', enableAudio);
+        document.addEventListener('keydown', enableAudio);
+    });
+};
