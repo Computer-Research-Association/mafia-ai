@@ -154,11 +154,11 @@ class RewardManager:
                     reward_target_role = target_real_role
 
                 if reward_target_role is not None:
-                    reward = REWARD_MATRIX[actor.role][lookup_event_type][
+                    base_reward = REWARD_MATRIX[actor.role][lookup_event_type][
                         reward_target_role
                     ]
-                    if reward != 0:
-                        step_rewards[event.actor_id] += reward
+                    if base_reward != 0:
+                        self.cumulative_intermediate[actor.id] += base_reward
                 continue
 
             # C. 상호작용 보상 누적 (ΣR_int에 합산)
@@ -172,13 +172,8 @@ class RewardManager:
                 if base_reward == 0:
                     continue
 
-                multiplier = 1.0
-                if p.role == Role.MAFIA and base_reward > 0:
-                    if self.last_claims.get(p.id) == Role.POLICE:
-                        multiplier = DECEPTION_MULTIPLIER
-
                 # 보상을 즉시 반환하지 않고 누적 변수에 저장
-                self.cumulative_intermediate[p.id] += base_reward * multiplier
+                self.cumulative_intermediate[p.id] += base_reward
 
         # 3. 최종 공식 적용 (게임이 종료되었을 때만 실행)
         if game_ended:
