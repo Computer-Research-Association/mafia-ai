@@ -40,3 +40,6 @@ gha-creds-*.json
 
 # NiceGUI files
 /.nicegui
+
+# Sound folder
+sounds/
