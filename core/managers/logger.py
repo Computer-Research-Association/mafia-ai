@@ -31,7 +31,7 @@ class LogManager:
         log_dir: str = "./logs",
         use_tensorboard: bool = True,
         write_mode: bool = True,
-        overwrite: bool = False,
+        log_events: bool = True,
         split_interval: int = 1000,  # [수정] 파일 분할 주기 추가 (기본 1000판)
     ):
         """
@@ -46,6 +46,7 @@ class LogManager:
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self.use_tensorboard = use_tensorboard and write_mode
         self.write_mode = write_mode  # [수정] 멤버 변수로 저장
+        self.log_events = log_events
         self.current_episode = 1
         self.split_interval = split_interval  # [수정] 설정 저장
 
@@ -59,7 +60,8 @@ class LogManager:
             self.session_dir = self.log_dir / f"{experiment_name}_{timestamp}"
             self.session_dir.mkdir(parents=True, exist_ok=True)
 
-            self._open_log_file(1)
+            if self.log_events:
+                self._open_log_file(1)
 
             self.writer = None
             if self.use_tensorboard:
@@ -80,18 +82,9 @@ class LogManager:
         self.logger.propagate = False  # Prevent propagation to root logger
 
         if not self.logger.handlers:
-            # File Handler
-            if self.session_dir:
-                log_file = self.session_dir / "system.log"
-                file_handler = logging.FileHandler(log_file, encoding="utf-8")
-                file_handler.setFormatter(
-                    logging.Formatter("%(asctime)s - %(message)s")
-                )
-                self.logger.addHandler(file_handler)
-
             # Console Handler
             stream_handler = logging.StreamHandler(sys.stdout)
-            stream_handler.setFormatter(logging.Formatter("%(message)s"))
+            stream_handler.setFormatter(logging.Formatter("%(asctime)s - %(message)s"))
             self.logger.addHandler(stream_handler)
 
     def _open_log_file(self, start_episode: int):
@@ -218,7 +211,12 @@ class LogManager:
 
         # [수정] 파일 로테이션 체크
         # 예: interval=1000일 때, 1001, 2001, 3001... 에피소드에서 새 파일 생성
-        if self.write_mode and self.split_interval > 0 and episode > 1:
+        if (
+            self.write_mode
+            and self.log_events
+            and self.split_interval > 0
+            and episode > 1
+        ):
             if (episode - 1) % self.split_interval == 0:
                 self._open_log_file(episode)
 

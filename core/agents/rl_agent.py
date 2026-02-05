@@ -4,6 +4,7 @@ import torch.nn as nn
 import numpy as np
 from typing import List, Optional, Tuple, Dict, Any
 from torch.distributions import Categorical
+from core.managers.checkpoint import CheckpointManager
 
 from core.agents.base_agent import BaseAgent
 from ai.models.actor_critic import DynamicActorCritic
@@ -37,7 +38,7 @@ class RLAgent(BaseAgent):
         state_dim: int,
         action_dims: List[int] = [9, 5],  # [Target, Role]
         algorithm: str = "ppo",
-        backbone: str = "mlp", # Change default to mlp
+        backbone: str = "mlp",  # Change default to mlp
         hidden_dim: int = 128,
         num_layers: int = 2,
     ):
@@ -56,14 +57,18 @@ class RLAgent(BaseAgent):
             hidden_dim=hidden_dim,
             num_layers=num_layers,
         )
-        
+
         # Check recurrence
         is_recurrent = self.backbone in ["lstm", "gru", "rnn"]
 
         if self.algorithm == "ppo":
-            self.learner = PPO(model=self.policy, config=config, is_recurrent=is_recurrent)
+            self.learner = PPO(
+                model=self.policy, config=config, is_recurrent=is_recurrent
+            )
         elif self.algorithm == "reinforce":
-            self.learner = REINFORCE(model=self.policy, config=config, is_recurrent=is_recurrent)
+            self.learner = REINFORCE(
+                model=self.policy, config=config, is_recurrent=is_recurrent
+            )
         else:
             raise ValueError(f"Unknown algorithm: {algorithm}")
 
@@ -130,9 +135,9 @@ class RLAgent(BaseAgent):
         else:
             obs = state
             mask = action_mask
-        
+
         # Check if observation is batched (ndim > 1)
-        if hasattr(obs, 'ndim') and obs.ndim > 1:
+        if hasattr(obs, "ndim") and obs.ndim > 1:
             obs_is_batch = True
         elif isinstance(obs, list) and len(obs) > 0 and isinstance(obs[0], list):
             obs_is_batch = True
@@ -146,7 +151,12 @@ class RLAgent(BaseAgent):
         )
 
         # If input was not batched (single item), unwrap the batch dimension from output
-        if not obs_is_batch and isinstance(action_vector, list) and len(action_vector) == 1 and isinstance(action_vector[0], list):
+        if (
+            not obs_is_batch
+            and isinstance(action_vector, list)
+            and len(action_vector) == 1
+            and isinstance(action_vector[0], list)
+        ):
             return action_vector[0]
 
         return action_vector
@@ -164,45 +174,69 @@ class RLAgent(BaseAgent):
         """학습 수행 - 알고리즘 객체에 위임"""
         return self.learner.update(expert_loader=expert_loader)
 
-    def save(self, filepath: str):
-        """모델의 가중치와 구조 설정을 모두 저장"""
-        torch.save({
-            "policy_state_dict": self.policy.state_dict(),
+    def save(self, filepath: str, extra_metadata: Dict[str, Any] = None):
+        """
+        CheckpointManager에게 저장을 위임
+        """
+        model_spec = {
             "algorithm": self.algorithm,
             "backbone": self.backbone,
             "state_dim": self.state_dim,
             "action_dims": self.action_dims,
-            "hidden_dim": self.policy.hidden_dim,  # 추가
-            "num_layers": self.policy.num_layers,  # 추가
-        }, filepath)
+            "structure": {
+                "hidden_dim": self.policy.hidden_dim,
+                "num_layers": self.policy.num_layers,
+            },
+        }
+
+        state_dict = {
+            "policy_state_dict": self.policy.state_dict(),
+        }
+
+        CheckpointManager.save_checkpoint(
+            filepath=filepath,
+            state_dict=state_dict,
+            model_spec=model_spec,
+            extra_metadata=extra_metadata,
+        )
 
     def load(self, filepath: str):
-        """파일의 설정값에 맞춰 모델을 자동으로 재구성하여 로드"""
-        checkpoint = torch.load(filepath, map_location=torch.device('cpu')) # 장치 문제 해결
-        
-        # 이전 버전 호환성 체크 (키가 없을 경우 기본값 또는 현재 설정 사용)
+        """
+        CheckpointManager를 통해 로드
+        """
+        checkpoint = CheckpointManager.load_checkpoint(filepath)
+
+        # 스펙 복원
+        backbone = checkpoint.get("backbone", self.backbone)
+        state_dim = checkpoint.get("state_dim", self.state_dim)
+        action_dims = checkpoint.get("action_dims", self.action_dims)
         hidden_dim = checkpoint.get("hidden_dim", 128)
         num_layers = checkpoint.get("num_layers", 2)
-        action_dims = checkpoint.get("action_dims", self.action_dims)
-        backbone = checkpoint.get("backbone", self.backbone) # 저장된 backbone이 있으면 사용
-        
-        # 1. 저장된 설정으로 모델(Policy)을 새로 생성하여 구조 일치시킴
+
+        # 모델 재구축
         self.policy = DynamicActorCritic(
-            state_dim=checkpoint["state_dim"],
+            state_dim=state_dim,
             action_dims=action_dims,
             backbone=backbone,
             hidden_dim=hidden_dim,
-            num_layers=num_layers
+            num_layers=num_layers,
         )
-        
-        # 속성 업데이트 (나중에 save할 때 반영되도록)
-        self.backbone = backbone
-        self.action_dims = action_dims
-        
-        # 2. 가중치 로드
         self.policy.load_state_dict(checkpoint["policy_state_dict"])
-        
-        # 3. 알고리즘(PPO 등) 재설정
-        if self.algorithm == "ppo":
+
+        # 상태 동기화
+        self.backbone = backbone
+        self.state_dim = state_dim
+        self.action_dims = action_dims
+
+        # 학습기 갱신
+        if hasattr(self, "learner"):
             self.learner.policy = self.policy
-            self.learner.policy_old.load_state_dict(self.policy.state_dict())
+            if self.algorithm == "ppo" and hasattr(self.learner, "policy_old"):
+                self.learner.policy_old = DynamicActorCritic(
+                    state_dim=state_dim,
+                    action_dims=action_dims,
+                    backbone=backbone,
+                    hidden_dim=hidden_dim,
+                    num_layers=num_layers,
+                )
+                self.learner.policy_old.load_state_dict(self.policy.state_dict())

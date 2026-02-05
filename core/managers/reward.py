@@ -12,8 +12,10 @@ LOSS_PENALTY = -1.0
 TIME_PENALTY_UNIT = -0.1
 DECEPTION_MULTIPLIER = 1.5
 # Lambda 값: CLI 인자(--lambda)를 통해 주입된 환경 변수 우선 사용
-REWARD_LAMBDA = float(os.getenv("MAFIA_LAMBDA", 0.3))
+REWARD_LAMBDA = float(os.getenv("MAFIA_LAMBDA", 0.5))
 INT_REWARD_SCALE = 25.0
+ACCUSE_KEY = "ACCUSE"
+CORRECT_KEY = "CORRECT_ACCUSE"
 
 # === [2. Reward Matrix Setup] ===
 # [내 역할][이벤트 타입][대상 역할] 구조의 3차원 행렬
@@ -21,35 +23,70 @@ REWARD_MATRIX = defaultdict(lambda: defaultdict(lambda: defaultdict(float)))
 
 # --- MAFIA Team Rewards ---
 _M = Role.MAFIA
-REWARD_MATRIX[_M][EventType.EXECUTE][Role.POLICE] = 10.0
-REWARD_MATRIX[_M][EventType.EXECUTE][Role.DOCTOR] = 10.0
-REWARD_MATRIX[_M][EventType.EXECUTE][Role.CITIZEN] = 3.0
-REWARD_MATRIX[_M][EventType.EXECUTE][Role.MAFIA] = -20.0
+_C = Role.CITIZEN
+_D = Role.DOCTOR
+_P = Role.POLICE
 
-REWARD_MATRIX[_M][EventType.KILL][Role.POLICE] = 5.0
-REWARD_MATRIX[_M][EventType.KILL][Role.DOCTOR] = 5.0
-REWARD_MATRIX[_M][EventType.KILL][Role.CITIZEN] = 2.0
-REWARD_MATRIX[_M][EventType.KILL][Role.MAFIA] = -99.0
 
-# --- CITIZEN Team Rewards ---
-CIV_ROLES = [Role.CITIZEN, Role.POLICE, Role.DOCTOR]
+REWARD_MATRIX[_M][EventType.VOTE][_P] = 1.0
+REWARD_MATRIX[_M][EventType.VOTE][_D] = 0.8
+REWARD_MATRIX[_M][EventType.VOTE][_C] = 0.4
+REWARD_MATRIX[_M][EventType.VOTE][_M] = -20.0
+
+REWARD_MATRIX[_M][EventType.EXECUTE][_P] = 10.0
+REWARD_MATRIX[_M][EventType.EXECUTE][_D] = 10.0
+REWARD_MATRIX[_M][EventType.EXECUTE][_C] = 3.0
+REWARD_MATRIX[_M][EventType.EXECUTE][_M] = -20.0
+
+REWARD_MATRIX[_M][EventType.KILL][_P] = 5.0
+REWARD_MATRIX[_M][EventType.KILL][_D] = 5.0
+REWARD_MATRIX[_M][EventType.KILL][_C] = 2.0
+REWARD_MATRIX[_M][EventType.KILL][_M] = -99.0
+
+REWARD_MATRIX[_M][EventType.CLAIM][_M] = -15.0
+REWARD_MATRIX[_M][EventType.CLAIM][_P] = 3.0
+REWARD_MATRIX[_M][EventType.CLAIM][_D] = 1.0
+REWARD_MATRIX[_M][EventType.CLAIM][_C] = 1.0
+
+REWARD_MATRIX[_M][ACCUSE_KEY][_M] = 5.0
+REWARD_MATRIX[_M][CORRECT_KEY][_P] = -2.0
+
+# --- CIVILIAN Team Rewards ---
+REWARD_MATRIX[_P][EventType.CLAIM][_P] = 1.0
+REWARD_MATRIX[_D][EventType.CLAIM][_D] = 1.0
+REWARD_MATRIX[_C][EventType.CLAIM][_C] = 1.0
+
+CIV_ROLES = [_C, _P, _D]
 for r in CIV_ROLES:
+    REWARD_MATRIX[r][EventType.CLAIM][_M] = -15.0
+
+    REWARD_MATRIX[r][ACCUSE_KEY][_M] = -5.0
+    REWARD_MATRIX[r][ACCUSE_KEY][r] = -2.0
+    REWARD_MATRIX[r][CORRECT_KEY][r] = 3.0
+    REWARD_MATRIX[r][CORRECT_KEY][_M] = 5.0
+
+    # 투표 보상/페널티
+    REWARD_MATRIX[r][EventType.VOTE][_M] = 3.0
+    REWARD_MATRIX[r][EventType.VOTE][_C] = -1.0
+    REWARD_MATRIX[r][EventType.VOTE][_P] = -3.0
+    REWARD_MATRIX[r][EventType.VOTE][_D] = -2.0
+
     # 처형 보상/페널티
-    REWARD_MATRIX[r][EventType.EXECUTE][Role.MAFIA] = 10.0
-    REWARD_MATRIX[r][EventType.EXECUTE][Role.CITIZEN] = -5.0
-    REWARD_MATRIX[r][EventType.EXECUTE][Role.POLICE] = -10.0
-    REWARD_MATRIX[r][EventType.EXECUTE][Role.DOCTOR] = -10.0
+    REWARD_MATRIX[r][EventType.EXECUTE][_M] = 10.0
+    REWARD_MATRIX[r][EventType.EXECUTE][_C] = -5.0
+    REWARD_MATRIX[r][EventType.EXECUTE][_P] = -10.0
+    REWARD_MATRIX[r][EventType.EXECUTE][_D] = -10.0
 
     # 사망 페널티 (팀원 손실)
-    REWARD_MATRIX[r][EventType.KILL][Role.CITIZEN] = -1.0
-    REWARD_MATRIX[r][EventType.KILL][Role.POLICE] = -2.0
-    REWARD_MATRIX[r][EventType.KILL][Role.DOCTOR] = -2.0
+    REWARD_MATRIX[r][EventType.KILL][_C] = -1.0
+    REWARD_MATRIX[r][EventType.KILL][_P] = -2.0
+    REWARD_MATRIX[r][EventType.KILL][_D] = -2.0
 
 # --- Role Specific Interactions ---
-REWARD_MATRIX[Role.POLICE][EventType.POLICE_RESULT][Role.MAFIA] = 3.0
-REWARD_MATRIX[Role.POLICE][EventType.POLICE_RESULT][Role.CITIZEN] = 0.5
-REWARD_MATRIX[Role.DOCTOR][EventType.PROTECT][Role.POLICE] = 1.0
-REWARD_MATRIX[Role.DOCTOR][EventType.PROTECT][Role.CITIZEN] = 0.5
+REWARD_MATRIX[_P][EventType.POLICE_RESULT][_M] = 3.0
+REWARD_MATRIX[_P][EventType.POLICE_RESULT][_C] = 0.5
+REWARD_MATRIX[_D][EventType.PROTECT][_P] = 1.0
+REWARD_MATRIX[_D][EventType.PROTECT][_C] = 0.5
 
 
 class RewardManager:
@@ -91,8 +128,37 @@ class RewardManager:
 
             # B. 주장(Claim) 업데이트 (기존 유지)
             if event.event_type == EventType.CLAIM and event.actor_id != -1:
-                if isinstance(event.value, Role):
-                    self.last_claims[event.actor_id] = event.value
+                actor = game.players[event.actor_id]
+
+                is_self_claim = event.target_id == -1 or event.target_id == actor.id
+
+                reward_target_role = None
+                lookup_event_type = EventType.CLAIM
+
+                if is_self_claim:
+                    if isinstance(event.value, Role):
+                        self.last_claims[actor.id] = event.value
+                        reward_target_role = event.value
+                else:
+                    target_real_role = self._get_target_role(game, event.target_id)
+                    claimed_role = event.value
+
+                    if (
+                        isinstance(claimed_role, Role)
+                        and reward_target_role == claimed_role
+                    ):
+                        lookup_event_type = CORRECT_KEY
+                    else:
+                        lookup_event_type = ACCUSE_KEY
+
+                    reward_target_role = target_real_role
+
+                if reward_target_role is not None:
+                    base_reward = REWARD_MATRIX[actor.role][lookup_event_type][
+                        reward_target_role
+                    ]
+                    if base_reward != 0:
+                        self.cumulative_intermediate[actor.id] += base_reward
                 continue
 
             # C. 상호작용 보상 누적 (ΣR_int에 합산)
@@ -106,13 +172,8 @@ class RewardManager:
                 if base_reward == 0:
                     continue
 
-                multiplier = 1.0
-                if p.role == Role.MAFIA and base_reward > 0:
-                    if self.last_claims.get(p.id) == Role.POLICE:
-                        multiplier = DECEPTION_MULTIPLIER
-
                 # 보상을 즉시 반환하지 않고 누적 변수에 저장
-                self.cumulative_intermediate[p.id] += base_reward * multiplier
+                self.cumulative_intermediate[p.id] += base_reward
 
         # 3. 최종 공식 적용 (게임이 종료되었을 때만 실행)
         if game_ended:
