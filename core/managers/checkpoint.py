@@ -225,7 +225,9 @@ class CheckpointManager:
         if not os.path.exists(filepath):
             raise FileNotFoundError(f"Checkpoint not found: {filepath}")
 
-        checkpoint = torch.load(filepath, map_location=torch.device("cpu"))
+        # Load to configured device (GPU or CPU)
+        device = torch.device(config.train.DEVICE)
+        checkpoint = torch.load(filepath, map_location=device)
 
         if "bom_uuid" in checkpoint:
             fmt = checkpoint.get("bom_format", "Unknown")

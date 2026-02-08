@@ -63,6 +63,7 @@ class GameSettings(BaseSettings):
 
 
 class TrainSettings(BaseSettings):
+    DEVICE: str = "cuda"  # Set to "cuda" for GPU or "cpu" for CPU
     LR: float = 0.0001
     GAMMA: float = 0.99
     EPS_CLIP: float = 0.2

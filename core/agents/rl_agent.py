@@ -58,6 +58,10 @@ class RLAgent(BaseAgent):
             num_layers=num_layers,
         )
 
+        # Move model to configured device (GPU or CPU)
+        device = torch.device(config.train.DEVICE)
+        self.policy = self.policy.to(device)
+
         # Check recurrence
         is_recurrent = self.backbone in ["lstm", "gru", "rnn"]
 
@@ -222,6 +226,10 @@ class RLAgent(BaseAgent):
             num_layers=num_layers,
         )
         self.policy.load_state_dict(checkpoint["policy_state_dict"])
+        
+        # Move loaded model to configured device
+        device = torch.device(config.train.DEVICE)
+        self.policy = self.policy.to(device)
 
         # 상태 동기화
         self.backbone = backbone
@@ -240,3 +248,5 @@ class RLAgent(BaseAgent):
                     num_layers=num_layers,
                 )
                 self.learner.policy_old.load_state_dict(self.policy.state_dict())
+                # Move policy_old to device as well
+                self.learner.policy_old = self.learner.policy_old.to(device)
