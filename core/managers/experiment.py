@@ -134,18 +134,21 @@ class ExperimentManager:
 
         self._inject_fixed_roles(env)
 
+        # [Patch] SuperSuit compatibility: Pre-fetch single agent spaces
+        # We must get these from the ParallelEnv (MafiaEnv) BEFORE wrapping it,
+        # because the wrapper (MarkovVectorEnv) hides the original attributes.
+        agent_0 = env.possible_agents[0]
+        single_obs = env.observation_spaces[agent_0]
+        single_act = env.action_spaces[agent_0]
+
         # 2. PettingZoo -> Gymnasium 변환
         env = ss.pettingzoo_env_to_vec_env_v1(env)
 
-        # [Patch] SuperSuit compatibility: Force set space attributes
+        # [Patch] Force set space attributes on the wrapper
         # This addresses "MakeCPUAsyncConstructor missing required positional arguments"
-        # We explicitly provide the single agent's space to satisfy the constructor's expectations.
-        single_obs = env.unwrapped.observation_spaces[env.possible_agents[0]]
-        single_act = env.unwrapped.action_spaces[env.possible_agents[0]]
-        
         env.single_observation_space = single_obs
         env.single_action_space = single_act
-        env.observation_space = single_obs  # Concat might inspect this for the prototype
+        env.observation_space = single_obs
         env.action_space = single_act
 
         # 3. 병렬 연결
