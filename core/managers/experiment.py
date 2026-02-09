@@ -134,31 +134,14 @@ class ExperimentManager:
 
         self._inject_fixed_roles(env)
 
-        # 2. 병렬 환경 생성 (Gymnasium AsyncVectorEnv 직접 사용)
-        # SuperSuit의 concat_vec_envs_v1은 MakeCPUAsyncConstructor 에러 발생
-        # Gymnasium의 VectorEnv를 직접 사용하면 더 안정적
-        
-        def make_env_fn():
-            """병렬 프로세스용 환경 생성 함수"""
-            from core.envs.mafia_env import MafiaEnv
-            parallel_env = MafiaEnv(encoder_map=encoder_map)
-            # 고정 역할 주입 로직 복제
-            if self.player_configs:
-                for i, p_config in enumerate(self.player_configs):
-                    role_str = p_config.get("role", "random").upper()
-                    if role_str != "RANDOM" and role_str in Role.__members__:
-                        role_enum = Role[role_str]
-                        if i < len(parallel_env.game.players):
-                            parallel_env.game.players[i].fixed_role = role_enum
-            return ss.pettingzoo_env_to_vec_env_v1(parallel_env)
-        
-        # 3. AsyncVectorEnv 또는 SyncVectorEnv로 병렬화
-        from gymnasium.vector import AsyncVectorEnv, SyncVectorEnv
+        # 2. PettingZoo -> Gymnasium 변환
+        env = ss.pettingzoo_env_to_vec_env_v1(env)
+
+        # 3. 병렬 연결
         try:
-            if num_cpus > 0:
-                vec_env = AsyncVectorEnv([make_env_fn for _ in range(num_envs)])
-            else:
-                vec_env = SyncVectorEnv([make_env_fn for _ in range(num_envs)])
+            vec_env = ss.concat_vec_envs_v1(
+                env, num_vec_envs=num_envs, num_cpus=num_cpus, base_class="gymnasium"
+            )
         except Exception as e:
             print(f"[Error] Parallel creation failed: {e}")
             print("[System] Switching to single process mode (Safe Mode)")

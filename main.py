@@ -3,8 +3,16 @@ import os
 import threading
 import argparse
 import glob
+import multiprocessing
 from pathlib import Path
 from typing import List, Dict, Any
+
+# CUDA + multiprocessing 충돌 방지: spawn 모드 설정 필수
+# fork 방식은 CUDA 컨텍스트를 복사하면서 에러 발생
+try:
+    multiprocessing.set_start_method('spawn', force=True)
+except RuntimeError:
+    pass  # 이미 설정된 경우 무시
 
 from PyQt6.QtWidgets import QApplication
 from core.managers.runner import train, test
