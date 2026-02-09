@@ -134,24 +134,10 @@ class ExperimentManager:
 
         self._inject_fixed_roles(env)
 
-        # [Patch] SuperSuit compatibility: Pre-fetch single agent spaces
-        # We must get these from the ParallelEnv (MafiaEnv) BEFORE wrapping it,
-        # because the wrapper (MarkovVectorEnv) hides the original attributes.
-        agent_0 = env.possible_agents[0]
-        single_obs = env.observation_spaces[agent_0]
-        single_act = env.action_spaces[agent_0]
-
-        # 2. PettingZoo -> Gymnasium 변환
-        env = ss.pettingzoo_env_to_vec_env_v1(env)
-
-        # [Patch] Force set space attributes on the wrapper
-        # This addresses "MakeCPUAsyncConstructor missing required positional arguments"
-        env.single_observation_space = single_obs
-        env.single_action_space = single_act
-        env.observation_space = single_obs
-        env.action_space = single_act
-
-        # 3. 병렬 연결
+        # 2. 병렬 환경 생성 (SuperSuit concat을 직접 사용)
+        # concat_vec_envs_v1은 PettingZoo ParallelEnv를 직접 받을 수 있음
+        # pettingzoo_env_to_vec_env_v1을 거치지 않고 바로 벡터화하면
+        # MakeCPUAsyncConstructor 에러를 피할 수 있음
         try:
             vec_env = ss.concat_vec_envs_v1(
                 env, num_vec_envs=num_envs, num_cpus=num_cpus, base_class="gymnasium"
