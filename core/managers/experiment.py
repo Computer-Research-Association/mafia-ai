@@ -7,6 +7,24 @@ import torch
 from typing import Dict, Any, List
 from pathlib import Path
 
+# SuperSuit 3.10.0 버그 수정: vec_env_args가 obs_space, act_space를 반환하지 않는 문제
+# https://github.com/Farama-Foundation/SuperSuit/issues/XXX  
+def _fixed_vec_env_args(env, num_envs):
+    """SuperSuit 3.10.0의 vec_env_args 버그 수정 버전"""
+    import cloudpickle
+    
+    def env_fn():
+        env_copy = cloudpickle.loads(cloudpickle.dumps(env))
+        return env_copy
+    
+    # 원본은 ([env_fn] * num_envs,)만 반환하지만,
+    # MakeCPUAsyncConstructor는 (env_fn_list, obs_space, act_space) 3개 인자 필요
+    return [env_fn] * num_envs, env.observation_space, env.action_space
+
+# Monkey patch 적용
+import supersuit.vector.vector_constructors as vec_constructors
+vec_constructors.vec_env_args = _fixed_vec_env_args
+
 
 # [중요] 클래스 밖으로 뺀 함수
 # 이 함수는 "로그 파일(logger)" 없이 순수한 게임 환경만 만듭니다.
