@@ -33,6 +33,7 @@ class PPO:
             hidden_dim=model.hidden_dim,
             num_layers=model.num_layers,
         )
+        self.policy_old.to(next(self.policy.parameters()).device)
         self.policy_old.load_state_dict(self.policy.state_dict())
 
         self.MseLoss = nn.MSELoss()
