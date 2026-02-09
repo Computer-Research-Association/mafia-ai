@@ -428,6 +428,15 @@ class MafiaEnv(ParallelEnv):
     def action_space(self, agent):
         return self.action_spaces[agent]
 
+    # SuperSuit compatibility: Expose single agent observation/action space
+    @property
+    def observation_space(self):
+        return self.observation_spaces[self.agents[0]]
+
+    @property
+    def action_space(self):
+        return self.action_spaces[self.agents[0]]
+
     def get_game_status(self, agent_id):
         """
         특정 에이전트 시점의 게임 상태를 반환합니다.
