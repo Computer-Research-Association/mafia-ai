@@ -137,10 +137,10 @@ class ExperimentManager:
         # 2. PettingZoo -> Gymnasium 변환
         env = ss.pettingzoo_env_to_vec_env_v1(env)
 
-        # 3. 병렬 연결 (black_death=False로 env 재생성 방지)
+        # 3. 병렬 연결
         try:
             vec_env = ss.concat_vec_envs_v1(
-                env, num_vec_envs=num_envs, num_cpus=num_cpus, base_class="gymnasium", black_death=False
+                env, num_vec_envs=num_envs, num_cpus=num_cpus, base_class="gymnasium"
             )
         except Exception as e:
             print(f"[Error] Parallel creation failed: {e}")
