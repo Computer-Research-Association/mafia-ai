@@ -9,15 +9,13 @@ import numpy as np
 # === [1. Reward Parameters] ===
 WIN_REWARD = 1.0
 LOSS_PENALTY = -1.0
-TIME_PENALTY_UNIT = -0.1
-DECEPTION_MULTIPLIER = 1.5
-# REWARD_LAMBDA = float(os.getenv("MAFIA_LAMBDA"))
+# INT_REWARD_SCALE: 즉각 보상을 스케일링하기 위한 상수
 INT_REWARD_SCALE = 25.0
-ACCUSE_KEY = "ACCUSE"
 CORRECT_KEY = "CORRECT_ACCUSE"
 
 # === [2. Reward Matrix Setup] ===
 # [내 역할][이벤트 타입][대상 역할] 구조의 3차원 행렬
+# 핵심 이벤트만 유지: EXECUTE, KILL, CORRECT_KEY
 REWARD_MATRIX = defaultdict(lambda: defaultdict(lambda: defaultdict(float)))
 
 # --- MAFIA Team Rewards ---
@@ -26,65 +24,44 @@ _C = Role.CITIZEN
 _D = Role.DOCTOR
 _P = Role.POLICE
 
-
-REWARD_MATRIX[_M][EventType.VOTE][_P] = 1.0
-REWARD_MATRIX[_M][EventType.VOTE][_D] = 0.8
-REWARD_MATRIX[_M][EventType.VOTE][_C] = 0.4
-REWARD_MATRIX[_M][EventType.VOTE][_M] = -20.0
-
+# EXECUTE: 처형 결과에 대한 보상
 REWARD_MATRIX[_M][EventType.EXECUTE][_P] = 10.0
 REWARD_MATRIX[_M][EventType.EXECUTE][_D] = 10.0
 REWARD_MATRIX[_M][EventType.EXECUTE][_C] = 3.0
 REWARD_MATRIX[_M][EventType.EXECUTE][_M] = -20.0
 
+# KILL: 마피아의 살해 행동
 REWARD_MATRIX[_M][EventType.KILL][_P] = 5.0
 REWARD_MATRIX[_M][EventType.KILL][_D] = 5.0
 REWARD_MATRIX[_M][EventType.KILL][_C] = 2.0
 REWARD_MATRIX[_M][EventType.KILL][_M] = -99.0
 
-REWARD_MATRIX[_M][EventType.CLAIM][_M] = -15.0
-REWARD_MATRIX[_M][EventType.CLAIM][_P] = 3.0
-REWARD_MATRIX[_M][EventType.CLAIM][_D] = 1.0
-REWARD_MATRIX[_M][EventType.CLAIM][_C] = 1.0
-
-REWARD_MATRIX[_M][ACCUSE_KEY][_M] = 5.0
+# CORRECT_KEY: 정확한 지목 (추론 능력)
 REWARD_MATRIX[_M][CORRECT_KEY][_M] = -5.0
 REWARD_MATRIX[_M][CORRECT_KEY][_P] = -2.0
 REWARD_MATRIX[_M][CORRECT_KEY][_D] = -1.0
 REWARD_MATRIX[_M][CORRECT_KEY][_C] = -0.5
 
 # --- CIVILIAN Team Rewards ---
-REWARD_MATRIX[_P][EventType.CLAIM][_P] = 1.0
-REWARD_MATRIX[_D][EventType.CLAIM][_D] = 1.0
-REWARD_MATRIX[_C][EventType.CLAIM][_C] = 1.0
-
 CIV_ROLES = [_C, _P, _D]
 for r in CIV_ROLES:
-    REWARD_MATRIX[r][EventType.CLAIM][_M] = -15.0
-
-    REWARD_MATRIX[r][ACCUSE_KEY][_M] = -5.0
-    REWARD_MATRIX[r][ACCUSE_KEY][r] = -2.0
+    # CORRECT_KEY: 정확한 지목 보상
     REWARD_MATRIX[r][CORRECT_KEY][r] = 3.0
     REWARD_MATRIX[r][CORRECT_KEY][_M] = 5.0
 
-    # 투표 보상/페널티
-    REWARD_MATRIX[r][EventType.VOTE][_M] = 3.0
-    REWARD_MATRIX[r][EventType.VOTE][_C] = -1.0
-    REWARD_MATRIX[r][EventType.VOTE][_P] = -3.0
-    REWARD_MATRIX[r][EventType.VOTE][_D] = -2.0
-
-    # 처형 보상/페널티
+    # EXECUTE: 처형 보상/페널티
     REWARD_MATRIX[r][EventType.EXECUTE][_M] = 10.0
     REWARD_MATRIX[r][EventType.EXECUTE][_C] = -5.0
     REWARD_MATRIX[r][EventType.EXECUTE][_P] = -10.0
     REWARD_MATRIX[r][EventType.EXECUTE][_D] = -10.0
 
-    # 사망 페널티 (팀원 손실)
+    # KILL: 사망 페널티 (팀원 손실)
     REWARD_MATRIX[r][EventType.KILL][_C] = -1.0
     REWARD_MATRIX[r][EventType.KILL][_P] = -2.0
     REWARD_MATRIX[r][EventType.KILL][_D] = -2.0
 
 # --- Role Specific Interactions ---
+# 역할 특화 보상: 역할별 학습에 중요한 신호
 REWARD_MATRIX[_P][EventType.POLICE_RESULT][_M] = 3.0
 REWARD_MATRIX[_P][EventType.POLICE_RESULT][_C] = 0.5
 REWARD_MATRIX[_D][EventType.PROTECT][_P] = 1.0
@@ -94,8 +71,6 @@ REWARD_MATRIX[_D][EventType.PROTECT][_C] = 0.5
 class RewardManager:
     def __init__(self):
         self.last_claims: Dict[int, Role] = {}
-        self.cumulative_intermediate = defaultdict(float)
-        self.rewards = defaultdict(float)
         self.reward_lambda = float(os.getenv("MAFIA_LAMBDA"))
 
     def reset(self):
@@ -104,22 +79,16 @@ class RewardManager:
 
     def calculate(self, game, start_idx: int = 0) -> Dict[int, float]:
         """
-        게임 히스토리를 분석하여 중간 보상을 누적하고,
-        게임 종료 시점에 최종 정규화된 보상을 계산합니다.
+        게임 히스토리를 분석하여 매 스텝 즉각적인 보상을 반환합니다.
+        
+        중간 보상: λ * (base_reward / INT_REWARD_SCALE) 형태로 즉시 반환
+        게임 종료 시: (1 - λ) * R_win 형태로 승리/패배 보상 추가
         """
-        # 이번 호출에서 반환할 보상 (최종 계산 전까지는 0)
         step_rewards = defaultdict(float)
         game_ended = False
         citizen_win = False
 
-        # 1. 중간 보상 누적 (시간 페널티)
-        # 생존자 대상 시간 페널티를 중간 보상 합계(ΣR_int)에 누적
-        daily_penalty = TIME_PENALTY_UNIT * game.day
-        for p in game.players:
-            if p.alive:
-                self.cumulative_intermediate[p.id] += daily_penalty
-
-        # 2. 히스토리 기반 이벤트 분석
+        # 히스토리 기반 이벤트 분석
         new_events = game.history[start_idx:]
 
         for event in new_events:
@@ -129,20 +98,20 @@ class RewardManager:
                 citizen_win = event.value
                 continue
 
-            # B. 주장(Claim) 업데이트 (기존 유지)
+            # B. 주장(Claim) 업데이트 - CORRECT_KEY 보상을 위해 유지
             if event.event_type == EventType.CLAIM and event.actor_id != -1:
                 actor = game.players[event.actor_id]
-
                 is_self_claim = event.target_id == -1 or event.target_id == actor.id
 
                 reward_target_role = None
-                lookup_event_type = EventType.CLAIM
+                lookup_event_type = None
 
                 if is_self_claim:
+                    # 자기 역할 주장은 보상 없음 (단순히 기록만)
                     if isinstance(event.value, Role):
                         self.last_claims[actor.id] = event.value
-                        reward_target_role = event.value
                 else:
+                    # 타인 지목: 정확한지 확인
                     target_real_role = self._get_target_role(game, event.target_id)
                     claimed_role = event.value
 
@@ -151,52 +120,48 @@ class RewardManager:
                         and target_real_role == claimed_role
                     ):
                         lookup_event_type = CORRECT_KEY
-                    else:
-                        lookup_event_type = ACCUSE_KEY
+                        reward_target_role = target_real_role
 
-                    reward_target_role = target_real_role
-
-                if reward_target_role is not None:
+                # 즉각 보상 반환
+                if reward_target_role is not None and lookup_event_type is not None:
                     base_reward = REWARD_MATRIX[actor.role][lookup_event_type][
                         reward_target_role
                     ]
                     if base_reward != 0:
-                        self.cumulative_intermediate[actor.id] += base_reward
+                        # 람다 가중치를 적용하여 스케일링 후 즉시 반환
+                        step_rewards[actor.id] += self.reward_lambda * (base_reward / INT_REWARD_SCALE)
                 continue
 
-            # C. 상호작용 보상 누적 (ΣR_int에 합산)
-            else:
-                target_role = self._get_target_role(game, event.target_id)
-                for p in game.players:
-                    if not p.alive:
-                        continue
+            # C. 상호작용 보상 즉시 반환 (EXECUTE, KILL만 처리)
+            target_role = self._get_target_role(game, event.target_id)
+            if target_role is None:
+                continue
 
-                    base_reward = REWARD_MATRIX[p.role][event.event_type][target_role]
-                    if base_reward == 0:
-                        continue
+            for p in game.players:
+                if not p.alive:
+                    continue
 
-                    # 보상을 즉시 반환하지 않고 누적 변수에 저장
-                    self.cumulative_intermediate[p.id] += base_reward
+                base_reward = REWARD_MATRIX[p.role][event.event_type][target_role]
+                if base_reward == 0:
+                    continue
 
-        # 3. 최종 공식 적용 (게임이 종료되었을 때만 실행)
+                # 람다 가중치를 적용하여 스케일링 후 즉시 반환
+                step_rewards[p.id] += self.reward_lambda * (base_reward / INT_REWARD_SCALE)
+
+        # D. 게임 종료 시 승리/패배 보상 추가
         if game_ended:
             for p in game.players:
-                # 3-1. 승패 보상 결정 (R_win)
+                # 승패 보상 결정 (R_win)
                 is_citizen_team = p.role != Role.MAFIA
                 if citizen_win:
                     r_win = WIN_REWARD if is_citizen_team else LOSS_PENALTY
                 else:
                     r_win = WIN_REWARD if not is_citizen_team else LOSS_PENALTY
 
-                # 3-2. 공식 적용: R = λ * tanh(ΣR_int / k_int) + (1-λ) * R_win
-                r_int_sum = self.cumulative_intermediate[p.id]
-                r_int_norm = np.tanh(r_int_sum / INT_REWARD_SCALE)
-
-                final_reward = (
-                    self.reward_lambda * r_int_norm + (1 - self.reward_lambda) * r_win
-                )
-
-                step_rewards[p.id] = final_reward
+                # 최종 보상: (1-λ) * R_win
+                # 중간보상은 이미 매 스텝 지급되었으므로 승리보상만 추가
+                final_reward = (1 - self.reward_lambda) * r_win
+                step_rewards[p.id] += final_reward
 
         return dict(step_rewards)
 
