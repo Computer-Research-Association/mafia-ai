@@ -134,13 +134,13 @@ class ExperimentManager:
 
         self._inject_fixed_roles(env)
 
-        # 2. 병렬 환경 생성 (SuperSuit concat을 직접 사용)
-        # concat_vec_envs_v1은 PettingZoo ParallelEnv를 직접 받을 수 있음
-        # pettingzoo_env_to_vec_env_v1을 거치지 않고 바로 벡터화하면
-        # MakeCPUAsyncConstructor 에러를 피할 수 있음
+        # 2. PettingZoo -> Gymnasium 변환
+        env = ss.pettingzoo_env_to_vec_env_v1(env)
+
+        # 3. 병렬 연결 (black_death=False로 env 재생성 방지)
         try:
             vec_env = ss.concat_vec_envs_v1(
-                env, num_vec_envs=num_envs, num_cpus=num_cpus, base_class="gymnasium"
+                env, num_vec_envs=num_envs, num_cpus=num_cpus, base_class="gymnasium", black_death=False
             )
         except Exception as e:
             print(f"[Error] Parallel creation failed: {e}")
