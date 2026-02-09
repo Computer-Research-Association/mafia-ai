@@ -137,12 +137,16 @@ class ExperimentManager:
         # 2. PettingZoo -> Gymnasium 변환
         env = ss.pettingzoo_env_to_vec_env_v1(env)
 
-        # [Patch] SuperSuit compatibility: Ensure single observation/action space attributes exist
-        # This fixes "missing positional arguments: 'obs_space' and 'act_space'" in MakeCPUAsyncConstructor
-        if not hasattr(env, "observation_space"):
-            env.observation_space = env.unwrapped.observation_spaces[env.possible_agents[0]]
-        if not hasattr(env, "action_space"):
-            env.action_space = env.unwrapped.action_spaces[env.possible_agents[0]]
+        # [Patch] SuperSuit compatibility: Force set space attributes
+        # This addresses "MakeCPUAsyncConstructor missing required positional arguments"
+        # We explicitly provide the single agent's space to satisfy the constructor's expectations.
+        single_obs = env.unwrapped.observation_spaces[env.possible_agents[0]]
+        single_act = env.unwrapped.action_spaces[env.possible_agents[0]]
+        
+        env.single_observation_space = single_obs
+        env.single_action_space = single_act
+        env.observation_space = single_obs  # Concat might inspect this for the prototype
+        env.action_space = single_act
 
         # 3. 병렬 연결
         try:
