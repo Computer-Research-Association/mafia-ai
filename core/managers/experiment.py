@@ -134,13 +134,17 @@ class ExperimentManager:
 
         self._inject_fixed_roles(env)
 
-        # 2. PettingZoo -> Gymnasium 변환
-        env = ss.pettingzoo_env_to_vec_env_v1(env)
+        # 2. 병렬 환경 생성을 위한 env 생성 함수 정의
+        # concat_vec_envs_v1은 env 인스턴스가 아니라 env를 만드는 함수를 받음
+        def make_parallel_env():
+            parallel_env = MafiaEnv(encoder_map=encoder_map)
+            self._inject_fixed_roles(parallel_env)
+            return ss.pettingzoo_env_to_vec_env_v1(parallel_env)
 
-        # 3. 병렬 연결 (num_cpus=0으로 단일 프로세스 모드 사용)
+        # 3. 병렬 연결 (env 생성 함수 전달)
         try:
             vec_env = ss.concat_vec_envs_v1(
-                env, num_vec_envs=num_envs, num_cpus=0, base_class="gymnasium"
+                make_parallel_env, num_vec_envs=num_envs, num_cpus=num_cpus, base_class="gymnasium"
             )
         except Exception as e:
             print(f"[Error] Parallel creation failed: {e}")
