@@ -34,6 +34,7 @@ class PPO:
             num_layers=model.num_layers,
         )
         self.policy_old.load_state_dict(self.policy.state_dict())
+        self.policy_old.to(next(self.policy.parameters()).device)
 
         self.MseLoss = nn.MSELoss()
 
