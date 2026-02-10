@@ -264,11 +264,9 @@ class PPO:
         if masks:
             b_masks = torch.cat(masks).to(device)
 
-        # Normalize advantages
-        if b_advantages.numel() > 1:
-            b_advantages = (b_advantages - b_advantages.mean()) / (
-                b_advantages.std() + 1e-7
-            )
+        # Clip advantages (preserve lambda effect)
+        # Normalization removed to maintain reward scale differences across lambda values
+        b_advantages = torch.clamp(b_advantages, -10.0, 10.0)
 
         total_loss = 0
         total_entropy = 0
@@ -357,16 +355,12 @@ class PPO:
     ):
         device = next(self.policy.parameters()).device
 
-        # 1. Global Advantage Normalization
+        # 1. Global Advantage Clipping (preserve lambda effect)
         # Move all advantages to device for calculation
         advantages = [adv.to(device) for adv in advantages]
-        all_advantages = torch.cat(advantages)
-
-        if all_advantages.numel() > 1:
-            adv_mean = all_advantages.mean()
-            adv_std = all_advantages.std() + 1e-7
-            # Normalize list elements
-            advantages = [(adv - adv_mean) / adv_std for adv in advantages]
+        
+        # Clip instead of normalize to preserve reward scale differences
+        advantages = [torch.clamp(adv, -10.0, 10.0) for adv in advantages]
 
         total_loss = 0
         total_entropy = 0
