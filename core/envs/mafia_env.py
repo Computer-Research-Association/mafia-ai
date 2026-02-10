@@ -419,9 +419,6 @@ class MafiaEnv(ParallelEnv):
         alive_indices = [p.id for p in status.players if p.alive]
         print(f"[Day {self.game.day}] {phase_str} | Alive: {alive_indices}")
 
-    def close(self):
-        pass
-
     def observation_space(self, agent):
         return self.observation_spaces[agent]
 

@@ -10,7 +10,9 @@ import numpy as np
 WIN_REWARD = 1.0
 LOSS_PENALTY = -1.0
 # INT_REWARD_SCALE: 즉각 보상을 스케일링하기 위한 상수
-INT_REWARD_SCALE = 25.0
+# 게임당 평균 10~15개 이벤트를 고려하여 중간/최종 보상 균형
+# 람다 0.5 기준: 개별 이벤트 0.5, 누적 후 최종 보상과 비슷한 스케일
+INT_REWARD_SCALE = 10.0
 CORRECT_KEY = "CORRECT_ACCUSE"
 
 # === [2. Reward Matrix Setup] ===

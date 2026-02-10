@@ -41,3 +41,6 @@ gha-creds-*.json
 
 # NiceGUI files
 /.nicegui
+
+# Agent custom rules (workspace-specific)
+/.agent
