@@ -884,8 +884,9 @@ print(corr_df.to_string(index=False))
 
 
 def calculate_diversity(items):
-    """리스트 요소들의 섀넌 엔트로피 계산"""
+    """리스트나 시리즈를 받아 섀넌 엔트로피(다양성) 계산"""
     cleaned = []
+    # 데이터가 리스트의 리스트 형태(Speech)인 경우와 단일 값(Vote/Night)인 경우 모두 처리
     if isinstance(items, (list, pd.Series)):
         for x in items:
             if isinstance(x, list):
@@ -903,114 +904,138 @@ def calculate_diversity(items):
 
 
 # -----------------------------------------------------------------------------
-# 2. 데이터 가공 (Long Format 변환)
+# 2. 데이터 가공 (배치별 Total Entropy 계산)
 # -----------------------------------------------------------------------------
-print("데이터 구조 변환 중 (Wide -> Long)...")
+print("데이터 집계 중 (Calculating Total Entropy per Batch)...")
 
+# 그룹화 (시나리오, 람다, 배치ID 기준)
 df = df.sort_values(by=["Scenario", "Lambda", "Batch_ID"])
 grouped = df.groupby(["Scenario", "Lambda", "Batch_ID"])
 
-long_data = []
+batch_data = []
 
 for (scen, lam, bid), group in grouped:
-    if len(group) < 20:
+    # 데이터가 너무 적은 배치는 제외 (노이즈 방지)
+    if len(group) < 10:
         continue
 
+    # A. 승률 계산
     win_rate = group["Win_Value"].mean()
 
-    # 3가지 행동에 대해 각각 엔트로피 계산 후 데이터 추가
-    actions = {"Speech": "Self_Claim", "Vote": "Vote_Target", "Night": "Night_Target"}
+    # B. 행동별 엔트로피 계산
+    # 1. Speech (리스트 내부 요소까지 풀어서 계산)
+    ent_speech = (
+        calculate_diversity(group["Self_Claim"]) if "Self_Claim" in group else 0
+    )
 
-    for action_label, col_name in actions.items():
-        if col_name in group.columns:
-            ent = calculate_diversity(group[col_name])
-            long_data.append(
-                {
-                    "Scenario": scen,
-                    "Lambda": lam,
-                    "Win_Rate": win_rate,
-                    "Entropy": ent,
-                    "Action_Type": action_label,  # 색상 구분을 위한 라벨
-                }
-            )
+    # 2. Vote (Target ID 분포)
+    ent_vote = (
+        calculate_diversity(group["Vote_Target"]) if "Vote_Target" in group else 0
+    )
 
-melted_df = pd.DataFrame(long_data)
+    # 3. Night Action (Target ID 분포)
+    ent_night = (
+        calculate_diversity(group["Night_Target"]) if "Night_Target" in group else 0
+    )
+
+    # C. 엔트로피 합산 (Total Strategy Diversity)
+    total_entropy = ent_speech + ent_vote + ent_night
+
+    batch_data.append(
+        {
+            "Scenario": scen,
+            "Lambda": lam,
+            "Batch_ID": bid,
+            "Win_Rate": win_rate,
+            "Total_Entropy": total_entropy,
+            "Ent_Speech": ent_speech,  # 나중에 분석 필요할까봐 남겨둠
+            "Ent_Vote": ent_vote,
+            "Ent_Night": ent_night,
+        }
+    )
+
+plot_df = pd.DataFrame(batch_data)
 
 # -----------------------------------------------------------------------------
-# 3. 시각화 (Action 통합 그래프)
+# 3. 시각화 (Scatter Plot with Lambda Hue)
 # -----------------------------------------------------------------------------
 sns.set_theme(style="whitegrid")
-scenarios = sorted(melted_df["Scenario"].unique())
+scenarios = sorted(plot_df["Scenario"].unique())
 
-# 2x2 레이아웃
+# 레이아웃 설정
 n_cols = 2
 n_rows = (len(scenarios) + 1) // 2
-fig, axes = plt.subplots(n_rows, n_cols, figsize=(16, 7 * n_rows))
+fig, axes = plt.subplots(n_rows, n_cols, figsize=(16, 6 * n_rows))
 axes = axes.flatten()
-
-# 행동별 색상 지정 (가독성: Speech=빨강, Vote=파랑, Night=초록)
-action_palette = {"Speech": "#e74c3c", "Vote": "#3498db", "Night": "#2ecc71"}
 
 for i, scenario in enumerate(scenarios):
     ax = axes[i]
-    subset = melted_df[melted_df["Scenario"] == scenario]
+    subset = plot_df[
+        plot_df["Scenario"] == scenario
+    ].copy()  # 원본 보호를 위해 복사본 생성
 
-    if len(subset) < 2:
-        ax.text(0.5, 0.5, "Not enough data", ha="center")
+    if subset.empty:
+        ax.text(0.5, 0.5, "No Data", ha="center")
         continue
 
+    # [추가된 부분] Y축(승률)에 아주 미세한 노이즈 추가 (Jittering)
+    # 0.01 정도의 표준편차를 가진 노이즈를 더해서 점들을 살짝 위아래로 흩뿌림
+    jitter_strength = 0.01
+    noise = np.random.normal(0, jitter_strength, size=len(subset))
+    subset["Win_Rate_Jittered"] = subset["Win_Rate"] + noise
+
     # -------------------------------------------------------
-    # A. 산점도 그리기 (Hue = Action_Type)
+    # A. 산점도 그리기 (y축을 Jittered 된 값으로 변경)
     # -------------------------------------------------------
-    sns.scatterplot(
+    scatter = sns.scatterplot(
         data=subset,
-        x="Entropy",
-        y="Win_Rate",
-        hue="Action_Type",
-        palette=action_palette,
-        style="Action_Type",  # 모양도 다르게 (동그라미, X, 네모)
-        s=80,
-        alpha=0.6,
+        x="Total_Entropy",
+        y="Win_Rate_Jittered",  # 여기를 변경!
+        hue="Lambda",
+        palette="viridis",
+        s=80,  # 크기 약간 줄임
+        edgecolor="k",
+        alpha=0.6,  # 투명도 약간 줌
         ax=ax,
     )
 
     # -------------------------------------------------------
-    # B. 행동별 회귀선 (Trend Line) 추가
+    # B. 전체 경향성 (Regression Line)
+    # 람다 구분 없이 전체적인 '다양성 vs 승률' 추세선
     # -------------------------------------------------------
-    # 각 행동별로 추세선을 따로 그려서 기울기를 비교합니다.
-    for action_type, color in action_palette.items():
-        act_subset = subset[subset["Action_Type"] == action_type]
-        if len(act_subset) > 1 and act_subset["Entropy"].std() > 0:
-            sns.regplot(
-                data=act_subset,
-                x="Entropy",
-                y="Win_Rate",
-                scatter=False,
-                ax=ax,
-                line_kws={"color": color, "linestyle": "--", "lw": 2},
-                label=f"{action_type} Trend",
-            )
-
-            # 상관계수 계산 (선택 사항: 그래프가 너무 복잡하면 주석 처리)
-            # r, _ = pearsonr(act_subset['Entropy'], act_subset['Win_Rate'])
-            # print(f"[{scenario}] {action_type} r={r:.3f}")
+    if len(subset) > 1 and subset["Total_Entropy"].std() > 0:
+        sns.regplot(
+            data=subset,
+            x="Total_Entropy",
+            y="Win_Rate",
+            scatter=False,
+            ax=ax,
+            color="red",
+            line_kws={"linestyle": "--", "alpha": 0.5},
+            label="Trend",
+        )
 
     # -------------------------------------------------------
     # C. 데코레이션
     # -------------------------------------------------------
     ax.set_title(f"Scenario: {scenario}", fontsize=16, fontweight="bold")
-    ax.set_xlabel("Batch Entropy (Diversity)", fontsize=12)
+    ax.set_xlabel("Total Strategy Diversity (Sum of Entropies)", fontsize=12)
     ax.set_ylabel("Win Rate", fontsize=12)
     ax.set_ylim(-0.05, 1.05)
 
-    # 범례 설정
-    ax.legend(title="Action Type", loc="lower right")
+    # 범례 위치 조정 (그래프 가리지 않게)
+    ax.legend(title="Lambda (Penalty)", loc="best")
 
 # 남은 빈칸 처리
 for j in range(i + 1, len(axes)):
     axes[j].axis("off")
 
-plt.suptitle("Impact of Diversity by Action Type", fontsize=20, y=1.02)
+plt.suptitle(
+    "Impact of Total Strategy Diversity on Win Rate (by Lambda)",
+    fontsize=20,
+    y=1.02,
+    fontweight="bold",
+)
 plt.tight_layout()
 plt.savefig(PLOT_DIR / "8_action_diversity.png", dpi=300, bbox_inches="tight")
 plt.close()
