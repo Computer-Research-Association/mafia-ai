@@ -10,7 +10,7 @@ from typing import List, Dict, Any
 # CUDA + multiprocessing 충돌 방지: spawn 모드 설정 필수
 # fork 방식은 CUDA 컨텍스트를 복사하면서 에러 발생
 try:
-    multiprocessing.set_start_method('spawn', force=True)
+    multiprocessing.set_start_method("spawn", force=True)
 except RuntimeError:
     pass  # 이미 설정된 경우 무시
 
@@ -46,7 +46,7 @@ def run_simulation(args, stop_event: threading.Event = None):
                             else "RANDOM"
                         ),
                         "algo": "ppo",  # 기본 알고리즘
-                        "backbone": "lstm",  # 기본 백본
+                        "backbone": "mlp",  # 기본 백본
                     }
                 )
             else:

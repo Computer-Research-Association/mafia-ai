@@ -33,6 +33,7 @@ analysis_detailed.png
 mafia_optuna.db
 /tensorboard
 /notebook
+/plots
 
 # Jupyter Notebook
 .ipynb_checkpoints
