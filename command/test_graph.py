@@ -785,27 +785,9 @@ plt.close()
 # =============================================================================
 # [Graph 7] Correlation Regression Plot
 # =============================================================================
-correlation_results = []
-
+sns.set_theme(style="whitegrid")
 scenarios = sorted(stats_df["Scenario"].unique())
 
-for scenario in scenarios:
-    subset = stats_df[stats_df["Scenario"] == scenario]
-
-    # 데이터가 2개 미만이면 상관계수 계산 불가
-    if len(subset) > 1:
-        # 피어슨 상관계수와 p-value 계산
-        corr, p_value = pearsonr(subset["Raw_Entropy"], subset["Win_Rate"])
-        correlation_results.append(
-            {"Scenario": scenario, "Correlation": corr, "P-Value": p_value}
-        )
-
-corr_df = pd.DataFrame(correlation_results)
-
-# -----------------------------------------------------------------------------
-# 2. 상관관계 시각화 (Regression Plot)
-# -----------------------------------------------------------------------------
-sns.set_theme(style="whitegrid")
 fig, axes = plt.subplots(2, 2, figsize=(16, 14))
 axes = axes.flatten()
 
@@ -816,62 +798,63 @@ for i, scenario in enumerate(scenarios):
 
     subset = stats_df[stats_df["Scenario"] == scenario]
 
-    # 상관계수 텍스트 추출
-    row = corr_df[corr_df["Scenario"] == scenario]
-    r_val = row["Correlation"].values[0] if not row.empty else 0
-    p_val = row["P-Value"].values[0] if not row.empty else 0
+    # 피어슨 상관계수 계산
+    if len(subset) > 1:
+        corr, p_value = pearsonr(subset["Raw_Entropy"], subset["Win_Rate"])
+    else:
+        corr, p_value = 0, 1
 
-    # 회귀선이 포함된 산점도 (Regression Plot)
+    # 산점도 + 회귀선 (linewidth → linewidths로 수정)
     sns.regplot(
         data=subset,
         x="Raw_Entropy",
         y="Win_Rate",
         ax=ax,
-        scatter_kws={"s": 100, "alpha": 0.7, "color": "#2c3e50"},
-        line_kws={"color": "#e74c3c", "lw": 3},
+        scatter_kws={"s": 150, "alpha": 0.7, "edgecolor": "black", "linewidths": 1.5},
+        line_kws={"color": "#e74c3c", "lw": 3, "linestyle": "--"},
     )
 
-    # 그래프 내부 주석 (상관계수 및 p-value)
-    text_str = f"Pearson $r$ = {r_val:.3f}\n$p$-value = {p_val:.4f}"
+    # 람다 값 라벨링
+    for _, point in subset.iterrows():
+        ax.annotate(
+            f"λ={point['Lambda']}",
+            (point["Raw_Entropy"], point["Win_Rate"]),
+            xytext=(8, 8),
+            textcoords="offset points",
+            fontsize=10,
+            fontweight="bold",
+            bbox=dict(boxstyle="round,pad=0.3", facecolor="yellow", alpha=0.6),
+        )
+
+    # 상관계수 표시
+    text_str = f"Pearson r = {corr:.3f}\np-value = {p_value:.4f}"
     ax.text(
         0.05,
         0.95,
         text_str,
         transform=ax.transAxes,
-        fontsize=13,
+        fontsize=12,
         verticalalignment="top",
-        bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
+        bbox=dict(
+            boxstyle="round",
+            facecolor="white",
+            alpha=0.9,
+            edgecolor="black",
+            linewidth=2,
+        ),
     )
 
-    # 람다 값을 포인트 옆에 텍스트로 표시 (데이터 레이블링)
-    for _, point in subset.iterrows():
-        ax.text(
-            point["Raw_Entropy"],
-            point["Win_Rate"],
-            f"$\lambda$={point['Lambda']}",
-            fontsize=10,
-            ha="right",
-            va="bottom",
-            alpha=0.8,
-        )
-
     ax.set_title(f"Scenario: {scenario}", fontsize=16, fontweight="bold")
-    ax.set_xlabel("Strategic Entropy (Raw Bits)", fontsize=12)
-    ax.set_ylabel("Win Rate (0~1)", fontsize=12)
+    ax.set_xlabel("Strategic Entropy (Bits)", fontsize=13)
+    ax.set_ylabel("Win Rate", fontsize=13)
+    ax.grid(True, alpha=0.3)
 
-    # ===== 수정된 부분 =====
-    # 데이터 범위 기반 자동 스케일링 (여백 10% 추가)
-    y_min = subset["Win_Rate"].min()
-    y_max = subset["Win_Rate"].max()
-    y_margin = (y_max - y_min) * 0.1  # 10% 여백
-    ax.set_ylim(y_min - y_margin, y_max + y_margin)
-    # =======================
-
-# 빈 subplot 정리
 for j in range(i + 1, len(axes)):
     axes[j].axis("off")
 
-plt.suptitle("Pearson Correlation: Strategic Entropy vs Win Rate", fontsize=20, y=1.02)
+plt.suptitle(
+    "Entropy-Performance Correlation Analysis", fontsize=20, y=1.00, fontweight="bold"
+)
 plt.tight_layout()
 plt.savefig(PLOT_DIR / "7_correlation_scatter.png", dpi=300, bbox_inches="tight")
 plt.close()
@@ -880,7 +863,6 @@ plt.close()
 # [Graph 8] Diversity by Action Type
 # =============================================================================
 print("\n=== Pearson Correlation Statistical Report ===")
-print(corr_df.to_string(index=False))
 
 
 def calculate_diversity(items):
