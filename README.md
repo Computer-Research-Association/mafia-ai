@@ -1,4 +1,4 @@
-<div align="center">
+<div>
   
 # Mafia AI: RL 및 IL 기반 전략 분석 연구 프로젝트
 
@@ -16,17 +16,26 @@
 
 ```mermaid
 %%{init: {'theme': 'dark'}}%%
-graph TD
-    A[ 전문가 데이터 생성<br/>LLM & RBA 활용] -->|고품질 행동 데이터 추출| B( 모방 학습 <br/> Imitation Learning)
-    B -->|초기 정책 모델 형성| C{ PPO 자가학습 <br/> Self-play Learning}
-    
-    C -->|에이전트 간 대결을 통한 전략 고도화| D[ 비교 분석 <br/> Comparative Analysis]
-    C -.-> C
+flowchart TD
+    A(["전문가 데이터 생성<br/>(LLM & RBA 활용)"])
+    B(["모방 학습<br/>(Imitation Learning)"])
+    C(["PPO 자가학습<br/>(Self-play Learning)"])
+    D(["비교 분석<br/>(Comparative Analysis)"])
 
-    style A fill:#2d3748,stroke:#4a5568,stroke-width:2px,color:#fff
-    style B fill:#2b6cb0,stroke:#2c5282,stroke-width:2px,color:#fff
-    style C fill:#c53030,stroke:#9b2c2c,stroke-width:2px,color:#fff
-    style D fill:#276749,stroke:#22543d,stroke-width:2px,color:#fff
+    A -->|고품질 행동 데이터 추출| B
+    B -->|초기 정책 모델 형성| C
+    C -->|에이전트 간 대결을 통한 전략 고도화| D
+    C -.->|지속적 반복 학습| C
+
+    classDef gen fill:#1e3a8a,stroke:#3b82f6,stroke-width:2px,color:#ffffff
+    classDef imi fill:#4c1d95,stroke:#8b5cf6,stroke-width:2px,color:#ffffff
+    classDef ppo fill:#7f1d1d,stroke:#ef4444,stroke-width:2px,color:#ffffff
+    classDef eval fill:#14532d,stroke:#22c55e,stroke-width:2px,color:#ffffff
+
+    class A gen
+    class B imi
+    class C ppo
+    class D eval
 ```
 
 1. **전문가 데이터 생성 (Expert Data Generation)**: `LLM(Solar-Pro)` 및 `RBA`를 활용하여 고품질의 전문가 행동 데이터를 추출하고 기록합니다.
@@ -72,7 +81,7 @@ graph TD
 | :---: | :---: | :--- | :---: |
 | **Taeju Park** | `Project Manager` | $AI$ 알고리즘($PPO$, $REINFORCE$) 및 모델 구현, 시스템 통합 | [@xoxown31](https://github.com/xoxown31) |
 | **Changkwon Kim** | `Software Engineer` | $GUI$ 시뮬레이터(런처/뷰어) 개발 및 $TensorBoard$ 시각화 연동 | [@chang1025](https://github.com/chang1025) |
-| **Jinwon Hong** | `AI Researcher` | $LLM$ 에이전트 설계 및 게임 엔진/환경 로직 개발 | [@11Won11](https://github.com/11Won11) |
+| **Jinwon Hong** | `AI Researcher` | 에이전트 설계 및 게임 엔진/환경 로직 개발 | [@11Won11](https://github.com/11Won11) |
 
 ---
 

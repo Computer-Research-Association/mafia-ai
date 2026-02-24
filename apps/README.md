@@ -1,6 +1,6 @@
 # Apps (응용 어플리케이션 및 유틸리티)
 
-<div align="center">
+<div>
   시뮬레이터 코어 시스템을 바탕으로 구축된 부가적인 응용 프로그램이나 <br/>
   인간 개입(Human Interaction) 연구를 지원하는 모듈들이 모여있는 디렉토리입니다.
 </div>
@@ -23,4 +23,4 @@ apps/human_interaction/
 
 ---
 
-⬅️ **[메인으로 돌아가기](../README.md)**
+**[메인으로 돌아가기](../README.md)**
