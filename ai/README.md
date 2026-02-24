@@ -1,6 +1,6 @@
 # AI Modules (강화학습 및 모델)
 
-<div align="center">
+<div>
   강화학습(RL)을 위한 신경망 모델, 학습 알고리즘(PPO, REINFORCE), 그리고 데이터 버퍼를 포함하는 코어 기반 모듈입니다.
 </div>
 
@@ -70,4 +70,4 @@ graph LR
 
 ---
 
-⬅️ **[메인으로 돌아가기](../README.md)**
+**[메인으로 돌아가기](../README.md)**
