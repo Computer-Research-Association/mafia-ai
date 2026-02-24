@@ -1,4 +1,4 @@
-# 🖥️ GUI System (인터페이스 및 시각화)
+# GUI System (인터페이스 및 시각화)
 
 <div align="center">
   사용자가 마피아 게임 시뮬레이션을 쉽게 설정하고 실행하며,<br/>
@@ -7,15 +7,15 @@
 
 ---
 
-## 📂 파일 구성 (File Structure)
+## 파일 구성 (File Structure)
 
-### 🚀 1. 런처 (Launcher)
+### 1. 런처 (Launcher)
 
 * **`launcher.py`**: 프로그램 진입점. 학습/테스트 모드 선택, 에피소드 수 지정, 경로 설정 등을 종합적으로 담당합니다.
 * **`agentConfig.py`**: 참가하는 8명의 플레이어 각각에 대해 에이전트 종류(`RL`, `LLM`, `RBA`), 역할(`Role`), 모델 백본 등을 개별적으로 구성하는 위젯 모듈입니다.
 * **`styles.qss`**: GUI 전체의 일관된 디자인 테마(Dark Mode 중심)를 호스팅하는 스타일시트입니다.
 
-### 📊 2. 로그 뷰어 (Log Viewer)
+### 2. 로그 뷰어 (Log Viewer)
 
 ```text
 gui/
