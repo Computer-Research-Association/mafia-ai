@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mafia Game POMDP — Reward Shaping Case Study</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --accent: #1a1a2e;
+      --accent2: #16213e;
+      --highlight: #4f8ef7;
+      --text: #1c1c1c;
+      --muted: #555;
+      --bg: #fafafa;
+      --card: #fff;
+      --border: #e0e0e0;
+    }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.7;
+    }
+
+    /* ── Hero ── */
+    .hero {
+      background: linear-gradient(135deg, var(--accent) 0%, var(--accent2) 60%, #0f3460 100%);
+      color: #fff;
+      padding: 72px 24px 60px;
+      text-align: center;
+    }
+
+    .hero .venue {
+      display: inline-block;
+      background: rgba(255,255,255,0.15);
+      border: 1px solid rgba(255,255,255,0.3);
+      border-radius: 20px;
+      padding: 4px 16px;
+      font-size: 0.8rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      margin-bottom: 24px;
+    }
+
+    .hero h1 {
+      font-family: 'Source Serif 4', serif;
+      font-size: clamp(1.5rem, 4vw, 2.4rem);
+      font-weight: 600;
+      max-width: 860px;
+      margin: 0 auto 12px;
+      line-height: 1.3;
+    }
+
+    .hero h2 {
+      font-size: clamp(0.9rem, 2vw, 1.1rem);
+      font-weight: 400;
+      color: rgba(255,255,255,0.75);
+      max-width: 700px;
+      margin: 0 auto 32px;
+      font-style: italic;
+    }
+
+    .authors {
+      font-size: 0.95rem;
+      color: rgba(255,255,255,0.9);
+      margin-bottom: 8px;
+    }
+
+    .affil {
+      font-size: 0.82rem;
+      color: rgba(255,255,255,0.6);
+      margin-bottom: 36px;
+    }
+
+    .btn-group { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 22px;
+      border-radius: 8px;
+      font-size: 0.88rem;
+      font-weight: 500;
+      text-decoration: none;
+      transition: transform 0.15s, opacity 0.15s;
+    }
+    .btn:hover { transform: translateY(-2px); opacity: 0.9; }
+    .btn-primary { background: #fff; color: var(--accent); }
+    .btn-secondary { background: rgba(255,255,255,0.15); color: #fff; border: 1px solid rgba(255,255,255,0.4); }
+
+    /* ── Layout ── */
+    .container { max-width: 900px; margin: 0 auto; padding: 0 24px; }
+
+    section { padding: 64px 0; border-bottom: 1px solid var(--border); }
+    section:last-child { border-bottom: none; }
+
+    h3 {
+      font-family: 'Source Serif 4', serif;
+      font-size: 1.5rem;
+      font-weight: 600;
+      margin-bottom: 20px;
+      color: var(--accent);
+    }
+
+    p { color: var(--muted); margin-bottom: 14px; }
+    p:last-child { margin-bottom: 0; }
+
+    /* ── Abstract ── */
+    .abstract-box {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-left: 4px solid var(--highlight);
+      border-radius: 8px;
+      padding: 28px 32px;
+    }
+
+    /* ── TL;DR ── */
+    .tldr {
+      display: flex;
+      align-items: flex-start;
+      gap: 16px;
+      background: #eef4ff;
+      border-radius: 10px;
+      padding: 20px 24px;
+      margin-bottom: 32px;
+    }
+    .tldr-label {
+      font-weight: 700;
+      font-size: 0.8rem;
+      letter-spacing: 0.08em;
+      color: var(--highlight);
+      white-space: nowrap;
+      padding-top: 2px;
+    }
+    .tldr p { margin: 0; color: var(--text); font-size: 0.95rem; }
+
+    /* ── Key Findings ── */
+    .findings-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 16px;
+      margin-top: 8px;
+    }
+
+    .finding-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 20px;
+      text-align: center;
+    }
+
+    .finding-card .role {
+      font-size: 0.75rem;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--highlight);
+      margin-bottom: 6px;
+    }
+
+    .finding-card .lambda {
+      font-size: 2rem;
+      font-weight: 700;
+      color: var(--accent);
+      line-height: 1;
+      margin-bottom: 6px;
+    }
+
+    .finding-card .desc {
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+
+    /* ── Figures ── */
+    .fig-wrap {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+      margin-bottom: 32px;
+    }
+
+    .fig-wrap img {
+      width: 100%;
+      display: block;
+    }
+
+    .fig-caption {
+      padding: 14px 20px;
+      font-size: 0.83rem;
+      color: var(--muted);
+      border-top: 1px solid var(--border);
+      line-height: 1.5;
+    }
+
+    .fig-caption strong { color: var(--text); }
+
+    /* ── Method ── */
+    .reward-eq {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 28px 32px;
+      margin: 20px 0;
+      text-align: center;
+      font-family: 'Source Serif 4', serif;
+      font-size: 1.1rem;
+    }
+
+    .reward-eq .eq { font-size: 1.15rem; margin-bottom: 8px; }
+    .reward-eq .eq-note { font-size: 0.82rem; color: var(--muted); font-family: 'Inter', sans-serif; }
+
+    /* ── ANOVA table ── */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.88rem;
+      background: var(--card);
+      border-radius: 10px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+    }
+
+    th {
+      background: var(--accent);
+      color: #fff;
+      padding: 12px 16px;
+      text-align: left;
+      font-weight: 500;
+    }
+
+    td {
+      padding: 10px 16px;
+      border-top: 1px solid var(--border);
+      color: var(--muted);
+    }
+
+    tr:hover td { background: #f5f5f5; }
+
+    /* ── Citation ── */
+    .citation-box {
+      background: #f4f4f4;
+      border-radius: 8px;
+      padding: 20px 24px;
+      font-family: monospace;
+      font-size: 0.82rem;
+      color: #333;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    /* ── Footer ── */
+    footer {
+      text-align: center;
+      padding: 32px 24px;
+      font-size: 0.8rem;
+      color: #999;
+    }
+
+    @media (max-width: 600px) {
+      .hero { padding: 48px 16px 40px; }
+      section { padding: 40px 0; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ── Hero ── -->
+<div class="hero">
+  <div class="venue">ASK 2026 · Poster</div>
+  <h1>Impact of Team-Individual Reward Combination Weight on Policy Stability in Partially Observable Competitive Environments</h1>
+  <h2>A Mafia Game Case Study</h2>
+  <p class="authors">Tae-Ju Park &nbsp;·&nbsp; Jin-Won Hong &nbsp;·&nbsp; Chang-Kwon Kim &nbsp;·&nbsp; In-Jung Kim</p>
+  <p class="affil">School of AI, Computer and Electrical Engineering · Handong Global University</p>
+  <div class="btn-group">
+    <a class="btn btn-primary" href="KIPS_C2026A0178.pdf">📄 Paper (PDF)</a>
+    <a class="btn btn-secondary" href="https://github.com/Computer-Research-Association/mafia-ai">⚙ Code</a>
+  </div>
+</div>
+
+<!-- ── Abstract ── -->
+<section>
+  <div class="container">
+    <h3>Abstract</h3>
+    <div class="tldr">
+      <span class="tldr-label">TL;DR</span>
+      <p>We study how the individual reward weight λ affects policy stability across roles in a POMDP Mafia game. Optimal λ differs by role — Mafia needs λ=0, while Doctor benefits from λ=0.3. Excessive λ universally degrades performance.</p>
+    </div>
+    <div class="abstract-box">
+      <p>Combining team rewards with auxiliary individual rewards is a common design choice in reinforcement learning, yet overly weighting individual rewards can misalign agents from team objectives. We conduct a systematic case study in a simplified Mafia game POMDP environment, varying the team-individual reward combination weight λ across {0.0, 0.1, 0.3, 0.5, 0.7, 0.9} and training independent PPO agents per role.</p>
+      <p>Results show that the effect of auxiliary rewards is role-dependent: Police and Doctor benefit from moderate λ, while Mafia's team-aligned objectives are actively harmed by individual rewards. Across all roles, excessive λ causes learning failure or team-misaligned convergence. Our findings highlight auxiliary reward ratio and role-specific suitability as critical design variables in team-individual reward structures.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ── Key Findings ── -->
+<section>
+  <div class="container">
+    <h3>Key Findings</h3>
+    <p>Each role has a distinct optimal λ, reflecting the alignment between individual reward signals and team objectives.</p>
+    <div class="findings-grid">
+      <div class="finding-card">
+        <div class="role">Mafia</div>
+        <div class="lambda">λ = 0.0</div>
+        <div class="desc">Team-aligned kill action — individual reward hurts goal alignment</div>
+      </div>
+      <div class="finding-card">
+        <div class="role">Police</div>
+        <div class="lambda">λ = 0.1</div>
+        <div class="desc">Investigation sharpened by minimal individual signal</div>
+      </div>
+      <div class="finding-card">
+        <div class="role">Doctor</div>
+        <div class="lambda">λ = 0.3</div>
+        <div class="desc">Protection behavior clarified with moderate auxiliary reward</div>
+      </div>
+      <div class="finding-card">
+        <div class="role">Citizen</div>
+        <div class="lambda">λ = 0.7</div>
+        <div class="desc">Indirect contribution benefits from stronger individual signal</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Method ── -->
+<section>
+  <div class="container">
+    <h3>Method</h3>
+    <p>Agents are trained independently per role using PPO-Clip with an MLP backbone [287→128→128]. The target role's slots are filled with PPO agents; all other roles use rule-based agents.</p>
+
+    <div class="reward-eq">
+      <div class="eq">R<sup>i</sup><sub>t</sub> = (1 − λ) · R<sup>i</sup><sub>team</sub> + λ · R<sup>i</sup><sub>individual</sub></div>
+      <div class="eq-note">λ ∈ {0.0, 0.1, 0.3, 0.5, 0.7, 0.9} &nbsp;·&nbsp; 5,000+ episodes per configuration &nbsp;·&nbsp; Observation dim: 287</div>
+    </div>
+
+    <p>The 287-dimensional observation vector encodes: self ID one-hot (8), role one-hot (4), day (1), phase one-hot (4), last event (30), cumulative action matrices 8×8×3 (192), cumulative role claim matrix 8×5 (40), and alive status (8).</p>
+  </div>
+</section>
+
+<!-- ── Results ── -->
+<section>
+  <div class="container">
+    <h3>Results</h3>
+
+    <div class="fig-wrap">
+      <img src="assets/0_training_metrics_line.png" alt="Training metrics per role and lambda" loading="lazy" />
+      <div class="fig-caption">
+        <strong>Figure 1.</strong> Training curves (KL Divergence, Entropy, Loss, Reward) per role across λ values. Reward scales differ across λ and are not directly comparable — win rate (Figure 2) is the primary performance metric.
+      </div>
+    </div>
+
+    <div class="fig-wrap">
+      <img src="assets/2_win_rate_box_strip.png" alt="Win rate distribution per role and lambda" loading="lazy" />
+      <div class="fig-caption">
+        <strong>Figure 2.</strong> Win rate distributions per role across λ. Each role exhibits a distinct optimal λ. Excessive λ (= 0.9) degrades performance across all roles.
+      </div>
+    </div>
+
+    <div class="fig-wrap">
+      <img src="assets/6_entropy_winrate_dual.png" alt="Strategic entropy and win rate vs lambda" loading="lazy" />
+      <div class="fig-caption">
+        <strong>Figure 3.</strong> Strategic entropy and win rate as a function of λ per role. Mafia shows a strong negative correlation (r = −0.984) between entropy and win rate, while Police and Doctor exhibit non-monotonic patterns with optimal entropy at λ = 0.1 and 0.3 respectively.
+      </div>
+    </div>
+
+    <h3 style="margin-top: 8px; font-size: 1.15rem;">One-way ANOVA (λ vs. Win Rate)</h3>
+    <table>
+      <thead>
+        <tr><th>Role</th><th>F-value</th><th>p-value</th><th>Interpretation</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Mafia</td><td>10.02</td><td>&lt; 0.001</td><td>Moderate sensitivity to λ</td></tr>
+        <tr><td>Police</td><td>139.96</td><td>&lt; 0.001</td><td>Highest sensitivity — sharp optimal λ</td></tr>
+        <tr><td>Doctor</td><td>73.97</td><td>&lt; 0.001</td><td>High sensitivity</td></tr>
+        <tr><td>Citizen</td><td>7.00</td><td>&lt; 0.001</td><td>Lowest sensitivity</td></tr>
+      </tbody>
+    </table>
+    <p style="margin-top: 12px; font-size: 0.83rem;">All roles show statistically significant differences across λ values (p &lt; 0.001).</p>
+  </div>
+</section>
+
+<!-- ── Citation ── -->
+<section>
+  <div class="container">
+    <h3>Citation</h3>
+    <div class="citation-box">@inproceedings{park2026mafia,
+  title     = {Impact of Team-Individual Reward Combination Weight on Policy Stability
+               in Partially Observable Competitive Environments: A Mafia Game Case Study},
+  author    = {Park, Tae-Ju and Hong, Jin-Won and Kim, Chang-Kwon and Kim, In-Jung},
+  booktitle = {Proceedings of the Korea Information Processing Society Conference (ASK 2026)},
+  year      = {2026},
+  note      = {KIPS\_C2026A0178}
+}</div>
+  </div>
+</section>
+
+<footer>
+  <p>Handong Global University · 2026 &nbsp;·&nbsp; Supported by MSIT &amp; IITP SW-centered University Program (2023-0-00055)</p>
+</footer>
+
+</body>
+</html>
